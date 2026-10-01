@@ -110,7 +110,8 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
         var em_idx = idx;
         var em_score = -1i;
         var em_found = false;
-        var tie_h = hash(idx ^ (params.epoch * 1597334677u) ^ (params.seed * 3812015801u) ^ (phase * 2654435761u));
+        let rr = rng_u4(idx, params.epoch, S_RELAX + phase);
+        var tie_h = rr.x;
         for (var dy = -1i; dy <= 1i; dy++) {
             for (var dx = -1i; dx <= 1i; dx++) {
                 if (dx == 0i && dy == 0i) { continue; }
@@ -159,10 +160,11 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
             vs = sanitize_vec2(velocity_in[fgrid(fxi, fyi)]);
         }
         let p_sed = parcel_hop_p(vs) * GAMMA_SEDIMENT_FACTOR * mob;
-        let hw = hash(idx ^ (params.epoch * 747796405u) ^ (phase * 196613u) ^ (params.seed * 2891336453u));
-        let rw = f32(hw) / 4294967295.0;
+        let hw = rr.y;
+        let rw = f32(rr.z >> 8u) * (1.0 / 16777216.0);
+        let rw2 = f32(rr.w >> 8u) * (1.0 / 16777216.0);
         var dest = idx;
-        if (n >= 2u && em_found && hash_f32(hw ^ 0x632BE5ABu) < GAMMA_SHED_P) {
+        if (n >= 2u && em_found && rw2 < GAMMA_SHED_P) {
             // Mini-falésia: o quantum de cima desce para a vaga mais aninhada.
             dest = em_idx;
         } else if (rw < p_sed) {
@@ -171,7 +173,7 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
             var ddy = 0i;
             let ax = abs(vs.x);
             let ay = abs(vs.y);
-            if (hash_f32(hw ^ 0x85EBCA6Bu) < ax / max(ax + ay, 1e-6)) {
+            if (f32(hw >> 8u) * (1.0 / 16777216.0) < ax / max(ax + ay, 1e-6)) {
                 ddx = select(-1i, 1i, vs.x > 0.0);
             } else {
                 ddy = select(-1i, 1i, vs.y > 0.0);
@@ -222,8 +224,7 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
     if (y > 0u) { let c = gamma_count(idx - GRID_SIZE); if (c < best_count) { best_count = c; best_idx = idx - GRID_SIZE; } }
     if (y + 1u < GRID_SIZE) { let c = gamma_count(idx + GRID_SIZE); if (c < best_count) { best_count = c; best_idx = idx + GRID_SIZE; } }
     if (best_idx == idx || n - best_count < SANDPILE_DIFF) { return; }
-    let h = hash(idx ^ (params.epoch * 668265263u) ^ (phase * 2654435761u) ^ (params.seed * 374761393u));
-    if (f32(h) / 4294967295.0 < GAMMA_RELAX_P) {
+    if (rng_f4(idx, params.epoch, S_SAND + phase).x < GAMMA_RELAX_P) {
         gamma_move_one(idx, best_idx);
     }
 }

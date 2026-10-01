@@ -53,10 +53,6 @@ fn parcel_hop_p(v: vec2<f32>) -> f32 {
     return clamp(l1 * env_per_fluid * max(params.dt, 1e-3), 0.0, GRAIN_ADV_CAP);
 }
 
-fn rand01(h: u32) -> f32 {
-    return f32(h >> 8u) * (1.0 / 16777216.0);
-}
-
 @compute @workgroup_size(16, 16)
 fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = gid.x;
@@ -101,7 +97,6 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     // (0..1) mais disp mais um salto de ±1 cai sempre dentro dela.
     let base = vec2<i32>(i32(floor(disp.x)) - 1, i32(floor(disp.y)) - 1);
     let light_t = uv_light_at_cell(x, y);
-    let rseed = params.seed * 1597334677u ^ params.epoch * 3812015801u;
 
     for (var ch = 0u; ch < 4u; ch++) {
         let slot = idx * 4u + ch;
@@ -117,7 +112,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
             let sens = 1.0 + CHEM_SENSITIZE * f32(min(act_n, 8u));
             let exp_act = f32(min(spent_n, 8u)) * LIGHT_ACT_P * max(params.uv_strength, 0.0) * light_t * sens;
             var na = u32(floor(exp_act));
-            if (rand01(hash(slot ^ rseed)) < exp_act - f32(na)) { na += 1u; }
+            if (rng_f4(slot, params.epoch, S_PHOTO).x < exp_act - f32(na)) { na += 1u; }
             na = min(na, min(spent_n, 8u));
             act_n += na;
             spent_n -= na;
@@ -126,7 +121,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (act_n > 0u) {
             let shield = 1.0 / (1.0 + CHEM_SHIELD * f32(min(act_n, 8u) - 1u));
             let exp_dec = f32(min(act_n, 8u)) * CHEM_DECAY_P * shield;
-            if (rand01(hash(slot ^ (params.seed * 2654435761u) ^ (params.epoch * 668265263u))) < exp_dec) {
+            if (rng_f4(slot, params.epoch, S_DECAY).x < exp_dec) {
                 act_n -= 1u;
                 spent_n += 1u;
             }
@@ -153,15 +148,14 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
                 stay += unit;
                 continue;
             }
-            let h0 = hash(slot ^ (k * 668265263u) ^ (params.seed * 2246822519u) ^ (params.epoch * 374761393u));
-            let h1 = hash(h0 ^ 0x85EBCA6Bu);
-            let h2 = hash(h1 ^ 0xC2B2AE35u);
-            var p = vec2<f32>(rand01(h0), rand01(h1)) + disp;
-            let r = rand01(h2);
+            // 4 números: ponto de partida (x, y), evento, direção do salto.
+            let rf = rng_f4(slot, params.epoch, S_MOVE + k);
+            var p = rf.xy + disp;
+            let r = rf.z;
             if (r < p_diff) {
-                var d = hash(h2 ^ 0x27D4EB2Fu) & 3u;
+                var d = min(u32(rf.w * 4.0), 3u);
                 if (k < act_n && coh_sum > 4.0001) {
-                    var u = rand01(hash(h2 ^ 0x9E3779B9u)) * coh_sum;
+                    var u = rf.w * coh_sum;
                     d = 3u;
                     for (var cd = 0u; cd < 4u; cd++) {
                         if (u < coh[cd]) { d = cd; break; }
@@ -193,7 +187,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let g_tgt = gamma_count(t_idx);
                 if (g_tgt > 0u) {
                     let gperm = 1.0 / (1.0 + GAMMA_POROSITY_K * f32(g_tgt));
-                    blocked = g_src == 0u || rand01(hash(slot ^ t_idx ^ rseed)) >= gperm;
+                    blocked = g_src == 0u || rng_f4(slot, params.epoch, S_BLOCK + b).x >= gperm;
                 }
             }
             if (blocked) {
@@ -233,7 +227,7 @@ fn thermal_activation(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var ch = 0u; ch < 4u; ch++) {
         let slot = idx * 4u + ch;
         if ((atomicLoad(&chem_grid[slot]) >> 16u) > 0u) {
-            if (hash_f32(slot ^ (params.epoch * 0x85EBCA6Bu) ^ (params.seed * 0x51ED270Bu)) < p_act) {
+            if (rng_f4(slot, params.epoch, S_THERMAL).x < p_act) {
                 chem_activate_one(slot);
             }
         }

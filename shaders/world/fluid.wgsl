@@ -290,8 +290,7 @@ fn buoyancy(@builtin(global_invocation_id) gid: vec3<u32>) {
     let dev = temp_in[idx] - temp_ambient_at(y);
     if (abs(dev) <= 1e-3) { return; }
     let time_bucket = params.epoch / 16u;
-    let seed0 = hash(idx ^ time_bucket * 0x85EBCA6Bu ^ 0xC2B2AE35u);
-    let side = (hash_f32(seed0) * 2.0 - 1.0) * 0.25 * abs(dev) / max(abs(dev), 1.0);
+    let side = (rng_f4(idx, time_bucket, S_BUOYANCY).x * 2.0 - 1.0) * 0.25 * abs(dev) / max(abs(dev), 1.0);
     let f = vec2<f32>(side * TEMP_BUOYANCY * abs(dev), TEMP_BUOYANCY * dev);
     atomic_add_force(idx * 2u, f.x);
     atomic_add_force(idx * 2u + 1u, f.y);
