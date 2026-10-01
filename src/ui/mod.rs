@@ -175,7 +175,9 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
     let mut light_changed = false;
     let p = &mut world.params;
     let st = &mut world.settings;
+    let seed_density = &mut world.seed_density;
     egui::CollapsingHeader::new("Monómeros").default_open(true).show(ui, |ui| {
+        ui.add(egui::Slider::new(seed_density, 0.05..=1.0).text("densidade inicial (na próxima semente)"));
         ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("difusão ×"));
         ui.add(egui::Slider::new(&mut p.settle, 0.0..=10.0).text("assentamento ×"));
         ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));

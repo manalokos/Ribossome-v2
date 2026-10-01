@@ -203,6 +203,9 @@ pub struct World {
     pipelines: Pipelines,
     /// Contadores do ciclo de vida da última leitura assíncrona (com atraso).
     pub last_counters: Option<LifeCounters>,
+    /// Densidade da matéria semeada no mundo completo (fração do máximo
+    /// histórico de ~20 por célula). Só conta na próxima sementeira.
+    pub seed_density: f32,
 }
 
 /// Contadores do ciclo de vida (life_counters na GPU).
@@ -613,6 +616,7 @@ impl World {
             pending_spawns: Vec::new(),
             pipelines,
             last_counters: None,
+            seed_density: SEED_DENSITY_DEFAULT,
         }
     }
 
@@ -638,7 +642,7 @@ impl World {
     /// dos monómeros escritos.
     pub fn seed_matter(&mut self, gpu: &Gpu, seed: u64) -> Ledger {
         let gamma = terrain::generate(&self.cfg, seed as u32, &self.fumaroles);
-        let mut cells = seed_cells(&self.cfg, seed);
+        let mut cells = seed_cells(&self.cfg, seed, self.seed_density);
         for (i, &g) in gamma.iter().enumerate() {
             if g > 0 {
                 cells[i * 4..i * 4 + 4].fill(0);
@@ -963,7 +967,10 @@ impl SplitMix {
 
 /// Matéria inicial: manchas fractais (fBm) independentes por canal, metade
 /// ativada. Nunca passa da capacidade da célula.
-fn seed_cells(cfg: &WorldConfig, seed: u64) -> Vec<u32> {
+/// Densidade semeada por omissão (≈ 8 monómeros por célula de água).
+pub const SEED_DENSITY_DEFAULT: f32 = 0.4;
+
+fn seed_cells(cfg: &WorldConfig, seed: u64, density: f32) -> Vec<u32> {
     let n = cfg.grid_size as usize;
     let mut rng = SplitMix(seed);
     let max_per_channel = CHEM_CELL_CAP / 4;
@@ -979,7 +986,7 @@ fn seed_cells(cfg: &WorldConfig, seed: u64) -> Vec<u32> {
             let fy = (y as f32 + 0.5) / n as f32 * m as f32 - 0.5;
             for (ch, f) in fields.iter().enumerate() {
                 let d = (0.5 + 1.6 * (bilinear(f, m, fx, fy) - 0.5)).clamp(0.0, 1.0);
-                let expect = d * (max_per_channel as f32 - 2.0);
+                let expect = d * (max_per_channel as f32 - 2.0) * density.clamp(0.0, 1.0);
                 let count = ((expect + rng.f32()) as u32).min(max_per_channel);
                 let act = (0..count).filter(|_| rng.f32() < 0.5).count() as u32;
                 cells[(y * n + x) * 4 + ch] = act | ((count - act) << 16);
