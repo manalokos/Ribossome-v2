@@ -47,6 +47,8 @@ pub struct WorldView {
     agents_bg: wgpu::BindGroup,
     agents_pipeline: wgpu::RenderPipeline,
     draw_args: wgpu::Buffer,
+    /// Slot a desenhar sozinho (u32::MAX = todos).
+    pub focus: std::cell::Cell<u32>,
 }
 
 impl WorldView {
@@ -232,7 +234,15 @@ impl WorldView {
             multiview_mask: None,
             cache: None,
         });
-        Self { view_buf, bind_group, pipeline, agents_bg, agents_pipeline, draw_args: world.draw_args_buf.clone() }
+        Self {
+            view_buf,
+            bind_group,
+            pipeline,
+            agents_bg,
+            agents_pipeline,
+            draw_args: world.draw_args_buf.clone(),
+            focus: std::cell::Cell::new(u32::MAX),
+        }
     }
 
     pub fn update(&self, queue: &wgpu::Queue, cam: &Camera, screen: [f32; 2], view_mode: u32, brightness: f32) {
@@ -244,7 +254,7 @@ impl WorldView {
             screen_w: screen[0],
             screen_h: screen[1],
             monomer_brightness: brightness,
-            _pad0: 0,
+            focus_slot: self.focus.get(),
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }

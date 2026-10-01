@@ -98,7 +98,7 @@ fn take_around(cell: u32, ch: u32) -> bool {
     return false;
 }
 
-fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, generation: u32) {
+fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, generation: u32, parent: u32) {
     var a: Agent;
     a.pos_x = pos.x;
     a.pos_y = pos.y;
@@ -111,6 +111,7 @@ fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, ge
     a.pair_count = 0u;
     a.generation = generation;
     a.age = 0u;
+    a.parent = parent;
     a.id = atomicAdd(&life_counters[LC_NEXT_ID], 1u);
     a.body_len = translate_agent(slot, gene_len);
     a.radius = contact_radius(slot, a.body_len);
@@ -188,7 +189,7 @@ fn spawn_seeds(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     for (var w = 0u; w < GENOME_WORDS; w++) { genomes[slot * GENOME_WORDS + w] = g[w]; }
     new_agent(slot, vec2<f32>(req.pos_x, req.pos_y), rng_f4(ri, params.epoch, S_SPAWN).y * 6.2831853,
-        params.spawn_energy, n, 0u);
+        params.spawn_energy, n, 0u, 0xFFFFFFFFu);
     atomicAdd(&life_counters[LC_SPAWNED], 1u);
 }
 
@@ -432,7 +433,7 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     // Energia (v3): metade para o filho, metade fica com o pai.
     let half = a.energy * 0.5;
-    new_agent(child, cp, mr.w * 6.2831853, half, n, a.generation + 1u);
+    new_agent(child, cp, mr.w * 6.2831853, half, n, a.generation + 1u, a.id);
     a.energy -= half;
     a.pair_count = 0u;
     agents[slot] = a;

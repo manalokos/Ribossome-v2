@@ -40,7 +40,8 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     let k = inst % MAX_BODY_V;
     let a = agents_view[slot];
     let naked = a.body_len == 0u;
-    if (a.alive == 0u || (k >= a.body_len && !(naked && k == 0u))) {
+    let hidden = view.focus_slot != 0xFFFFFFFFu && slot != view.focus_slot;
+    if (a.alive == 0u || hidden || (k >= a.body_len && !(naked && k == 0u))) {
         o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         return o;
     }

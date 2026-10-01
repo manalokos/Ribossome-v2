@@ -275,6 +275,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn mj_and_flexibility_tables() {
         let m = mj_matrix();
         let i = |l: char| AA_LETTERS.iter().position(|&x| x == l).unwrap();

@@ -190,7 +190,8 @@ gpu_struct! {
         pub id: u32,
         /// Raio de contacto (unidades do mundo): raio de giração do corpo.
         pub radius: f32,
-        pub _pad1: u32,
+        /// `id` do pai (0xFFFFFFFF na geração 0).
+        pub parent: u32,
         pub _pad2: u32,
     }
 }
@@ -267,7 +268,8 @@ gpu_struct! {
         pub screen_h: f32,
         /// Brilho da camada de monómeros (0..1; "monomer_brightness" do v3).
         pub monomer_brightness: f32,
-        pub _pad0: u32,
+        /// Slot a desenhar sozinho (0xFFFFFFFF = todos).
+        pub focus_slot: u32,
     }
 }
 

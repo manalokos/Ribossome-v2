@@ -8,7 +8,7 @@ use crate::world::World;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 pub struct Capture {
-    view: WorldView,
+    pub view: WorldView,
     size: u32,
     texture: wgpu::Texture,
     readback: wgpu::Buffer,
