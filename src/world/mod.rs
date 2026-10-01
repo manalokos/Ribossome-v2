@@ -88,6 +88,8 @@ pub struct WorldSettings {
     pub light_interval: u32,
     /// Física dos grãos do terreno ligada.
     pub terrain_enabled: bool,
+    /// Repulsão estérica entre agentes.
+    pub contact_enabled: bool,
 }
 
 impl Default for WorldSettings {
@@ -102,6 +104,7 @@ impl Default for WorldSettings {
             jacobi_iters: 128,
             light_interval: 100,
             terrain_enabled: true,
+            contact_enabled: true,
         }
     }
 }
@@ -140,6 +143,10 @@ struct Pipelines {
     mg_restrict: wgpu::ComputePipeline,
     mg_prolong: wgpu::ComputePipeline,
     mg_finish: wgpu::ComputePipeline,
+    contact_clear: wgpu::ComputePipeline,
+    contact_insert: wgpu::ComputePipeline,
+    contact_resolve: wgpu::ComputePipeline,
+    contact_apply: wgpu::ComputePipeline,
 }
 
 /// Suavizações por nível do multigrid (antes, depois) e no nível mais grosso.
@@ -267,6 +274,9 @@ impl World {
         let bodies_buf = storage_buffer(device, "bodies", max_agents * SLOT_WORDS * 4);
         let body_pos_buf = storage_buffer(device, "body positions", max_agents * 64 * 8);
         let draw_list_buf = storage_buffer(device, "draw list", max_agents * 4);
+        let contact_head = storage_buffer(device, "contact head", cells * 4);
+        let contact_next = storage_buffer(device, "contact next", max_agents * 64 * 4);
+        let contact_disp = storage_buffer(device, "contact disp", max_agents * 16);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
             size: 16,
@@ -307,7 +317,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..9).map(|b| storage_entry(b, b == 4)).collect();
+        let life_entries: Vec<_> = (0..12).map(|b| storage_entry(b, b == 4)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -439,6 +449,9 @@ impl World {
                 &body_pos_buf,
                 &draw_list_buf,
                 &draw_args_buf,
+                &contact_head,
+                &contact_next,
+                &contact_disp,
             ],
         );
 
@@ -513,6 +526,10 @@ impl World {
             mg_restrict: mg_compute("mg_restrict"),
             mg_prolong: mg_compute("mg_prolong"),
             mg_finish: mg_compute("mg_finish"),
+            contact_clear: compute("contact_clear"),
+            contact_insert: compute("contact_insert"),
+            contact_resolve: compute("contact_resolve"),
+            contact_apply: compute("contact_apply"),
         };
 
         Self {
@@ -739,6 +756,13 @@ impl World {
 
             // ORGANISMOS: depois do commit (os depósitos da morte vão para chem_grid).
             run(&mut pass, &pl.agents_step, ab, [ag, 1]);
+            // CONTACTO: grelha de resíduos, empurrões, aplicação.
+            if st.contact_enabled {
+                run(&mut pass, &pl.contact_clear, ab, [(self.cfg.cells() as u32).div_ceil(256), 1]);
+                run(&mut pass, &pl.contact_insert, ab, [(self.cfg.max_agents * 64).div_ceil(256), 1]);
+                run(&mut pass, &pl.contact_resolve, ab, [ag, 1]);
+                run(&mut pass, &pl.contact_apply, ab, [ag, 1]);
+            }
             // Nascimentos num passe à parte: a morte devolve slots (push) e o
             // nascimento tira-os (pop); nunca no mesmo despacho.
             run(&mut pass, &pl.agents_birth, ab, [ag, 1]);

@@ -44,6 +44,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         "life/lifecycle.wgsl",
         "life/body.wgsl",
         "life/drawlist.wgsl",
+        "life/contact.wgsl",
     ],
     entries: &[
         ("transport_scatter", Stage::Compute),
@@ -79,6 +80,10 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("agents_ledger", Stage::Compute),
         ("agents_birth", Stage::Compute),
         ("build_draw_list", Stage::Compute),
+        ("contact_clear", Stage::Compute),
+        ("contact_insert", Stage::Compute),
+        ("contact_resolve", Stage::Compute),
+        ("contact_apply", Stage::Compute),
     ],
 };
 

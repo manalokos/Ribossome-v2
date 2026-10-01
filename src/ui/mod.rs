@@ -163,6 +163,7 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         ui.add(egui::Slider::new(&mut world.params.mutation_rate, 0.0..=0.05).text("taxa de mutação"));
         ui.add(egui::Slider::new(&mut world.params.uv_damage, 1.0..=50.0).text("dano UV"));
         ui.add(egui::Slider::new(&mut world.params.brownian, 0.0..=20.0).text("movimento browniano"));
+        ui.checkbox(&mut world.settings.contact_enabled, "repulsão entre agentes");
         ui.add(egui::Slider::new(&mut world.params.phoretic_gain, 0.0..=500.0).text("difusioforese"));
     });
 }

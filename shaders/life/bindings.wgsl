@@ -17,6 +17,11 @@
 // [vertex_count, instance_count, first_vertex, first_instance].
 @group(3) @binding(7) var<storage, read_write> draw_list: array<u32>;
 @group(3) @binding(8) var<storage, read_write> draw_args: array<atomic<u32>, 4>;
+// Grelha de contacto: cabeça da lista por célula do ambiente, ligação por
+// resíduo (slot·64 + k) e deslocamento calculado por agente (dx, dy, dθ, _).
+@group(3) @binding(9) var<storage, read_write> contact_head: array<atomic<u32>>;
+@group(3) @binding(10) var<storage, read_write> contact_next: array<u32>;
+@group(3) @binding(11) var<storage, read_write> contact_disp: array<vec4<f32>>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;
