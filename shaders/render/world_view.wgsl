@@ -34,13 +34,24 @@ fn vs_fullscreen(@builtin(vertex_index) vi: u32) -> VsOut {
     return o;
 }
 
-// Cores provisórias dos 4 nucleótidos.
+// PALETA DO v3 (composite.wgsl). Duas cores de energia: ATIVADOS a dourado
+// (carregados, vivos), GASTOS no azul complementar, com diferença de
+// luminância para se lerem também com daltonismo. O tom vem da FRAÇÃO de
+// ativados (não da soma: dourado + azul somados davam cinzento) e o brilho
+// da quantidade total.
+const MONOMER_ACT_COLOR: vec3<f32> = vec3<f32>(1.0, 0.62, 0.05);
+const MONOMER_SPENT_COLOR: vec3<f32> = vec3<f32>(0.05, 0.3, 0.85);
+const MONOMER_GAMMA: f32 = 0.5;     // alpha_gamma_adjust do v3
+const DYE_VIS_GAIN: f32 = 2.0;
+const WATER: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+
+// Teclas 1–4 (só ativados): A vermelho, U amarelo, G verde, C azul.
 fn channel_color(ch: u32) -> vec3<f32> {
     switch ch {
-        case 0u: { return vec3<f32>(0.95, 0.35, 0.30); } // A
-        case 1u: { return vec3<f32>(0.95, 0.85, 0.30); } // U
-        case 2u: { return vec3<f32>(0.35, 0.90, 0.40); } // G
-        default: { return vec3<f32>(0.35, 0.55, 1.00); } // C
+        case 0u: { return vec3<f32>(1.0, 0.15, 0.1); }
+        case 1u: { return vec3<f32>(1.0, 0.85, 0.1); }
+        case 2u: { return vec3<f32>(0.15, 0.9, 0.25); }
+        default: { return vec3<f32>(0.2, 0.45, 1.0); }
     }
 }
 
@@ -63,23 +74,27 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         act[ch] = f32(v & 0xFFFFu);
         spent[ch] = f32(v >> 16u);
     }
-    let water = vec3<f32>(0.03, 0.07, 0.12);
+    // Água: preta, com um brilho quente onde chega a luz UV (com as sombras).
+    let water = WATER + vec3<f32>(0.06, 0.05, 0.035) * clamp(light_view[idx] * 3.0, 0.0, 2.0);
+    // Contagens em unidades de 3 quanta, com tone map de Reinhard (como no v3).
+    let act_lin = act / 3.0 * DYE_VIS_GAIN;
+    let act_tm = act_lin / (vec4<f32>(1.0) + act_lin);
 
     if (view.view_mode >= 1u && view.view_mode <= 4u) {
         let ch = view.view_mode - 1u;
-        let t = clamp(act[ch] / 12.0, 0.0, 1.0);
-        return vec4<f32>(mix(water, channel_color(ch), t), 1.0);
+        return vec4<f32>(clamp(water + channel_color(ch) * act_tm[ch], vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     }
     // 6: terreno (quanta de gamma; rocha >= 3 a branco).
     if (view.view_mode == 6u) {
         let g = f32(gamma_view[idx]);
         return vec4<f32>(mix(vec3<f32>(0.02, 0.03, 0.05), vec3<f32>(0.85, 0.8, 0.7), clamp(g / 3.0, 0.0, 1.0)), 1.0);
     }
-    // 7: temperatura (0..12), com a isotérmica de ativação (T = 2) marcada.
+    // 7: temperatura (v3): azul frio -> vermelho quente, com a isotérmica de
+    // ativação (T = 2) a branco: lá dentro a água reativa monómeros gastos.
     if (view.view_mode == 7u) {
         let t = temp_view[fluid_index_at_world(world)];
-        var c = heat_ramp(t / 12.0);
-        if (abs(t - 2.0) < 0.08) { c = vec3<f32>(0.2, 0.9, 1.0); }
+        var c = mix(vec3<f32>(0.02, 0.08, 0.35), vec3<f32>(0.95, 0.12, 0.05), clamp(sqrt(t / 12.0), 0.0, 1.0));
+        if (abs(t - 2.0) < 0.12) { c = vec3<f32>(0.95); }
         return vec4<f32>(c, 1.0);
     }
     // 8: luz UV (raiz quadrada, para ver o fundo).
@@ -108,16 +123,14 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         return vec4<f32>(select(rubble, rock, g >= 3u), 1.0);
     }
 
-    // Normal: tom = mistura dos canais ativados; gastos puxam para cinzento.
-    let act_sum = dot(act, vec4<f32>(1.0));
-    let total = act_sum + dot(spent, vec4<f32>(1.0));
-    if (total <= 0.0) { return vec4<f32>(water, 1.0); }
-    var col = vec3<f32>(0.0);
-    for (var ch = 0u; ch < 4u; ch++) {
-        col += channel_color(ch) * act[ch];
-    }
-    let hue = select(vec3<f32>(0.5), col / max(act_sum, 1e-6), act_sum > 0.0);
-    let base = mix(vec3<f32>(0.45), hue, act_sum / total);
-    let density = clamp(total / f32(CHEM_CELL_CAP), 0.0, 1.0);
-    return vec4<f32>(mix(water, base, sqrt(density)), 1.0);
+    // Normal (v3): tom azul<->dourado pela fração de ativados (esticada com
+    // smoothstep para não passar por cinzento), brilho pela quantidade.
+    let act_amt = clamp(dot(act_tm, vec4<f32>(1.0)), 0.0, 1.5);
+    let spent_amt = clamp(dot(spent, vec4<f32>(1.0)) / 3.0, 0.0, 1.5);
+    let total_amt = act_amt + spent_amt;
+    let act_frac = smoothstep(0.25, 0.75, act_amt / max(total_amt, 1e-5));
+    let hue = mix(MONOMER_SPENT_COLOR, MONOMER_ACT_COLOR, act_frac);
+    let inten = pow(clamp(total_amt, 0.0, 1.0), MONOMER_GAMMA);
+    let c = mix(water, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0));
+    return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }

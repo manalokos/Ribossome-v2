@@ -169,7 +169,7 @@ impl Running {
                 self.egui_renderer.update_texture(&self.gpu.device, &self.gpu.queue, id, &delta);
             }
         }
-        self.view.update(&self.gpu.queue, &self.cam, screen, self.ui.view_mode);
+        self.view.update(&self.gpu.queue, &self.cam, screen, self.ui.view_mode, self.ui.monomer_brightness);
 
         let Running { gpu, world, view, egui_renderer, profiler, ui: st, .. } = self;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);

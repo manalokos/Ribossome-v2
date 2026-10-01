@@ -155,8 +155,9 @@ gpu_struct! {
         pub view_mode: u32,
         pub screen_w: f32,
         pub screen_h: f32,
+        /// Brilho da camada de monómeros (0..1; "monomer_brightness" do v3).
+        pub monomer_brightness: f32,
         pub _pad0: u32,
-        pub _pad1: u32,
     }
 }
 

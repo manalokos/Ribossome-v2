@@ -42,7 +42,7 @@ fn main() {
             done += k;
         }
         for &v in &views {
-            let rgba = cap.render(&gpu, &cam, v);
+            let rgba = cap.render(&gpu, &cam, v, env("BRIGHT", 0.5));
             let p = out.join(format!("passo{m:06}_vista{v}.png"));
             cap.save_png(&rgba, &p).unwrap();
             println!("{}", p.display());

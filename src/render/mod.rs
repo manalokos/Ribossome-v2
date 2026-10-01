@@ -163,7 +163,7 @@ impl WorldView {
         Self { view_buf, bind_group, pipeline }
     }
 
-    pub fn update(&self, queue: &wgpu::Queue, cam: &Camera, screen: [f32; 2], view_mode: u32) {
+    pub fn update(&self, queue: &wgpu::Queue, cam: &Camera, screen: [f32; 2], view_mode: u32, brightness: f32) {
         let p = ViewParams {
             center_x: cam.center[0],
             center_y: cam.center[1],
@@ -171,8 +171,8 @@ impl WorldView {
             view_mode,
             screen_w: screen[0],
             screen_h: screen[1],
+            monomer_brightness: brightness,
             _pad0: 0,
-            _pad1: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }

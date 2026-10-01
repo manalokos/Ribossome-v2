@@ -14,6 +14,8 @@ pub struct UiState {
     pub ledger_epoch: u32,
     pub reseed: bool,
     pub vsync: bool,
+    /// Brilho da camada de monómeros na vista normal.
+    pub monomer_brightness: f32,
 }
 
 impl UiState {
@@ -27,6 +29,7 @@ impl UiState {
             ledger_epoch: 0,
             reseed: false,
             vsync: true,
+            monomer_brightness: 0.5,
         }
     }
 }
@@ -65,6 +68,7 @@ pub fn draw(ctx: &egui::Context, st: &mut UiState, world: &mut World, prof: &mut
                 ui.selectable_value(&mut st.view_mode, i as u32, *n);
             }
         });
+        ui.add(egui::Slider::new(&mut st.monomer_brightness, 0.0..=1.0).text("brilho dos monómeros"));
         world_panel(ui, world);
 
         ui.separator();
