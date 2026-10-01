@@ -39,8 +39,7 @@ fn vs_fullscreen(@builtin(vertex_index) vi: u32) -> VsOut {
 // luminância para se lerem também com daltonismo. O tom vem da FRAÇÃO de
 // ativados (não da soma: dourado + azul somados davam cinzento) e o brilho
 // da quantidade total.
-const MONOMER_ACT_COLOR: vec3<f32> = vec3<f32>(1.0, 0.62, 0.05);
-const MONOMER_SPENT_COLOR: vec3<f32> = vec3<f32>(0.05, 0.3, 0.85);
+const MONOMER_SPENT_COLOR: vec3<f32> = vec3<f32>(0.22, 0.22, 0.24);
 const MONOMER_GAMMA: f32 = 0.5;     // alpha_gamma_adjust do v3
 const DYE_VIS_GAIN: f32 = 2.0;
 const WATER: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
@@ -123,13 +122,17 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         return vec4<f32>(select(rubble, rock, g >= 3u), 1.0);
     }
 
-    // Normal (v3): tom azul<->dourado pela fração de ativados (esticada com
-    // smoothstep para não passar por cinzento), brilho pela quantidade.
+    // Normal: os ATIVADOS têm a média das cores dos seus canais (A vermelho,
+    // U amarelo, G verde, C azul, pesada pelas contagens); os GASTOS são
+    // cinzento escuro. Tom pela fração de ativados, brilho pela quantidade.
     let act_amt = clamp(dot(act_tm, vec4<f32>(1.0)), 0.0, 1.5);
     let spent_amt = clamp(dot(spent, vec4<f32>(1.0)) / 3.0, 0.0, 1.5);
     let total_amt = act_amt + spent_amt;
-    let act_frac = smoothstep(0.25, 0.75, act_amt / max(total_amt, 1e-5));
-    let hue = mix(MONOMER_SPENT_COLOR, MONOMER_ACT_COLOR, act_frac);
+    var act_col = vec3<f32>(0.0);
+    for (var ch = 0u; ch < 4u; ch++) { act_col += channel_color(ch) * act[ch]; }
+    act_col /= max(dot(act, vec4<f32>(1.0)), 1e-5);
+    let act_frac = act_amt / max(total_amt, 1e-5);
+    let hue = mix(MONOMER_SPENT_COLOR, act_col, act_frac);
     let inten = pow(clamp(total_amt, 0.0, 1.0), MONOMER_GAMMA);
     let c = mix(water, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0));
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
