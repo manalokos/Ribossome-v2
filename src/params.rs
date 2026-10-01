@@ -114,6 +114,12 @@ gpu_struct! {
         /// Difusioforese (v3): unidades do mundo por passo por unidade de
         /// fluxo de consumo não compensado.
         pub phoretic_gain: f32,
+        /// Rigidez das juntas (RT/rad² para flexibilidade 1; ÷ flexibilidade²).
+        pub chain_stiffness: f32,
+        /// Agitação térmica das juntas (kT em RT à temperatura ambiente).
+        pub thermal_kt: f32,
+        pub _pad0: u32,
+        pub _pad1: u32,
     }
 }
 
@@ -150,6 +156,10 @@ impl Default for SimParams {
             uptake_rate: 0.001,
             brownian: 3.0,
             phoretic_gain: 100.0,
+            chain_stiffness: 20.0,
+            thermal_kt: 1.0,
+            _pad0: 0,
+            _pad1: 0,
         }
     }
 }

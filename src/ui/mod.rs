@@ -164,6 +164,8 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         ui.add(egui::Slider::new(&mut world.params.uv_damage, 1.0..=50.0).text("dano UV"));
         ui.add(egui::Slider::new(&mut world.params.brownian, 0.0..=20.0).text("movimento browniano"));
         ui.checkbox(&mut world.settings.contact_enabled, "repulsão entre agentes");
+        ui.add(egui::Slider::new(&mut world.params.chain_stiffness, 1.0..=100.0).text("rigidez das juntas"));
+        ui.add(egui::Slider::new(&mut world.params.thermal_kt, 0.0..=5.0).text("agitação térmica (kT)"));
         ui.add(egui::Slider::new(&mut world.params.phoretic_gain, 0.0..=500.0).text("difusioforese"));
     });
 }

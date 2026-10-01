@@ -51,24 +51,14 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
         n += 1u;
         i += 3u;
     }
-    // Geometria: anda a cadeia com dobras homoquirais e centra no centro de massa.
-    var p = vec2<f32>(0.0);
-    var ang = 0.0;
-    var com = vec2<f32>(0.0);
-    var mass = 0.0;
+    // Geometria inicial: dobras homoquirais pela tendência local; a
+    // dobragem (fold.wgsl) parte daqui nos primeiros passos de vida.
     for (var k = 0u; k < n; k++) {
-        let aa = body_get(slot, k);
-        body_pos[slot * MAX_BODY + k] = p;
-        let m = residue_mass(aa);
-        com += p * m;
-        mass += m;
-        ang += residue_bend(aa);
-        p += vec2<f32>(cos(ang), sin(ang)) * SEGMENT_LEN;
+        let b = residue_bend(body_get(slot, k));
+        joint_angle[slot * MAX_BODY + k] = b;
+        joint_base[slot * MAX_BODY + k] = b;
     }
-    com /= max(mass, 1e-6);
-    for (var k = 0u; k < n; k++) {
-        body_pos[slot * MAX_BODY + k] -= com;
-    }
+    rebuild_body(slot, n);
     return n;
 }
 

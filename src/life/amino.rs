@@ -9,7 +9,10 @@
 //!   (Asp 3,65, Glu 4,25, His 6,00, Cys 8,18, Tyr 10,07, Lys 10,53, Arg 12,48);
 //!   a carga a pH 7 é calculada (Henderson-Hasselbalch), não escrita à mão;
 //! - propensão catalítica: data/catalytic_propensity.csv
-//!   (scripts/catalytic_propensity.py, M-CSA sobre Swiss-Prot 2026_03).
+//!   (scripts/catalytic_propensity.py, M-CSA sobre Swiss-Prot 2026_03);
+//! - energias de contacto: data/mj1996.csv (Miyazawa & Jernigan 1996);
+//! - flexibilidade: data/flexibility_vihinen1994.csv (Vihinen et al. 1994)
+//!   (scripts/aaindex_extract.py, a partir da AAindex).
 
 /// Ordem alfabética do código de uma letra (como no v3).
 pub const AA_LETTERS: [char; 20] =
@@ -175,6 +178,32 @@ pub fn translate(genome: &[u8]) -> Vec<u8> {
     body
 }
 
+fn csv_rows(text: &str) -> impl Iterator<Item = Vec<&str>> {
+    text.lines().filter(|l| !l.starts_with('#') && !l.starts_with("aa")).map(|l| l.split(',').collect())
+}
+
+/// Matriz de contactos de Miyazawa-Jernigan 1996 (e_ij em RT), na ordem de `AMINO`.
+pub fn mj_matrix() -> [[f32; 20]; 20] {
+    let mut m = [[0.0; 20]; 20];
+    for (i, row) in csv_rows(include_str!("../../data/mj1996.csv")).enumerate() {
+        assert_eq!(row[0].chars().next(), Some(AA_LETTERS[i]));
+        for j in 0..20 {
+            m[i][j] = row[j + 1].parse().expect("mj1996.csv");
+        }
+    }
+    m
+}
+
+/// Flexibilidade normalizada (B-values) de Vihinen 1994, na ordem de `AMINO`.
+pub fn flexibility() -> [f32; 20] {
+    let mut f = [0.0; 20];
+    for (i, row) in csv_rows(include_str!("../../data/flexibility_vihinen1994.csv")).enumerate() {
+        assert_eq!(row[0].chars().next(), Some(AA_LETTERS[i]));
+        f[i] = row[1].parse().expect("flexibility csv");
+    }
+    f
+}
+
 /// Tabelas WGSL geradas (código genético e propriedades por aminoácido).
 pub fn wgsl() -> String {
     let mut s = String::from("// ---- aminoácidos (gerado de src/life/amino.rs) ----\n");
@@ -197,6 +226,12 @@ pub fn wgsl() -> String {
     s += &col("AA_HYDROPATHY", &|a| a.hydropathy);
     s += &col("AA_CHARGE_PH7", &|a| a.charge_at(7.0));
     s += &col("AA_CATALYTIC", &|a| a.catalytic);
+    let flex = flexibility();
+    let fv: Vec<String> = flex.iter().map(|v| format!("{v:.4}")).collect();
+    s += &format!("const AA_FLEX = array<f32, 20>({});\n", fv.join(", "));
+    let mj = mj_matrix();
+    let mv: Vec<String> = mj.iter().flatten().map(|v| format!("{v:.2}")).collect();
+    s += &format!("const AA_MJ = array<f32, 400>({});\n", mv.join(", "));
     s
 }
 
@@ -237,6 +272,21 @@ mod tests {
         assert!((q('D') + 1.0).abs() < 0.01 && (q('K') - 1.0).abs() < 0.01);
         assert!(q('H') > 0.05 && q('H') < 0.15, "His a pH 7 ~ +0,09");
         assert_eq!(q('A'), 0.0);
+    }
+
+    #[test]
+    fn mj_and_flexibility_tables() {
+        let m = mj_matrix();
+        let i = |l: char| AA_LETTERS.iter().position(|&x| x == l).unwrap();
+        // Valores publicados (MJ 1996, Table 3): L-L, C-C, K-K.
+        assert_eq!((m[i('L')][i('L')], m[i('C')][i('C')], m[i('K')][i('K')]), (-7.37, -5.44, -0.12));
+        for a in 0..20 {
+            for b in 0..20 {
+                assert_eq!(m[a][b], m[b][a], "MJ tem de ser simétrica");
+            }
+        }
+        let f = flexibility();
+        assert_eq!((f[i('G')], f[i('W')]), (1.031, 0.904));
     }
 
     #[test]

@@ -22,6 +22,9 @@
 @group(3) @binding(9) var<storage, read_write> contact_head: array<atomic<u32>>;
 @group(3) @binding(10) var<storage, read_write> contact_next: array<u32>;
 @group(3) @binding(11) var<storage, read_write> contact_disp: array<vec4<f32>>;
+// Ângulos das juntas (atual e base), MAX_BODY por slot.
+@group(3) @binding(12) var<storage, read_write> joint_angle: array<f32>;
+@group(3) @binding(13) var<storage, read_write> joint_base: array<f32>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

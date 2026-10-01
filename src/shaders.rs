@@ -45,6 +45,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         "life/body.wgsl",
         "life/drawlist.wgsl",
         "life/contact.wgsl",
+        "life/fold.wgsl",
     ],
     entries: &[
         ("transport_scatter", Stage::Compute),

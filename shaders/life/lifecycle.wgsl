@@ -227,6 +227,13 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (slot >= params.max_agents) { return; }
     var a = agents[slot];
     if (a.alive == 0u) { return; }
+
+    // ---- JUNTAS: dobragem ao nascer, depois agitação térmica ----
+    let kt_here = params.thermal_kt * (1.0 + temp_in[fluid_index_at_world(vec2<f32>(a.pos_x, a.pos_y))] / 12.0);
+    joints_step(slot, a, kt_here);
+    if (a.age + 1u == FOLD_STEPS) {
+        a.radius = contact_radius(slot, a.body_len);
+    }
     a.age += 1u;
 
     // ---- Deriva passiva: levado à velocidade da água (baixo Reynolds). ----
