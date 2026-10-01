@@ -349,6 +349,11 @@ gpu_struct! {
         pub monomer_brightness: f32,
         /// Slot a desenhar sozinho (0xFFFFFFFF = todos).
         pub focus_slot: u32,
+        /// Cor dos agentes: 0 química, 1 sinal α, 2 sinal β, 3 α e β.
+        pub signal_view: u32,
+        pub _vpad0: u32,
+        pub _vpad1: u32,
+        pub _vpad2: u32,
     }
 }
 

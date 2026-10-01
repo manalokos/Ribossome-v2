@@ -194,6 +194,7 @@ impl WorldView {
                 vertex_storage(3),
                 vertex_storage(4),
                 vertex_storage(5),
+                vertex_storage(6),
             ],
         });
         let agents_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -206,6 +207,7 @@ impl WorldView {
                 wgpu::BindGroupEntry { binding: 3, resource: world.body_pos_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 4, resource: world.draw_list_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 5, resource: world.organs_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: world.signals_buf.as_entire_binding() },
             ],
         });
         let agents_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -247,7 +249,15 @@ impl WorldView {
         }
     }
 
-    pub fn update(&self, queue: &wgpu::Queue, cam: &Camera, screen: [f32; 2], view_mode: u32, brightness: f32) {
+    pub fn update(
+        &self,
+        queue: &wgpu::Queue,
+        cam: &Camera,
+        screen: [f32; 2],
+        view_mode: u32,
+        brightness: f32,
+        signal_view: u32,
+    ) {
         let p = ViewParams {
             center_x: cam.center[0],
             center_y: cam.center[1],
@@ -257,6 +267,10 @@ impl WorldView {
             screen_h: screen[1],
             monomer_brightness: brightness,
             focus_slot: self.focus.get(),
+            signal_view,
+            _vpad0: 0,
+            _vpad1: 0,
+            _vpad2: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }

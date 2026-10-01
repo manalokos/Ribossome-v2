@@ -12,6 +12,8 @@ pub struct Capture {
     size: u32,
     texture: wgpu::Texture,
     readback: wgpu::Buffer,
+    /// Cor dos agentes (0 química, 1 α, 2 β, 3 α e β).
+    pub signal_view: std::cell::Cell<u32>,
 }
 
 impl Capture {
@@ -35,7 +37,7 @@ impl Capture {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        Self { view, size, texture, readback }
+        Self { view, size, texture, readback, signal_view: std::cell::Cell::new(0) }
     }
 
     /// Vista da textura (para mostrar no egui, p. ex. no inspetor).
@@ -54,7 +56,7 @@ impl Capture {
         brightness: f32,
     ) {
         let s = self.size as f32;
-        self.view.update(queue, cam, [s, s], view_mode, brightness);
+        self.view.update(queue, cam, [s, s], view_mode, brightness, self.signal_view.get());
         let target = self.texture.create_view(&Default::default());
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("capture"),
@@ -75,7 +77,7 @@ impl Capture {
     /// Desenha com a câmara dada e devolve RGBA (linha de cima primeiro).
     pub fn render(&self, gpu: &Gpu, world: &World, cam: &Camera, view_mode: u32, brightness: f32) -> Vec<u8> {
         let s = self.size as f32;
-        self.view.update(&gpu.queue, cam, [s, s], view_mode, brightness);
+        self.view.update(&gpu.queue, cam, [s, s], view_mode, brightness, self.signal_view.get());
         let target = self.texture.create_view(&Default::default());
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         world.encode_draw_list(&mut enc);

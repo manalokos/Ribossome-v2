@@ -67,7 +67,7 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
                         step = 9u;
                     }
                 }
-                let ob = ((m % 8u) + 1u) | ((m / 8u) << 4u) | (gain << 8u);
+                let ob = ((m % ORGAN_TYPES) + 1u) | ((m / ORGAN_TYPES) << 4u) | (gain << 8u);
                 organs[slot * 32u + n / 2u] |= ob << ((n % 2u) * 16u);
             }
         }

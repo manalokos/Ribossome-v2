@@ -1,12 +1,13 @@
 // ÓRGÃOS E SINAIS INTERNOS (ver src/life/organs.rs).
 //
 // organ byte por resíduo: 0 = nenhum; senão (tipo + 1) | (parâmetro << 4).
-// Sinais: dois canais (α, β) por resíduo, CONDUZIDOS ao longo da cadeia no
-// sentido N->C (a polaridade da cadeia), um resíduo por passo, com perda
-// SIGNAL_DECAY por salto, limitados a ±SIGNAL_MAX. Os sensores e o relógio
-// emitem; o relé converte; o músculo dobra a sua junta conforme α. O atraso
-// de condução desfasa músculos distantes: uma onda, que é o que permite
-// nadar (um músculo sozinho é recíproco e não desloca nada).
+// Sinais: dois canais (α, β) por resíduo, CONDUZIDOS entre vizinhos, um
+// salto por passo: cada resíduo recebe o sinal dos vizinhos N e C pesado
+// pela condutividade do seu aminoácido (AA_CONDUCTANCE, v3), com perda
+// SIGNAL_DECAY, limitado a ±SIGNAL_MAX. Os sensores e o relógio emitem; o
+// relé converte; todas as juntas dobram conforme α e β. O atraso de
+// condução desfasa juntas distantes: uma onda, que é o que permite nadar
+// (uma dobra sozinha é recíproca e não desloca nada).
 
 const SIGNAL_DECAY: f32 = 0.95;
 const SIGNAL_MAX: f32 = 4.0;
@@ -16,8 +17,8 @@ const SIGNAL_MAX: f32 = 4.0;
 const SIGNAL_GAIN: f32 = 4.0;
 // Energia gasta por passo por radiano de desvio mantido (todas as juntas).
 const BEND_COST: f32 = 0.0005;
-// Período do relógio: CLOCK_PERIOD_BASE × 2^(bits 1–2 do parâmetro) passos.
-const CLOCK_PERIOD_BASE: f32 = 20.0;
+// Raio de amostragem dos sensores de comida e luz (unidades do mundo).
+const SENSOR_RADIUS: f32 = 90.0;
 // Ganho dos sensores de variação (diferença por passo).
 const SENSOR_CHANGE_GAIN: f32 = 20.0;
 // Capacidade de energia acrescentada pelo armazenamento, por (parâmetro + 1).
@@ -82,6 +83,57 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     return lim * tanh(SIGNAL_GAIN * amp * (s.x * sa[aa] + s.y * sb[aa]) / lim);
 }
 
+// Amostra as células num disco de raio SENSOR_RADIUS à volta de `pos`:
+// `what` 0 = comida (ativados, 4 canais), 1 = luz UV. Total: média do disco.
+// Direcional: média do lado esquerdo da cadeia (+perp) − média do direito.
+fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> f32 {
+    let w = f32(WORLD_UNITS_PER_CELL);
+    let r = i32(ceil(SENSOR_RADIUS / w));
+    let c0 = vec2<i32>(floor(pos / w));
+    var sum_l = 0.0;
+    var sum_r = 0.0;
+    var n_l = 0.0;
+    var n_r = 0.0;
+    for (var dy = -r; dy <= r; dy++) {
+        for (var dx = -r; dx <= r; dx++) {
+            let c = c0 + vec2<i32>(dx, dy);
+            if (any(c < vec2<i32>(0)) || any(c >= vec2<i32>(i32(GRID_SIZE)))) { continue; }
+            let d = (vec2<f32>(c) + 0.5) * w - pos;
+            if (length(d) > SENSOR_RADIUS) { continue; }
+            let idx = u32(c.y) * GRID_SIZE + u32(c.x);
+            var v = 0.0;
+            if (what == 0u) {
+                var cnt = 0u;
+                for (var ch = 0u; ch < 4u; ch++) { cnt += chem_act_count(idx, ch); }
+                v = f32(cnt) / 12.0;
+            } else {
+                v = uv_light_at_cell(u32(c.x), u32(c.y)) * 4.0;
+            }
+            let side = dot(d, perp);
+            if (!directional || side > 0.25 * w) {
+                sum_l += v;
+                n_l += 1.0;
+            } else if (side < -0.25 * w) {
+                sum_r += v;
+                n_r += 1.0;
+            }
+        }
+    }
+    if (!directional) { return sum_l / max(n_l, 1.0); }
+    return sum_l / max(n_l, 1.0) - sum_r / max(n_r, 1.0);
+}
+
+// Normal (lado esquerdo) da cadeia no resíduo k, no MUNDO.
+fn chain_normal(slot: u32, a: Agent, k: u32) -> vec2<f32> {
+    let base = slot * MAX_BODY;
+    let ka = select(k - 1u, k, k == 0u);
+    let kb = select(k + 1u, k, k + 1u >= a.body_len);
+    let t = body_pos[base + kb] - body_pos[base + ka];
+    let l = length(t);
+    let tw = rotate(select(vec2<f32>(1.0, 0.0), t / l, l > 1e-5), a.rot);
+    return vec2<f32>(-tw.y, tw.x);
+}
+
 // Um passo dos sinais: emissões dos sensores/relógio/relé e condução ao longo
 // da cadeia. Devolve a energia gasta pelas juntas a manter os desvios.
 fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
@@ -105,15 +157,10 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         var sensed = 0.0;
         var is_sensor = true;
         switch t {
-            case ORGAN_FOOD_SENSOR: {
-                let cell = world_to_cell(residue_world(slot, a, k));
-                var c = 0u;
-                for (var ch = 0u; ch < 4u; ch++) { c += chem_act_count(cell, ch); }
-                sensed = f32(c) / 12.0;
-            }
-            case ORGAN_LIGHT_SENSOR: {
-                let cell = world_to_cell(residue_world(slot, a, k));
-                sensed = uv_light_at_cell(cell % GRID_SIZE, cell / GRID_SIZE) * 4.0;
+            case ORGAN_FOOD_SENSOR, ORGAN_LIGHT_SENSOR, ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: {
+                let what = select(0u, 1u, t == ORGAN_LIGHT_SENSOR || t == ORGAN_LIGHT_SENSOR_DIR);
+                let dir = t == ORGAN_FOOD_SENSOR_DIR || t == ORGAN_LIGHT_SENSOR_DIR;
+                sensed = sense_disc(residue_world(slot, a, k), chain_normal(slot, a, k), what, dir);
             }
             case ORGAN_ENERGY_SENSOR: {
                 sensed = clamp(a.energy / max(cap, 1e-3), 0.0, 1.0) * 2.0;
@@ -152,12 +199,17 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             default: {}
         }
     }
-    // Condução N->C com um passo de atraso: o resíduo k recebe o sinal que
-    // o k−1 tinha no passo anterior (perdendo SIGNAL_DECAY) mais a sua emissão.
+    // Condução com um passo de atraso: o resíduo k recebe o que os vizinhos
+    // k−1 (lado N) e k+1 (lado C) tinham no passo anterior, pesado pela
+    // condutividade do seu aminoácido, perdendo SIGNAL_DECAY, mais a emissão.
+    var cond = AA_CONDUCTANCE;
     var prev = vec2<f32>(0.0);
     for (var k = 0u; k < n; k++) {
         let here = signals[base + k];
-        let s = SIGNAL_DECAY * prev + emit[k];
+        let next = select(vec2<f32>(0.0), signals[base + k + 1u], k + 1u < n);
+        let c = cond[body_get(slot, k)];
+        let incoming = vec2<f32>(c.x * prev.x + c.y * next.x, c.z * prev.y + c.w * next.y);
+        let s = SIGNAL_DECAY * incoming + emit[k];
         signals[base + k] = clamp(s, vec2<f32>(-SIGNAL_MAX), vec2<f32>(SIGNAL_MAX));
         prev = here;
     }

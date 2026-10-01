@@ -18,6 +18,8 @@ pub struct UiState {
     pub vsync: bool,
     /// Brilho da camada de monómeros na vista normal.
     pub monomer_brightness: f32,
+    /// Cor dos agentes: 0 química, 1 sinal α, 2 sinal β, 3 α e β.
+    pub signal_view: u32,
     /// Semear: quantas sementes, comprimento mínimo/máximo, começar por AUG.
     pub seed_count: u32,
     pub seed_len: [u32; 2],
@@ -37,6 +39,7 @@ impl UiState {
             reseed: false,
             vsync: true,
             monomer_brightness: 0.5,
+            signal_view: 0,
             seed_count: 500,
             seed_len: [12, 120],
             seed_aug: true,
@@ -88,6 +91,15 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
             }
         });
         ui.add(egui::Slider::new(&mut st.monomer_brightness, 0.0..=1.0).text("brilho dos monómeros"));
+        const SIGNAL_VIEWS: [&str; 4] = ["química", "sinal α", "sinal β", "α (vermelho) + β (verde)"];
+        egui::ComboBox::from_label("cor dos agentes").selected_text(SIGNAL_VIEWS[st.signal_view as usize]).show_ui(
+            ui,
+            |ui| {
+                for (i, n) in SIGNAL_VIEWS.iter().enumerate() {
+                    ui.selectable_value(&mut st.signal_view, i as u32, *n);
+                }
+            },
+        );
         world_panel(ui, world);
         life_panel(ui, st, world);
 

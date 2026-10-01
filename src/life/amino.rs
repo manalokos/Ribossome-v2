@@ -274,6 +274,35 @@ pub const MAX_BEND: [f32; 20] = [
     0.50, // Y
 ];
 
+/// CONDUTIVIDADE dos sinais por aminoácido (v3, `config/amino_acids.json`,
+/// ordem de `AMINO`): (α vindo do lado N, α vindo do lado C, β vindo do lado
+/// N, β vindo do lado C). Cada resíduo recebe o sinal dos dois vizinhos
+/// pesado por estes fatores; somam ~1 por canal e alguns são negativos (o
+/// resíduo inverte o sinal que vem desse lado). A sequência decide assim por
+/// onde e em que sentido os sinais andam.
+pub const CONDUCTANCE: [(f32, f32, f32, f32); 20] = [
+    (0.8, 0.2, 0.7, 0.3),    // A
+    (0.5, 0.5, 0.5, 0.5),    // C
+    (-0.2, 1.2, -0.3, 1.3),  // D
+    (1.4, -0.4, 1.3, -0.3),  // E
+    (0.6, 0.4, 0.55, 0.45),  // F
+    (0.5, 0.5, 0.5, 0.5),    // G
+    (1.2, -0.2, -0.3, 1.3),  // H
+    (0.65, 0.35, 0.7, 0.3),  // I
+    (1.4, -0.4, 1.3, -0.3),  // K
+    (-0.3, 1.3, -0.2, 1.2),  // L
+    (0.8, 0.2, -0.1, 1.1),   // M
+    (0.7, 0.3, 0.65, 0.35),  // N
+    (1.5, -0.5, 1.4, -0.4),  // P
+    (1.0, 0.0, 0.75, 0.25),  // Q
+    (-0.4, 1.4, -0.3, 1.3),  // R
+    (0.5, 0.5, 0.5, 0.5),    // S
+    (0.9, 0.1, 1.0, 0.0),    // T
+    (-0.3, 1.3, 1.2, -0.2),  // V
+    (0.55, 0.45, 0.6, 0.4),  // W
+    (-0.5, 1.5, -0.4, 1.4),  // Y
+];
+
 /// Sensibilidade de cada junta ao sinal α e ao sinal β (valores do v3, ordem de `AMINO`).
 pub const SIGNAL_SENSITIVITY: [(f32, f32); 20] = [
     (-0.2, 0.2),      // A
@@ -323,6 +352,9 @@ pub fn wgsl() -> String {
     let sa: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.0)).collect();
     let sb: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.1)).collect();
     s += &format!("const AA_ALPHA_SENS = array<f32, 20>({});\n", sa.join(", "));
+    let cd: Vec<String> =
+        CONDUCTANCE.iter().map(|c| format!("vec4<f32>({:.3}, {:.3}, {:.3}, {:.3})", c.0, c.1, c.2, c.3)).collect();
+    s += &format!("const AA_CONDUCTANCE = array<vec4<f32>, 20>({});\n", cd.join(", "));
     let mb: Vec<String> = MAX_BEND.iter().map(|v| format!("{v:.3}")).collect();
     s += &format!("const AA_MAX_BEND = array<f32, 20>({});\n", mb.join(", "));
     let ra: Vec<String> = REST_ANGLE.iter().map(|v| format!("{v:.5}")).collect();

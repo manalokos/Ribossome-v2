@@ -192,6 +192,8 @@ pub struct World {
     pub draw_list_buf: wgpu::Buffer,
     pub joint_state_buf: wgpu::Buffer,
     pub organs_buf: wgpu::Buffer,
+    /// Sinais internos (α, β) por resíduo: slot·64 + k, vec2<f32>.
+    pub signals_buf: wgpu::Buffer,
     pub draw_args_buf: wgpu::Buffer,
     pub life_counters_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
@@ -581,6 +583,7 @@ impl World {
             draw_list_buf,
             joint_state_buf,
             organs_buf,
+            signals_buf: signals,
             draw_args_buf,
             life_counters_buf,
             free_buf,

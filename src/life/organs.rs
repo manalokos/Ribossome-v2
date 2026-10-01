@@ -3,7 +3,7 @@
 //! Codificação: um PROMOTOR (aminoácidos C, H ou W) seguido de um codão
 //! MODIFICADOR que não seja stop forma um órgão, que ocupa UMA posição do
 //! corpo. O modificador (índice do codão 0..63, ordem A U G C) define o tipo
-//! (modificador % 8) e o parâmetro (modificador / 8, 0..7). Um SEGUNDO
+//! (modificador % 10) e o parâmetro (modificador / 10, 0..6). Um SEGUNDO
 //! modificador (se não for stop) dá a INTENSIDADE: 64 níveis logarítmicos,
 //! ganho = 2^((índice − 32)/8), de ×0,06 a ×15 (9 bases no total); sem ele o
 //! ganho é 1 (6 bases). A intensidade multiplica a emissão dos sensores,
@@ -11,13 +11,16 @@
 //! Fisicamente (massa, dobragem MJ, catálise) o órgão continua a ser o
 //! aminoácido promotor; o órgão acrescenta-lhe uma função.
 //!
-//! Os sinais internos são dois canais (α, β) por resíduo, conduzidos N->C.
+//! Os sinais internos são dois canais (α, β) por resíduo, conduzidos entre
+//! vizinhos com a condutividade de cada aminoácido (`amino::CONDUCTANCE`).
 //! Todas as juntas dobram conforme α e β (sensibilidade por aminoácido); o
 //! "músculo" amplifica a resposta local; a natação faz-se pelo RFT.
 //!
 //! Parâmetro (3 bits):
 //! - sensores (comida, luz, energia): bit 0 canal α/β, bit 1 sinal +/−,
-//!   bit 2 nível ou VARIAÇÃO desde o passo anterior;
+//!   bit 2 nível ou VARIAÇÃO desde o passo anterior. Os de comida e luz
+//!   amostram as células num raio: os TOTAIS somam o disco todo; os
+//!   DIRECIONAIS dão (lado esquerdo − lado direito) da cadeia;
 //! - relógio: bit 0 canal, bits 1–2 período (20, 40, 80, 160 passos);
 //! - relé: bits 0–1 modo (α->β, β->α, inverte α, inverte β), bit 2 ganho ×2;
 //! - boca: catálise ×(2 + p); músculo: resposta ×(2 + p/2);
@@ -27,7 +30,7 @@
 
 use super::amino::{AA_LETTERS, STOP, codon};
 
-pub const ORGAN_TYPES: usize = 8;
+pub const ORGAN_TYPES: usize = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -39,6 +42,8 @@ pub enum Organ {
     Clock = 5,
     Relay = 6,
     Storage = 7,
+    FoodSensorDirectional = 8,
+    LightSensorDirectional = 9,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -52,13 +57,18 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "relógio",
     "relé",
     "armazenamento",
+    "sensor de comida direcional",
+    "sensor de luz direcional",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'F', 'L'];
 
 /// Custo de manutenção por passo de um órgão, em múltiplos do custo de um resíduo.
-pub const ORGAN_UPKEEP: [f32; ORGAN_TYPES] = [3.0, 4.0, 2.0, 2.0, 1.0, 2.0, 1.0, 1.0];
+pub const ORGAN_UPKEEP: [f32; ORGAN_TYPES] = [3.0, 4.0, 2.0, 2.0, 1.0, 2.0, 1.0, 1.0, 3.0, 3.0];
+
+/// Período base do relógio (passos); o parâmetro multiplica-o por 2^(bits 1–2).
+pub const CLOCK_PERIOD_BASE: f32 = 20.0;
 
 /// Aminoácidos promotores (pouco frequentes num genoma ao acaso).
 pub const PROMOTERS: [char; 3] = ['C', 'H', 'W'];
@@ -133,12 +143,23 @@ pub fn translate_organs(genome: &[u8], require_start: bool) -> Vec<Residue> {
 /// Constantes WGSL dos órgãos.
 pub fn wgsl() -> String {
     let mut s = String::from("// ---- órgãos (gerado de src/life/organs.rs) ----\n");
-    for (i, name) in ["MOUTH", "MUSCLE", "FOOD_SENSOR", "LIGHT_SENSOR", "ENERGY_SENSOR", "CLOCK", "RELAY", "STORAGE"]
-        .iter()
-        .enumerate()
-    {
+    let names = [
+        "MOUTH",
+        "MUSCLE",
+        "FOOD_SENSOR",
+        "LIGHT_SENSOR",
+        "ENERGY_SENSOR",
+        "CLOCK",
+        "RELAY",
+        "STORAGE",
+        "FOOD_SENSOR_DIR",
+        "LIGHT_SENSOR_DIR",
+    ];
+    for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");
     }
+    s += &format!("const ORGAN_TYPES: u32 = {ORGAN_TYPES}u;\n");
+    s += &format!("const CLOCK_PERIOD_BASE: f32 = {CLOCK_PERIOD_BASE:.1};\n");
     let promo: Vec<String> = (0..20u8).map(|a| format!("{}u", is_promoter(a) as u32)).collect();
     s += &format!("const AA_IS_PROMOTER = array<u32, 20>({});\n", promo.join(", "));
     let up: Vec<String> = ORGAN_UPKEEP.iter().map(|v| format!("{v:.3}")).collect();
@@ -161,13 +182,13 @@ mod tests {
         let body = translate_organs(&g, true);
         assert_eq!(body.len(), 3);
         assert_eq!(body[0].organ, None);
-        // GCA: 2*16 + 3*4 + 0 = 44 -> tipo 4, param 5; UUU: 1*16 + 1*4 + 1 = 21 -> intensidade 21.
-        assert_eq!(body[1], Residue { aa: aa_index('C'), organ: Some((4, 5, 21)) });
+        // GCA: 2*16 + 3*4 + 0 = 44 -> tipo 4, param 4; UUU: 1*16 + 1*4 + 1 = 21 -> intensidade 21.
+        assert_eq!(body[1], Residue { aa: aa_index('C'), organ: Some((4, 4, 21)) });
         assert_eq!(body[2].organ, None);
         // Sem segundo modificador (stop a seguir): intensidade por omissão, 6 bases.
         let g2 = bases("AUGUGUGCAUAA");
         let b2 = translate_organs(&g2, true);
-        assert_eq!(b2[1].organ, Some((4, 5, GAIN_DEFAULT)));
+        assert_eq!(b2[1].organ, Some((4, 4, GAIN_DEFAULT)));
         assert!((organ_gain(GAIN_DEFAULT) - 1.0).abs() < 1e-6);
     }
 
