@@ -35,6 +35,7 @@ pub struct AminoAcid {
     pub catalytic: f32,
 }
 
+#[allow(clippy::too_many_arguments)]
 const fn aa(
     letter: char,
     mass: f32,
@@ -164,7 +165,7 @@ pub const MAX_BODY: usize = 64;
 pub fn translate(genome: &[u8]) -> Vec<u8> {
     let Some(start) = genome.windows(3).position(|w| w == [0, 1, 2]) else { return Vec::new() };
     let mut body = Vec::new();
-    for c in genome[start..].chunks_exact(3) {
+    for c in genome[start..].as_chunks::<3>().0 {
         let a = codon(c[0], c[1], c[2]);
         if a == STOP || body.len() >= MAX_BODY {
             break;
