@@ -121,6 +121,7 @@ struct Pipelines {
     agents_step: wgpu::ComputePipeline,
     agents_ledger: wgpu::ComputePipeline,
     agents_birth: wgpu::ComputePipeline,
+    draw_list: wgpu::ComputePipeline,
 }
 
 pub struct World {
@@ -151,6 +152,8 @@ pub struct World {
     pub genomes_buf: wgpu::Buffer,
     pub bodies_buf: wgpu::Buffer,
     pub body_pos_buf: wgpu::Buffer,
+    pub draw_list_buf: wgpu::Buffer,
+    pub draw_args_buf: wgpu::Buffer,
     pub life_counters_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
     spawn_buf: wgpu::Buffer,
@@ -233,6 +236,13 @@ impl World {
         let genomes_buf = storage_buffer(device, "genomes", max_agents * SLOT_WORDS * 4);
         let bodies_buf = storage_buffer(device, "bodies", max_agents * SLOT_WORDS * 4);
         let body_pos_buf = storage_buffer(device, "body positions", max_agents * 64 * 8);
+        let draw_list_buf = storage_buffer(device, "draw list", max_agents * 4);
+        let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw args"),
+            size: 16,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let free_slots: Vec<u32> = (0..cfg.max_agents).rev().collect();
         let free_buf = storage_buffer(device, "free slots", max_agents * 4);
         gpu.queue.write_buffer(&free_buf, 0, bytemuck::cast_slice(&free_slots));
@@ -267,7 +277,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..7).map(|b| storage_entry(b, b == 4)).collect();
+        let life_entries: Vec<_> = (0..9).map(|b| storage_entry(b, b == 4)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -313,7 +323,17 @@ impl World {
         let life_bg = bind_all(
             "life bg",
             &life_layout,
-            &[&agents_buf, &genomes_buf, &free_buf, &life_counters_buf, &spawn_buf, &bodies_buf, &body_pos_buf],
+            &[
+                &agents_buf,
+                &genomes_buf,
+                &free_buf,
+                &life_counters_buf,
+                &spawn_buf,
+                &bodies_buf,
+                &body_pos_buf,
+                &draw_list_buf,
+                &draw_args_buf,
+            ],
         );
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -359,6 +379,7 @@ impl World {
             agents_step: compute("agents_step"),
             agents_ledger: compute("agents_ledger"),
             agents_birth: compute("agents_birth"),
+            draw_list: compute("build_draw_list"),
         };
 
         Self {
@@ -387,6 +408,8 @@ impl World {
             genomes_buf,
             bodies_buf,
             body_pos_buf,
+            draw_list_buf,
+            draw_args_buf,
             life_counters_buf,
             free_buf,
             spawn_buf,
@@ -554,6 +577,19 @@ impl World {
         }
         drop(pass);
         self.params.epoch = self.params.epoch.wrapping_add(steps);
+    }
+
+    /// Grava a lista dos agentes vivos e os argumentos do draw indireto.
+    pub fn encode_draw_list(&self, enc: &mut wgpu::CommandEncoder) {
+        enc.clear_buffer(&self.draw_args_buf, 0, None);
+        let mut pass =
+            enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("draw list"), timestamp_writes: None });
+        pass.set_bind_group(0, &self.frame_bg, &[0]);
+        pass.set_bind_group(1, &self.world_bg, &[]);
+        pass.set_bind_group(2, &self.fluid_ab, &[]);
+        pass.set_bind_group(3, &self.life_bg, &[]);
+        pass.set_pipeline(&self.pipelines.draw_list);
+        pass.dispatch_workgroups(groups(self.cfg.max_agents, 64), 1, 1);
     }
 
     /// Grava a redução do livro-razão para `ledger_buf`.

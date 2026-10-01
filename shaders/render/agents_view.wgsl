@@ -8,6 +8,7 @@
 @group(0) @binding(1) var<storage, read> agents_view: array<Agent>;
 @group(0) @binding(2) var<storage, read> bodies_view: array<u32>;
 @group(0) @binding(3) var<storage, read> body_pos_view: array<vec2<f32>>;
+@group(0) @binding(4) var<storage, read> draw_list_view: array<u32>;
 
 const MAX_BODY_V: u32 = 64u;
 
@@ -35,7 +36,7 @@ fn class_color(aa: u32) -> vec3<f32> {
 @vertex
 fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) -> AgentVsOut {
     var o: AgentVsOut;
-    let slot = inst / MAX_BODY_V;
+    let slot = draw_list_view[inst / MAX_BODY_V];
     let k = inst % MAX_BODY_V;
     let a = agents_view[slot];
     let naked = a.body_len == 0u;

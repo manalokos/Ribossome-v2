@@ -191,6 +191,7 @@ impl Running {
             frame.segment("world", |enc| world.encode_steps(&gpu.queue, enc, n));
         }
         frame.segment("ledger", |enc| world.encode_ledger_readback(enc));
+        frame.segment("draw list", |enc| world.encode_draw_list(enc));
 
         let mut egui_enc = gpu.device.create_command_encoder(&Default::default());
         let mut extra = egui_renderer.update_buffers(&gpu.device, &gpu.queue, &mut egui_enc, &jobs, &sd);

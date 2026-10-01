@@ -24,6 +24,9 @@ const COLD_DEATH_MULT: f32 = 0.1;
 const HOT_DEATH_MULT: f32 = 10.0;
 const UV_HAZARD_SCALE: f32 = 0.001;
 const MIN_GENE_LEN: u32 = 6u;
+const S_BROWN: u32 = 9u;
+// Difusioforese (v3): limite de velocidade por passo, em unidades do mundo.
+const PHORETIC_MAX_STEP: f32 = 3.0;
 
 fn genome_get(slot: u32, i: u32) -> u32 {
     return (genomes[slot * GENOME_WORDS + i / 16u] >> ((i % 16u) * 2u)) & 3u;
@@ -243,15 +246,22 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // com uma taxa proporcional à sua PROPENSÃO CATALÍTICA medida (M-CSA).
     // O monómero fica no lugar, gasto; a ativação vira energia do agente.
     var cat = AA_CATALYTIC;
+    // Fluxo de consumo por direção (difusioforese): soma de taxa × direção
+    // do resíduo a partir do centro de massa. Consumo simétrico cancela.
+    var phoretic = vec2<f32>(0.0);
     for (var k = 0u; k < a.body_len; k++) {
         if (a.energy + params.food_power > cap) { break; }
-        let cell = world_to_cell(residue_world(slot, a, k));
+        let rw = residue_world(slot, a, k);
+        let cell = world_to_cell(rw);
         var avail = vec4<u32>(0u);
         for (var ch = 0u; ch < 4u; ch++) { avail[ch] = chem_act_count(cell, ch); }
         let tot = avail.x + avail.y + avail.z + avail.w;
         if (tot == 0u) { continue; }
         let hunger = clamp(1.0 - a.energy / cap, 0.0, 1.0);
         let pe = clamp(params.uptake_rate * cat[body_get(slot, k)] * f32(tot) * hunger, 0.0, 1.0);
+        let rc = rw - p;
+        let rl = length(rc);
+        if (rl > 1e-4) { phoretic += rc / rl * pe; }
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
         if (r.x < pe) {
             var u = u32(r.y * f32(tot));
@@ -264,6 +274,30 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * f32(a.body_len);
+
+    // ---- DIFUSIOFORESE (v3): consumo assimétrico empurra o corpo para o
+    // lado onde consome. (O sentido real depende de a superfície atrair ou
+    // repelir o soluto; o v3 usava este.) ----
+    var dp = phoretic * params.phoretic_gain;
+    let dl = length(dp);
+    if (dl > PHORETIC_MAX_STEP) { dp *= PHORETIC_MAX_STEP / dl; }
+
+    // ---- MOVIMENTO BROWNIANO: agitação térmica. Translação ∝ 1/√raio por
+    // passo (D ∝ 1/raio, Stokes-Einstein); rotação D_r ∝ 1/raio³. O raio
+    // conta-se em resíduos (√n para uma cadeia enrolada). ----
+    let radius = max(sqrt(f32(max(a.body_len, 1u))), 1.0);
+    let bq = rng_f4(a.id, params.epoch, S_BROWN);
+    // Box-Muller: dois desvios normais.
+    let bm_r = sqrt(-2.0 * log(max(bq.x, 1e-7)));
+    let gauss = vec2<f32>(bm_r * cos(6.2831853 * bq.y), bm_r * sin(6.2831853 * bq.y));
+    dp += gauss * params.brownian / sqrt(radius);
+    a.rot += (bq.z * 2.0 - 1.0) * 1.7320508 * 0.15 / pow(radius, 1.5);
+    let np2 = clamp(p + dp, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
+    if (gamma_count(world_to_cell(np2)) < GAMMA_SOLID_THRESHOLD) {
+        p = np2;
+        a.pos_x = p.x;
+        a.pos_y = p.y;
+    }
 
     // ---- MORTE (v3): base ÷ energia × temperatura + risco UV ----
     let cell_here = world_to_cell(p);

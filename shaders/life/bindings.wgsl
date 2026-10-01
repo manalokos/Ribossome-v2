@@ -13,6 +13,10 @@
 @group(3) @binding(5) var<storage, read_write> bodies: array<u32>;
 // Posições locais dos resíduos (centradas no centro de massa), MAX_BODY por slot.
 @group(3) @binding(6) var<storage, read_write> body_pos: array<vec2<f32>>;
+// Lista de slots vivos para o desenho e argumentos do draw indireto
+// [vertex_count, instance_count, first_vertex, first_instance].
+@group(3) @binding(7) var<storage, read_write> draw_list: array<u32>;
+@group(3) @binding(8) var<storage, read_write> draw_args: array<atomic<u32>, 4>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

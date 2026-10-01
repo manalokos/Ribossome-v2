@@ -107,8 +107,13 @@ gpu_struct! {
         /// Probabilidade de hidrólise por monómero ativado, por unidade de
         /// propensão catalítica e por passo (v3: 0,01 × massa mínima 0,1).
         pub uptake_rate: f32,
-        pub _pad0: u32,
-        pub _pad1: u32,
+        /// Movimento browniano: desvio por passo (unidades do mundo) de um
+        /// corpo com o raio de UM resíduo; corpos maiores andam menos
+        /// (Stokes-Einstein: D ∝ 1/raio).
+        pub brownian: f32,
+        /// Difusioforese (v3): unidades do mundo por passo por unidade de
+        /// fluxo de consumo não compensado.
+        pub phoretic_gain: f32,
     }
 }
 
@@ -143,8 +148,8 @@ impl Default for SimParams {
             mutation_rate: 0.003,
             uv_damage: 10.0,
             uptake_rate: 0.001,
-            _pad0: 0,
-            _pad1: 0,
+            brownian: 3.0,
+            phoretic_gain: 100.0,
         }
     }
 }
