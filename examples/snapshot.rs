@@ -13,7 +13,8 @@ fn env<T: std::str::FromStr>(k: &str, d: T) -> T {
 
 fn main() {
     let gpu = Gpu::new_headless().unwrap();
-    let cfg = if env("BIG", 1) == 1 { WorldConfig::DEFAULT } else { WorldConfig::TEST };
+    let mut cfg = if env("BIG", 1) == 1 { WorldConfig::DEFAULT } else { WorldConfig::TEST };
+    cfg.fluid_size = env("FLUIDRES", cfg.fluid_size);
     let mut world = World::new(&gpu, cfg, 1);
     world.settings.fluid_enabled = env("FLUID", 1) == 1;
     world.params.cohesion = env("COH", world.params.cohesion);

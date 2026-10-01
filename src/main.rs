@@ -43,6 +43,9 @@ fn world_config_from_env() -> WorldConfig {
         cfg.grid_size = g;
         cfg.fluid_size = (g / 2).max(16);
     }
+    if let Some(f) = std::env::var("RIBO_FLUID").ok().and_then(|v| v.parse::<u32>().ok()) {
+        cfg.fluid_size = f;
+    }
     cfg
 }
 

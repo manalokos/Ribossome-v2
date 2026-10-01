@@ -26,7 +26,7 @@ fn measure(gpu: &Gpu, world: &mut World, steps: u32) -> f64 {
 fn main() {
     let gpu = Gpu::new_headless().unwrap();
     let steps = 640;
-    let mut run = |name: &str, cfg: WorldConfig, f: &dyn Fn(&mut World), seeds: u32| {
+    let run = |name: &str, cfg: WorldConfig, f: &dyn Fn(&mut World), seeds: u32| {
         let mut world = World::new(&gpu, cfg, 1);
         world.seed_matter(&gpu, 1);
         f(&mut world);
