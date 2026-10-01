@@ -353,7 +353,7 @@ pub struct WorldConfig {
 impl WorldConfig {
     /// Fluido a 1024²: era o que o v3 corria (as constantes do fluido estão
     /// afinadas em células do fluido).
-    pub const DEFAULT: Self = Self { grid_size: 2048, fluid_size: 1024, world_units_per_cell: 30, max_agents: 60_000 };
+    pub const DEFAULT: Self = Self { grid_size: 2048, fluid_size: 1024, world_units_per_cell: 30, max_agents: 400_000 };
     /// Mundo pequeno para testes.
     pub const TEST: Self = Self { grid_size: 256, fluid_size: 128, world_units_per_cell: 30, max_agents: 4096 };
 
