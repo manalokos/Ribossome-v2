@@ -7,9 +7,17 @@
 //! Fisicamente (massa, dobragem MJ, catálise) o órgão continua a ser o
 //! aminoácido promotor; o órgão acrescenta-lhe uma função.
 //!
-//! Os sinais internos são dois canais (α, β) por resíduo, difundidos ao
-//! longo da cadeia com perda. Sensores e relógio emitem; o relé converte;
-//! o músculo dobra a sua junta conforme α (a natação faz-se pelo RFT).
+//! Os sinais internos são dois canais (α, β) por resíduo, conduzidos N->C.
+//! Todas as juntas dobram conforme α e β (sensibilidade por aminoácido); o
+//! "músculo" amplifica a resposta local; a natação faz-se pelo RFT.
+//!
+//! Parâmetro (3 bits):
+//! - sensores (comida, luz, energia): bit 0 canal α/β, bit 1 sinal +/−,
+//!   bit 2 nível ou VARIAÇÃO desde o passo anterior;
+//! - relógio: bit 0 canal, bits 1–2 período (20, 40, 80, 160 passos);
+//! - relé: bits 0–1 modo (α->β, β->α, inverte α, inverte β), bit 2 ganho ×2;
+//! - boca: catálise ×(2 + p); músculo: resposta ×(2 + p/2);
+//!   armazenamento: +4·(p + 1) de capacidade.
 //!
 //! Esta é a única fonte de verdade: o shader recebe as constantes geradas.
 

@@ -210,6 +210,8 @@ pub struct LifeCounters {
     pub spawn_failed: u32,
     pub deaths: u32,
     pub births: u32,
+    /// Mortes com energia < 1.
+    pub starved: u32,
 }
 
 fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
@@ -285,6 +287,7 @@ impl World {
         let joint_active = storage_buffer(device, "joint active", max_agents * 64 * 4);
         let organs_buf = storage_buffer(device, "organs", max_agents * SLOT_WORDS * 4);
         let signals = storage_buffer(device, "signals", max_agents * 64 * 8);
+        let sensor_mem = storage_buffer(device, "sensor memory", max_agents * 64 * 4);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
             size: 16,
@@ -325,7 +328,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..18).map(|b| storage_entry(b, b == 4)).collect();
+        let life_entries: Vec<_> = (0..19).map(|b| storage_entry(b, b == 4)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -466,6 +469,7 @@ impl World {
                 &joint_active,
                 &organs_buf,
                 &signals,
+                &sensor_mem,
             ],
         );
 
@@ -595,7 +599,15 @@ impl World {
     /// Lê os contadores do ciclo de vida de forma síncrona (testes, depuração).
     pub fn life_counters_blocking(&self, gpu: &Gpu) -> LifeCounters {
         let w: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&self.life_counters_buf)).to_vec();
-        LifeCounters { free_top: w[0], next_id: w[1], spawned: w[2], spawn_failed: w[3], deaths: w[4], births: w[5] }
+        LifeCounters {
+            free_top: w[0],
+            next_id: w[1],
+            spawned: w[2],
+            spawn_failed: w[3],
+            deaths: w[4],
+            births: w[5],
+            starved: w[6],
+        }
     }
 
     /// Lê os agentes (todos os slots) de forma síncrona (testes).

@@ -16,8 +16,10 @@ const SIGNAL_GAIN: f32 = 4.0;
 const MAX_SIGNAL_ANGLE: f32 = 2.4;
 // Energia gasta por passo por radiano de desvio mantido (todas as juntas).
 const BEND_COST: f32 = 0.0005;
-// Período do relógio: CLOCK_PERIOD_BASE × (parâmetro + 1) passos.
+// Período do relógio: CLOCK_PERIOD_BASE × 2^(bits 1–2 do parâmetro) passos.
 const CLOCK_PERIOD_BASE: f32 = 20.0;
+// Ganho dos sensores de variação (diferença por passo).
+const SENSOR_CHANGE_GAIN: f32 = 20.0;
 // Capacidade de energia acrescentada pelo armazenamento, por (parâmetro + 1).
 const STORAGE_CAPACITY: f32 = 4.0;
 
@@ -90,35 +92,55 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         if (t == 0xFFu) { continue; }
         let p = organ_param(o);
         let s = signals[base + k];
+        // SENSORES (comida, luz, energia): bit 0 = canal (α/β), bit 1 =
+        // sinal (+/−), bit 2 = nível ou VARIAÇÃO desde o passo anterior
+        // (memória por resíduo; é assim que as bactérias fazem quimiotaxia).
+        var sensed = 0.0;
+        var is_sensor = true;
         switch t {
             case ORGAN_FOOD_SENSOR: {
-                // p 0–3: só o nucleótido p (ativados); 4–7: todos os ativados.
                 let cell = world_to_cell(residue_world(slot, a, k));
                 var c = 0u;
-                if (p < 4u) {
-                    c = chem_act_count(cell, p);
-                } else {
-                    for (var ch = 0u; ch < 4u; ch++) { c += chem_act_count(cell, ch); }
-                }
-                emit[k].x = f32(c) / 12.0;
+                for (var ch = 0u; ch < 4u; ch++) { c += chem_act_count(cell, ch); }
+                sensed = f32(c) / 12.0;
             }
             case ORGAN_LIGHT_SENSOR: {
                 let cell = world_to_cell(residue_world(slot, a, k));
-                emit[k].x = uv_light_at_cell(cell % GRID_SIZE, cell / GRID_SIZE) * f32(p + 1u);
+                sensed = uv_light_at_cell(cell % GRID_SIZE, cell / GRID_SIZE) * 4.0;
             }
             case ORGAN_ENERGY_SENSOR: {
-                emit[k].y = clamp(a.energy / max(cap, 1e-3), 0.0, 1.0) * f32(p + 1u) / 4.0;
+                sensed = clamp(a.energy / max(cap, 1e-3), 0.0, 1.0) * 2.0;
             }
+            default: { is_sensor = false; }
+        }
+        if (is_sensor) {
+            let mi = base + k;
+            var v = sensed;
+            if ((p & 4u) != 0u) {
+                // Variação, amplificada (as mudanças por passo são pequenas).
+                v = (sensed - sensor_mem[mi]) * SENSOR_CHANGE_GAIN;
+            }
+            sensor_mem[mi] = sensed;
+            v = select(v, -v, (p & 2u) != 0u);
+            if ((p & 1u) == 0u) { emit[k].x = v; } else { emit[k].y = v; }
+            continue;
+        }
+        switch t {
             case ORGAN_CLOCK: {
-                let period = CLOCK_PERIOD_BASE * f32(p + 1u);
-                emit[k].x = sin(6.2831853 * f32(a.age) / period);
+                // bit 0 = canal; bits 1–2 = período (20, 40, 80 ou 160 passos).
+                let period = CLOCK_PERIOD_BASE * f32(1u << (p >> 1u));
+                let v = sin(6.2831853 * f32(a.age) / period);
+                if ((p & 1u) == 0u) { emit[k].x = v; } else { emit[k].y = v; }
             }
             case ORGAN_RELAY: {
-                // p % 3: 0 α->β, 1 β->α, 2 inverte α.
-                let m = p % 3u;
-                if (m == 0u) { emit[k].y = s.x; }
-                else if (m == 1u) { emit[k].x = s.y; }
-                else { emit[k].x = -2.0 * s.x; }
+                // bits 0–1: 0 α->β, 1 β->α, 2 inverte α, 3 inverte β; bit 2 = ganho ×2.
+                let g = select(1.0, 2.0, (p & 4u) != 0u);
+                switch (p & 3u) {
+                    case 0u: { emit[k].y = g * s.x; }
+                    case 1u: { emit[k].x = g * s.y; }
+                    case 2u: { emit[k].x = -g * 2.0 * s.x; }
+                    default: { emit[k].y = -g * 2.0 * s.y; }
+                }
             }
             default: {}
         }

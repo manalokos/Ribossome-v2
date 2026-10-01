@@ -33,6 +33,8 @@
 @group(3) @binding(16) var<storage, read_write> organs: array<u32>;
 // Sinais internos (α, β) por resíduo.
 @group(3) @binding(17) var<storage, read_write> signals: array<vec2<f32>>;
+// Memória dos sensores (o valor sentido no passo anterior), por resíduo.
+@group(3) @binding(18) var<storage, read_write> sensor_mem: array<f32>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;
@@ -40,6 +42,8 @@ const LC_SPAWNED: u32 = 2u;
 const LC_SPAWN_FAILED: u32 = 3u;
 const LC_DEATHS: u32 = 4u;
 const LC_BIRTHS: u32 = 5u;
+// Mortes com energia < 1 (fome).
+const LC_STARVED: u32 = 6u;
 
 const GENOME_WORDS: u32 = 16u;
 const MAX_GENE_LEN: u32 = 256u;

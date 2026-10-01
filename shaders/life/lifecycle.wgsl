@@ -234,6 +234,7 @@ fn die(slot: u32, a_in: Agent) {
     agents[slot] = a;
     slot_push(slot);
     atomicAdd(&life_counters[LC_DEATHS], 1u);
+    if (a.energy < 1.0) { atomicAdd(&life_counters[LC_STARVED], 1u); }
 }
 
 fn energy_capacity(slot: u32, a: Agent) -> f32 {
@@ -378,7 +379,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // ---- EMPARELHAMENTO (v3): captura complementos ATIVADOS da vizinhança ----
     // O molde é o genoma; a captura é na célula de um resíduo ao acaso (ou
     // do próprio agente, se for RNA nu). Base a base, pela ordem do genoma.
-    if (a.pair_count < a.gene_len && a.energy > 1.0) {
+    if (a.pair_count < a.gene_len && a.energy > 1.0 + params.pairing_cost) {
         let rr = rng_f4(a.id, params.epoch, S_PAIR);
         var attempts = u32(params.pairing_rate);
         if (rr.x < fract(params.pairing_rate)) { attempts += 1u; }
@@ -392,8 +393,10 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let ang = q.y * 6.2831853;
             site += vec2<f32>(cos(ang), sin(ang)) * q.z * PAIRING_REACH;
             let comp = genome_get(slot, a.pair_count) ^ 1u;
+            if (a.energy < 1.0 + params.pairing_cost) { break; }
             if (!chem_take_state_one(world_to_cell(site) * 4u + comp, false)) { break; }
             a.pair_count += 1u;
+            a.energy -= params.pairing_cost;
         }
     }
     agents[slot] = a;

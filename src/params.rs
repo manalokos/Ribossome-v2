@@ -131,7 +131,8 @@ gpu_struct! {
         pub joint_coupling: f32,
         /// 1 = regulação pela fome (v3): um organismo cheio deixa de ligar comida.
         pub hunger_regulation: u32,
-        pub _pad0: u32,
+        /// Energia gasta por base emparelhada (polimerizar consome energia).
+        pub pairing_cost: f32,
     }
 }
 
@@ -161,11 +162,13 @@ impl Default for SimParams {
             death_probability: 0.02,
             spawn_energy: 5.0,
             food_power: 6.0,
-            maintenance_cost: 0.0001,
+            // Mais cara do que no v3 (0,0001): com ela a energia nunca faltava e
+            // não havia seleção. 0,002: a fome passa a ser a principal causa de morte.
+            maintenance_cost: 0.002,
             pairing_rate: 3.0,
             mutation_rate: 0.003,
             uv_damage: 10.0,
-            uptake_rate: 0.001,
+            uptake_rate: 0.0005,
             // 0: a agitação térmica já entra pelo tremor das juntas (RFT); somar
             // este browniano contava-a duas vezes e afogava a natação.
             brownian: 0.0,
@@ -179,7 +182,7 @@ impl Default for SimParams {
             require_start: 1,
             joint_coupling: 0.9,
             hunger_regulation: 0,
-            _pad0: 0,
+            pairing_cost: 0.3,
         }
     }
 }
