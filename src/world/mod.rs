@@ -275,7 +275,7 @@ impl World {
         let body_pos_buf = storage_buffer(device, "body positions", max_agents * 64 * 8);
         let draw_list_buf = storage_buffer(device, "draw list", max_agents * 4);
         let contact_head = storage_buffer(device, "contact head", cells * 4);
-        let contact_next = storage_buffer(device, "contact next", max_agents * 64 * 4);
+        let contact_next = storage_buffer(device, "contact next", max_agents * 4);
         let contact_disp = storage_buffer(device, "contact disp", max_agents * 16);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
@@ -660,6 +660,9 @@ impl World {
         // linhas de 65535 workgroups quando é preciso uma segunda dimensão.
         let commit_wg = (self.cfg.cells() * 4).div_ceil(256) as u32;
         let commit_groups = [commit_wg.min(65535), commit_wg.div_ceil(65535)];
+        // Grelha de contacto (células de 120 unidades; igual a CONTACT_N no shader).
+        let contact_n = (self.cfg.sim_size() / 120.0) as u32 + 1;
+        let contact_cells = contact_n * contact_n;
         let pl = &self.pipelines;
         let (ab, ba) = (&self.fluid_ab, &self.fluid_ba);
         let mut pass =
@@ -756,10 +759,10 @@ impl World {
 
             // ORGANISMOS: depois do commit (os depósitos da morte vão para chem_grid).
             run(&mut pass, &pl.agents_step, ab, [ag, 1]);
-            // CONTACTO: grelha de resíduos, empurrões, aplicação.
+            // CONTACTO: grelha de agentes, empurrões, aplicação.
             if st.contact_enabled {
-                run(&mut pass, &pl.contact_clear, ab, [(self.cfg.cells() as u32).div_ceil(256), 1]);
-                run(&mut pass, &pl.contact_insert, ab, [(self.cfg.max_agents * 64).div_ceil(256), 1]);
+                run(&mut pass, &pl.contact_clear, ab, [contact_cells.div_ceil(256), 1]);
+                run(&mut pass, &pl.contact_insert, ab, [ag, 1]);
                 run(&mut pass, &pl.contact_resolve, ab, [ag, 1]);
                 run(&mut pass, &pl.contact_apply, ab, [ag, 1]);
             }

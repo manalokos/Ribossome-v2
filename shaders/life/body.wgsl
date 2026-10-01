@@ -72,6 +72,18 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
     return n;
 }
 
+// Raio de contacto: raio de giração dos resíduos (mais a espessura de um
+// resíduo), limitado a CONTACT_R_MAX; RNA nu = CONTACT_R_NAKED.
+fn contact_radius(slot: u32, n: u32) -> f32 {
+    if (n == 0u) { return CONTACT_R_NAKED; }
+    var s = 0.0;
+    for (var k = 0u; k < n; k++) {
+        let q = body_pos[slot * MAX_BODY + k];
+        s += dot(q, q);
+    }
+    return min(sqrt(s / f32(n)) + 4.0, CONTACT_R_MAX);
+}
+
 fn rotate(v: vec2<f32>, a: f32) -> vec2<f32> {
     let c = cos(a);
     let s = sin(a);

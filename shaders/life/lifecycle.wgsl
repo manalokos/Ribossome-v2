@@ -113,6 +113,7 @@ fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, ge
     a.age = 0u;
     a.id = atomicAdd(&life_counters[LC_NEXT_ID], 1u);
     a.body_len = translate_agent(slot, gene_len);
+    a.radius = contact_radius(slot, a.body_len);
     agents[slot] = a;
 }
 

@@ -178,7 +178,8 @@ gpu_struct! {
         pub age: u32,
         /// Identificador único (para o RNG; não muda com o slot).
         pub id: u32,
-        pub _pad0: u32,
+        /// Raio de contacto (unidades do mundo): raio de giração do corpo.
+        pub radius: f32,
         pub _pad1: u32,
         pub _pad2: u32,
     }
