@@ -106,7 +106,9 @@ impl Default for SimParams {
             fluid_enabled: 1,
             fluid_obstacle_strength: 1000.0,
             slope_steer_rate: 210.0,
-            cohesion: 0.6,
+            // 0 (o v3 tinha 0.6): a coesão separava os nucleótidos por tipo em fios
+            // e condensava-os em camadas presas junto ao fundo e às rochas.
+            cohesion: 0.0,
         }
     }
 }

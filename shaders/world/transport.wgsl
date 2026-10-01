@@ -29,13 +29,9 @@ const CHEM_SHIELD: f32 = 0.5;          // ativados juntos decaem menos
 const TEMP_ACT_THRESHOLD: f32 = 2.0;
 const FUMAROLE_ACT_P: f32 = 0.15;
 
-// PARCEL-EXACT: deslocamento esperado = |v|·dt, a mesma distância que uma
-// parcela de água percorre. Norma L1 (|vx|+|vy|): a direção do salto é
-// repartida por |vx|/(|vx|+|vy|), por isso o fluxo por eixo é exatamente
-// k·vx·n / k·vy·n, um esquema upwind conservativo em média que mantém
-// uniforme um campo sem divergência. (Com L2 nasciam bolsas de vácuo nas
-// cabeças das plumas.) UNIDADES: v em células do fluido/s; saltos em
-// células do ambiente.
+// Probabilidade de salto pela corrente num ponto (usada pelo entulho do
+// terreno). Norma L1: o fluxo por eixo é k·vx·n / k·vy·n.
+// UNIDADES: v em células do fluido/s; saltos em células do ambiente.
 fn parcel_hop_p(v: vec2<f32>) -> f32 {
     let env_per_fluid = f32(GRID_SIZE) / f32(FLUID_SIZE);
     let l1 = abs(v.x) + abs(v.y);
@@ -53,11 +49,38 @@ fn transport_quanta(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Célula do ambiente -> posição no MUNDO (não passar coordenadas de
     // célula a funções de mundo: no v3 isso congelou todos os monómeros).
     let cell_w = f32(WORLD_UNITS_PER_CELL);
+    let fluid_on = params.fluid_enabled != 0u;
     var v = vec2<f32>(0.0);
-    if (params.fluid_enabled != 0u) {
+    if (fluid_on) {
         v = fluid_velocity_at_world(vec2<f32>(f32(x) + 0.5, f32(y) + 0.5) * cell_w);
     }
-    let p_adv = parcel_hop_p(v);
+    // ADVECÇÃO POR FACES (volumes finitos upwind). A velocidade de cada face
+    // é a média dos centros das duas células; uma face que dá para rocha ou
+    // para fora do aquário tem velocidade ZERO (impermeável). O salto A->B e
+    // o salto B->A usam o MESMO valor de face, por isso um escoamento sem
+    // divergência mantém a densidade uniforme. (Com a velocidade só no
+    // centro, como no v3, o salto para dentro de uma parede era bloqueado
+    // mas a matéria continuava a chegar: acumulava em camadas nas margens.)
+    // Ordem das faces: 0 = +x, 1 = -x, 2 = +y, 3 = -y.
+    var face_out = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+    if (fluid_on) {
+        let k = f32(GRID_SIZE) / f32(FLUID_SIZE) * max(params.dt, 1e-3);
+        let c = vec2<f32>(f32(x) + 0.5, f32(y) + 0.5) * cell_w;
+        if (x + 1u < GRID_SIZE && gamma_count(idx + 1u) == 0u) {
+            face_out[0] = max(0.5 * (v.x + fluid_velocity_at_world(c + vec2<f32>(cell_w, 0.0)).x), 0.0) * k;
+        }
+        if (x > 0u && gamma_count(idx - 1u) == 0u) {
+            face_out[1] = max(-0.5 * (v.x + fluid_velocity_at_world(c - vec2<f32>(cell_w, 0.0)).x), 0.0) * k;
+        }
+        if (y + 1u < GRID_SIZE && gamma_count(idx + GRID_SIZE) == 0u) {
+            face_out[2] = max(0.5 * (v.y + fluid_velocity_at_world(c + vec2<f32>(0.0, cell_w)).y), 0.0) * k;
+        }
+        if (y > 0u && gamma_count(idx - GRID_SIZE) == 0u) {
+            face_out[3] = max(-0.5 * (v.y + fluid_velocity_at_world(c - vec2<f32>(0.0, cell_w)).y), 0.0) * k;
+        }
+    }
+    let out_sum = face_out[0] + face_out[1] + face_out[2] + face_out[3];
+    let p_adv = min(out_sum, MONOMER_ADV_CAP);
     let agitation = clamp(length(v) / DIFF_AGITATION_SPEED, 0.0, 1.0);
     let p_diff = clamp(DIFF_HOP_P * mix(DIFF_HOP_FLOOR, 1.0, agitation) * max(params.diffusion, 0.0), 0.0, 0.5);
 
@@ -124,15 +147,16 @@ fn transport_quanta(@builtin(global_invocation_id) gid: vec3<u32>) {
             var is_adv = false;
             let pick_spent = hash_f32(h ^ 0x51ED270Bu) < f32(spent_n) / f32(max(act_n + spent_n, 1u));
             if (r < p_adv_eff) {
-                // Salto a jusante: eixo escolhido pelo peso |vx| vs |vy|.
+                // Salto a jusante: face escolhida em proporção do fluxo de saída.
                 is_adv = true;
-                let ax = abs(v.x);
-                let ay = abs(v.y);
-                if (hash_f32(h ^ 0x85EBCA6Bu) < ax / max(ax + ay, 1e-6)) {
-                    dx = select(-1, 1, v.x > 0.0);
-                } else {
-                    dy = select(-1, 1, v.y > 0.0);
+                var u = hash_f32(h ^ 0x85EBCA6Bu) * out_sum;
+                var f = 3u;
+                for (var fi = 0u; fi < 4u; fi++) {
+                    if (u < face_out[fi]) { f = fi; break; }
+                    u -= face_out[fi];
                 }
+                if (f == 0u) { dx = 1; } else if (f == 1u) { dx = -1; }
+                else if (f == 2u) { dy = 1; } else { dy = -1; }
             } else if (r < p_adv_eff + p_diff_eff) {
                 var d = hash(h ^ 0xC2B2AE35u) & 3u;
                 if (!pick_spent && coh_sum > 4.0001) {
