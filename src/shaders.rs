@@ -5,7 +5,7 @@
 //! também os entry points que o Rust usa: o teste `tests/shaders.rs` valida
 //! cada módulo com o naga do próprio wgpu e confirma que todos existem.
 
-use crate::params::{Agent, Fumarole, SimParams, SpawnRequest, ViewParams, WorldConfig};
+use crate::params::{Agent, Fumarole, MgLevel, SimParams, SpawnRequest, ViewParams, WorldConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -35,6 +35,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         "common/terrain.wgsl",
         "common/chem.wgsl",
         "world/fluid.wgsl",
+        "world/multigrid.wgsl",
         "world/light.wgsl",
         "world/transport.wgsl",
         "world/terrain.wgsl",
@@ -64,6 +65,12 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("jacobi_pressure", Stage::Compute),
         ("subtract_gradient", Stage::Compute),
         ("enforce_boundaries", Stage::Compute),
+        ("mg_init", Stage::Compute),
+        ("mg_smooth_red", Stage::Compute),
+        ("mg_smooth_black", Stage::Compute),
+        ("mg_restrict", Stage::Compute),
+        ("mg_prolong", Stage::Compute),
+        ("mg_finish", Stage::Compute),
         ("compute_gamma_slope", Stage::Compute),
         ("relax_gamma_a", Stage::Compute),
         ("relax_gamma_b", Stage::Compute),
@@ -105,6 +112,7 @@ pub fn preamble(cfg: &WorldConfig) -> String {
     s += &Fumarole::wgsl();
     s += &Agent::wgsl();
     s += &SpawnRequest::wgsl();
+    s += &MgLevel::wgsl();
     s += &crate::life::amino::wgsl();
     s
 }

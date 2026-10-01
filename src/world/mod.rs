@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gpu::{Gpu, groups};
-use crate::params::{Agent, Fumarole, SimParams, SpawnRequest, WorldConfig};
+use crate::params::{Agent, Fumarole, MgLevel, SimParams, SpawnRequest, WorldConfig};
 use crate::shaders::{self, CHEM_CELL_CAP};
 
 /// Máximo de passos de simulação por frame (cada um tem a sua cópia dos params).
@@ -78,6 +78,10 @@ pub struct WorldSettings {
     pub fluid_enabled: bool,
     /// Resolve o fluido de N em N passos, com dt×N (2 no v3).
     pub fluid_substep: u32,
+    /// Pressão: multigrid (por omissão) ou Jacobi (o do v3, para comparar).
+    pub multigrid: bool,
+    /// Ciclos V do multigrid por resolução.
+    pub mg_cycles: u32,
     /// Iterações de Jacobi (arredondado para par: o resultado tem de cair em pressure_a).
     pub jacobi_iters: u32,
     /// Recalcula a luz UV de N em N passos.
@@ -90,7 +94,15 @@ impl Default for WorldSettings {
     fn default() -> Self {
         // Jacobi 128 (o v3 usava 10): com 10 a pressão não convergia e o fluido
         // criava e destruía água (~50% de fluxo líquido através de uma linha).
-        Self { fluid_enabled: true, fluid_substep: 2, jacobi_iters: 128, light_interval: 100, terrain_enabled: true }
+        Self {
+            fluid_enabled: true,
+            fluid_substep: 2,
+            multigrid: true,
+            mg_cycles: 1,
+            jacobi_iters: 128,
+            light_interval: 100,
+            terrain_enabled: true,
+        }
     }
 }
 
@@ -122,7 +134,22 @@ struct Pipelines {
     agents_ledger: wgpu::ComputePipeline,
     agents_birth: wgpu::ComputePipeline,
     draw_list: wgpu::ComputePipeline,
+    mg_init: wgpu::ComputePipeline,
+    mg_red: wgpu::ComputePipeline,
+    mg_black: wgpu::ComputePipeline,
+    mg_restrict: wgpu::ComputePipeline,
+    mg_prolong: wgpu::ComputePipeline,
+    mg_finish: wgpu::ComputePipeline,
 }
+
+/// Suavizações por nível do multigrid (antes, depois) e no nível mais grosso.
+const MG_PRE: u32 = 2;
+const MG_POST: u32 = 2;
+const MG_COARSE: u32 = 30;
+/// Nível mais grosso do multigrid.
+const MG_MIN_SIZE: u32 = 8;
+/// Ancoragem do multigrid no nível fino.
+const MG_EPS: f32 = 1e-4;
 
 pub struct World {
     pub cfg: WorldConfig,
@@ -148,6 +175,9 @@ pub struct World {
     fluid_ab: wgpu::BindGroup,
     fluid_ba: wgpu::BindGroup,
     life_bg: wgpu::BindGroup,
+    mg_bg: wgpu::BindGroup,
+    /// Tamanho de cada nível do multigrid (o offset dinâmico do nível l é l·256).
+    mg_sizes: Vec<u32>,
     pub agents_buf: wgpu::Buffer,
     pub genomes_buf: wgpu::Buffer,
     pub bodies_buf: wgpu::Buffer,
@@ -320,6 +350,82 @@ impl World {
             &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &fumarole_buf],
         );
 
+        // Grupo 4 — multigrid da pressão: um uniforme por nível (offset
+        // dinâmico) e os buffers de todos os níveis seguidos.
+        let mut mg_sizes = vec![cfg.fluid_size];
+        while *mg_sizes.last().unwrap() > MG_MIN_SIZE && mg_sizes.last().unwrap() % 2 == 0 {
+            let n = mg_sizes.last().unwrap() / 2;
+            mg_sizes.push(n);
+        }
+        let mut mg_offsets = vec![0u32];
+        for n in &mg_sizes {
+            let last = *mg_offsets.last().unwrap();
+            mg_offsets.push(last + n * n);
+        }
+        let mg_total = *mg_offsets.last().unwrap() as u64;
+        let mut level_bytes = vec![0u8; PARAMS_STRIDE as usize * mg_sizes.len()];
+        for (l, &n) in mg_sizes.iter().enumerate() {
+            let lv = MgLevel {
+                n,
+                off: mg_offsets[l],
+                n_c: mg_sizes.get(l + 1).copied().unwrap_or(0),
+                off_c: mg_offsets[l + 1],
+                // Mata o modo constante (Neumann puro é singular) sem mexer no
+                // gradiente; o operador de Galerkin escala ×2 por nível.
+                eps: MG_EPS * 2f32.powi(l as i32),
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
+            };
+            let at = l * PARAMS_STRIDE as usize;
+            level_bytes[at..at + size_of::<MgLevel>()].copy_from_slice(bytemuck::bytes_of(&lv));
+        }
+        let mg_level_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mg levels"),
+            size: level_bytes.len() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue.write_buffer(&mg_level_buf, 0, &level_bytes);
+        let mg_p = storage_buffer(device, "mg p", mg_total * 4);
+        let mg_rhs = storage_buffer(device, "mg rhs", mg_total * 4);
+        let mg_fluid = storage_buffer(device, "mg fluid", mg_total * 4);
+        let mg_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mg layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(size_of::<MgLevel>() as u64),
+                    },
+                    count: None,
+                },
+                storage_entry(1, false),
+                storage_entry(2, false),
+                storage_entry(3, false),
+            ],
+        });
+        let mg_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mg bg"),
+            layout: &mg_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &mg_level_buf,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(size_of::<MgLevel>() as u64),
+                    }),
+                },
+                wgpu::BindGroupEntry { binding: 1, resource: mg_p.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: mg_rhs.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: mg_fluid.as_entire_binding() },
+            ],
+        });
+
         let life_bg = bind_all(
             "life bg",
             &life_layout,
@@ -341,7 +447,28 @@ impl World {
             bind_group_layouts: &[Some(&frame_layout), Some(&world_layout), Some(&fluid_layout), Some(&life_layout)],
             immediate_size: 0,
         });
+        let mg_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mg pipeline layout"),
+            bind_group_layouts: &[
+                Some(&frame_layout),
+                Some(&world_layout),
+                Some(&fluid_layout),
+                Some(&life_layout),
+                Some(&mg_layout),
+            ],
+            immediate_size: 0,
+        });
         let module = shaders::create(device, &shaders::WORLD, &cfg);
+        let mg_compute = |entry: &'static str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&mg_pl_layout),
+                module: &module,
+                entry_point: Some(shaders::entry(&shaders::WORLD, entry)),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
         let compute = |entry: &'static str| {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(entry),
@@ -380,6 +507,12 @@ impl World {
             agents_ledger: compute("agents_ledger"),
             agents_birth: compute("agents_birth"),
             draw_list: compute("build_draw_list"),
+            mg_init: mg_compute("mg_init"),
+            mg_red: mg_compute("mg_smooth_red"),
+            mg_black: mg_compute("mg_smooth_black"),
+            mg_restrict: mg_compute("mg_restrict"),
+            mg_prolong: mg_compute("mg_prolong"),
+            mg_finish: mg_compute("mg_finish"),
         };
 
         Self {
@@ -404,6 +537,8 @@ impl World {
             fluid_ab,
             fluid_ba,
             life_bg,
+            mg_bg,
+            mg_sizes,
             agents_buf,
             genomes_buf,
             bodies_buf,
@@ -554,10 +689,43 @@ impl World {
                 run(&mut pass, &pl.advect_velocity, ab, f); // a -> b
                 run(&mut pass, &pl.vorticity, ba, f); // b -> a
                 run(&mut pass, &pl.divergence, ab, f); // lê a
-                // Pressão em ARRANQUE QUENTE (nunca é limpa): converge ao longo
-                // dos frames. Número par de iterações: termina em pressure_a.
-                for k in 0..jacobi_iters {
-                    run(&mut pass, &pl.jacobi, if k % 2 == 0 { ab } else { ba }, f);
+                // Pressão em ARRANQUE QUENTE (nunca é limpa); o resultado fica
+                // sempre em pressure_a.
+                if st.multigrid {
+                    let mg = |pass: &mut wgpu::ComputePass, p: &wgpu::ComputePipeline, bg, l: usize, n: u32| {
+                        pass.set_bind_group(2, bg, &[]);
+                        pass.set_bind_group(4, &self.mg_bg, &[(l as u64 * PARAMS_STRIDE) as u32]);
+                        pass.set_pipeline(p);
+                        let w = groups(n, 16);
+                        pass.dispatch_workgroups(w, w, 1);
+                    };
+                    let levels = self.mg_sizes.len();
+                    mg(&mut pass, &pl.mg_init, ab, 0, self.mg_sizes[0]);
+                    for _ in 0..st.mg_cycles.max(1) {
+                        for l in 0..levels - 1 {
+                            for _ in 0..MG_PRE {
+                                mg(&mut pass, &pl.mg_red, ab, l, self.mg_sizes[l]);
+                                mg(&mut pass, &pl.mg_black, ab, l, self.mg_sizes[l]);
+                            }
+                            mg(&mut pass, &pl.mg_restrict, ab, l, self.mg_sizes[l + 1]);
+                        }
+                        for _ in 0..MG_COARSE {
+                            mg(&mut pass, &pl.mg_red, ab, levels - 1, self.mg_sizes[levels - 1]);
+                            mg(&mut pass, &pl.mg_black, ab, levels - 1, self.mg_sizes[levels - 1]);
+                        }
+                        for l in (0..levels - 1).rev() {
+                            mg(&mut pass, &pl.mg_prolong, ab, l, self.mg_sizes[l]);
+                            for _ in 0..MG_POST {
+                                mg(&mut pass, &pl.mg_red, ab, l, self.mg_sizes[l]);
+                                mg(&mut pass, &pl.mg_black, ab, l, self.mg_sizes[l]);
+                            }
+                        }
+                    }
+                    mg(&mut pass, &pl.mg_finish, ba, 0, self.mg_sizes[0]);
+                } else {
+                    for k in 0..jacobi_iters {
+                        run(&mut pass, &pl.jacobi, if k % 2 == 0 { ab } else { ba }, f);
+                    }
                 }
                 run(&mut pass, &pl.subtract_gradient, ab, f); // a -> b
                 run(&mut pass, &pl.boundaries, ba, f); // b -> a (final em a)

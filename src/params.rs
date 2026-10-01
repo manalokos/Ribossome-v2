@@ -185,6 +185,21 @@ gpu_struct! {
 }
 
 gpu_struct! {
+    /// Um nível do multigrid da pressão: tamanho e offset do nível e do de baixo.
+    pub struct MgLevel {
+        pub n: u32,
+        pub off: u32,
+        pub n_c: u32,
+        pub off_c: u32,
+        /// Termo de ancoragem na diagonal (escala com o espaçamento²).
+        pub eps: f32,
+        pub _pad0: u32,
+        pub _pad1: u32,
+        pub _pad2: u32,
+    }
+}
+
+gpu_struct! {
     /// Pedido de semente (geração 0), escrito pelo CPU.
     pub struct SpawnRequest {
         /// Posição em unidades do mundo.

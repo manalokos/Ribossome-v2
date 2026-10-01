@@ -113,7 +113,12 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
     egui::CollapsingHeader::new("Fluido").default_open(true).show(ui, |ui| {
         ui.checkbox(&mut st.fluid_enabled, "fluido ligado");
         ui.checkbox(&mut st.terrain_enabled, "física do terreno ligada");
-        ui.add(egui::Slider::new(&mut st.jacobi_iters, 2..=256).text("iterações Jacobi"));
+        ui.checkbox(&mut st.multigrid, "pressão por multigrid (senão Jacobi)");
+        if st.multigrid {
+            ui.add(egui::Slider::new(&mut st.mg_cycles, 1..=4).text("ciclos V"));
+        } else {
+            ui.add(egui::Slider::new(&mut st.jacobi_iters, 2..=256).text("iterações Jacobi"));
+        }
         ui.add(egui::Slider::new(&mut st.fluid_substep, 1..=4).text("resolve de N em N passos"));
         ui.add(egui::Slider::new(&mut p.fluid_vorticity, 0.0..=10.0).text("vorticidade"));
         ui.add(egui::Slider::new(&mut p.fluid_viscosity, 0.0..=5.0).text("viscosidade"));
