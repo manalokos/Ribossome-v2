@@ -68,32 +68,30 @@ fn rebuild_body(slot: u32, n: u32) {
 const RFT_PERP_RATIO: f32 = 2.0;
 
 // Tangente da cadeia no resíduo k, a MEIO do passo (média das posições
-// antigas e novas).
-fn rft_tangent(slot: u32, n: u32, k: u32, old: ptr<function, array<vec2<f32>, 64>>) -> vec2<f32> {
-    let base = slot * MAX_BODY;
+// antigas e novas alinhadas).
+fn rft_tangent(n: u32, k: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: ptr<function, array<vec2<f32>, 64>>) -> vec2<f32> {
     let ka = select(k - 1u, k, k == 0u);
     let kb = select(k + 1u, k, k + 1u >= n);
-    let a = 0.5 * (body_pos[base + ka] + (*old)[ka]);
-    let b = 0.5 * (body_pos[base + kb] + (*old)[kb]);
+    let a = 0.5 * ((*cur)[ka] + (*old)[ka]);
+    let b = 0.5 * ((*cur)[kb] + (*old)[kb]);
     let t = b - a;
     let l = length(t);
     return select(vec2<f32>(1.0, 0.0), t / l, l > 1e-5);
 }
 
 // Devolve (Vx, Vy, Ω) no referencial do corpo, por passo.
-fn rft_solve(slot: u32, n: u32, old: ptr<function, array<vec2<f32>, 64>>) -> vec3<f32> {
+fn rft_solve(n: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: ptr<function, array<vec2<f32>, 64>>) -> vec3<f32> {
     // M·[Vx,Vy,Ω] = −c, com M = Σ Dᵀ·R·D e c = Σ Dᵀ·R·u, onde R é o tensor de
     // arrasto do resíduo e D mapeia (Vx,Vy,Ω) para a velocidade do resíduo.
     var m = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
     var c = vec3<f32>(0.0);
-    let base = slot * MAX_BODY;
     for (var k = 0u; k < n; k++) {
         // Regra do PONTO MÉDIO: geometria avaliada a meio do passo. Com a
         // geometria do fim do passo, o ruído das juntas era retificado numa
         // deriva espúria (∝ ruído²) que fazia "nadar" sem motor nenhum.
-        let r = 0.5 * (body_pos[base + k] + (*old)[k]);
-        let u = body_pos[base + k] - (*old)[k];
-        let t = rft_tangent(slot, n, k, old);
+        let r = 0.5 * ((*cur)[k] + (*old)[k]);
+        let u = (*cur)[k] - (*old)[k];
+        let t = rft_tangent(n, k, old, cur);
         // R = ξ∥·t·tᵀ + ξ⊥·(I − t·tᵀ), com ξ∥ = 1.
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
         let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
@@ -122,10 +120,12 @@ fn rft_solve(slot: u32, n: u32, old: ptr<function, array<vec2<f32>, 64>>) -> vec
 }
 
 // Um passo da dinâmica das juntas do agente `slot`. kT = agitação térmica local.
-// Devolve o movimento rígido de natação (Vx, Vy, Ω) no referencial do corpo.
-fn joints_step(slot: u32, a: Agent, kt: f32) -> vec3<f32> {
+// Devolve (Vx, Vy, Ω, φ): o movimento rígido de natação no referencial do
+// corpo e φ, a rotação do referencial guardado (preso ao 1.º segmento) face
+// ao referencial alinhado em que o RFT resolve. a.rot avança Ω + φ.
+fn joints_step(slot: u32, a: Agent, kt: f32) -> vec4<f32> {
     let n = a.body_len;
-    if (n < 2u) { return vec3<f32>(0.0); }
+    if (n < 2u) { return vec4<f32>(0.0); }
     let base = slot * MAX_BODY;
     let folding = a.age < FOLD_STEPS;
     var old: array<vec2<f32>, 64>;
@@ -206,6 +206,31 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> vec3<f32> {
     }
     rebuild_body(slot, n);
     // Durante a dobragem não se nada (a cadeia está a assentar).
-    if (folding || params.rft_enabled == 0u) { return vec3<f32>(0.0); }
-    return rft_solve(slot, n, &old);
+    if (folding || params.rft_enabled == 0u) { return vec4<f32>(0.0); }
+    // As posições guardadas estão num referencial preso ao 1.º segmento: cada
+    // batida aparece lá como uma rotação RÍGIDA grande do resto do corpo, que
+    // o RFT linearizado (Ω×r) só cancela até 1.ª ordem; o resto (∝ Ω²) dava
+    // uma rotação espúria sempre no mesmo sentido. Por isso alinha-se primeiro
+    // a forma nova à antiga (Procrustes 2D, à volta do centro de massa): o
+    // RFT vê só a deformação verdadeira e a rotação do referencial (φ) é
+    // contabilizada de forma exata.
+    var cur: array<vec2<f32>, 64>;
+    var sc = 0.0;
+    var sd = 0.0;
+    for (var k = 0u; k < n; k++) {
+        let q = body_pos[base + k];
+        let o = old[k];
+        sd += dot(q, o);
+        sc += q.x * o.y - q.y * o.x;
+    }
+    let phi = atan2(sc, sd); // roda a forma nova para a antiga
+    let cp = cos(phi);
+    let sp = sin(phi);
+    for (var k = 0u; k < n; k++) {
+        let q = body_pos[base + k];
+        cur[k] = vec2<f32>(cp * q.x - sp * q.y, sp * q.x + cp * q.y);
+    }
+    let s = rft_solve(n, &old, &cur);
+    // Mundo = R(rot)·R(Ω)·R(φ)·forma guardada nova  =>  rot avança Ω + φ.
+    return vec4<f32>(s, phi);
 }

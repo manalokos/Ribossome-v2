@@ -242,7 +242,7 @@ pub const REST_ANGLE: [f32; 20] = [
     0.10112,   // T
     0.09,      // V
     0.349066,  // W
-    -0.523599, // Y
+    -std::f32::consts::FRAC_PI_6, // Y (−0,523599 no v3)
 ];
 
 /// Sensibilidade de cada junta ao sinal α e ao sinal β (valores do v3, ordem de `AMINO`).

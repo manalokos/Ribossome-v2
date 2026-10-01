@@ -254,9 +254,15 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // ---- JUNTAS: dobragem ao nascer, depois agitação térmica e músculos ----
     let kt_here = params.thermal_kt * (1.0 + temp_in[fluid_index_at_world(vec2<f32>(a.pos_x, a.pos_y))] / 12.0);
-    let swim = joints_step(slot, a, kt_here) * max(params.swim_gain, 0.0);
-    // Natação: o movimento rígido vem no referencial do corpo; roda-o para o mundo.
-    if (any(swim != vec3<f32>(0.0))) {
+    // O ganho de natação escala SÓ a translação. A rotação fica a física:
+    // escalá-la exagerava o balanço de cada abrir-e-fechar (o corpo rodava
+    // muito para um lado e para o outro) e a orientação errada estragava a
+    // natação; com a rotação física, um movimento recíproco não desloca nada.
+    let swim_raw = joints_step(slot, a, kt_here);
+    let swim = vec3<f32>(swim_raw.xy * max(params.swim_gain, 0.0), swim_raw.z);
+    // Natação: o movimento rígido vem no referencial (alinhado) do corpo;
+    // roda-o para o mundo.
+    if (any(swim_raw != vec4<f32>(0.0))) {
         // Orientação a meio do passo (o corpo roda Ω durante o passo).
         let sv = rotate(swim.xy, a.rot + 0.5 * swim.z);
         let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
@@ -264,7 +270,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             a.pos_x = np0.x;
             a.pos_y = np0.y;
         }
-        a.rot += swim.z;
+        a.rot += swim.z + swim_raw.w;
     }
     if (a.age + 1u == FOLD_STEPS) {
         a.radius = contact_radius(slot, a.body_len);
