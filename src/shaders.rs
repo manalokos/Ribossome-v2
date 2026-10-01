@@ -1,0 +1,93 @@
+//! Montagem dos módulos WGSL.
+//!
+//! Cada módulo = preâmbulo gerado (constantes do mundo + structs de
+//! `params.rs`) + uma lista fixa de ficheiros. O registo `MODULES` declara
+//! também os entry points que o Rust usa: o teste `tests/shaders.rs` valida
+//! cada módulo com o naga do próprio wgpu e confirma que todos existem.
+
+use crate::params::{SimParams, ViewParams, WorldConfig};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage {
+    Compute,
+    Vertex,
+    Fragment,
+}
+
+pub struct ModuleDef {
+    pub name: &'static str,
+    /// (caminho relativo a `shaders/`, conteúdo)
+    pub files: &'static [(&'static str, &'static str)],
+    pub entries: &'static [(&'static str, Stage)],
+}
+
+macro_rules! wgsl_files {
+    ($($path:literal),* $(,)?) => {
+        &[$(($path, include_str!(concat!("../shaders/", $path)))),*]
+    };
+}
+
+pub const WORLD: ModuleDef = ModuleDef {
+    name: "world",
+    files: wgsl_files![
+        "world/bindings.wgsl",
+        "common/rng.wgsl",
+        "common/chem.wgsl",
+        "world/transport.wgsl",
+        "world/ledger.wgsl",
+    ],
+    entries: &[("transport_quanta", Stage::Compute), ("ledger_reduce", Stage::Compute)],
+};
+
+pub const WORLD_VIEW: ModuleDef = ModuleDef {
+    name: "world_view",
+    files: wgsl_files!["render/world_view.wgsl"],
+    entries: &[("vs_fullscreen", Stage::Vertex), ("fs_world", Stage::Fragment)],
+};
+
+pub const MODULES: &[&ModuleDef] = &[&WORLD, &WORLD_VIEW];
+
+/// Constantes do mundo e da química partilhadas por todos os módulos.
+pub const CHEM_CELL_CAP: u32 = 48;
+
+pub fn preamble(cfg: &WorldConfig) -> String {
+    let mut s = String::new();
+    s += "// ---- preâmbulo gerado (src/shaders.rs) ----\n";
+    s += &format!("const GRID_SIZE: u32 = {}u;\n", cfg.grid_size);
+    s += &format!("const FLUID_SIZE: u32 = {}u;\n", cfg.fluid_size);
+    s += &format!("const WORLD_UNITS_PER_CELL: u32 = {}u;\n", cfg.world_units_per_cell);
+    s += &format!("const SIM_SIZE: f32 = {:.1};\n", cfg.sim_size());
+    s += &format!("const CHEM_CELL_CAP: u32 = {}u;\n", CHEM_CELL_CAP);
+    s += &SimParams::wgsl();
+    s += &ViewParams::wgsl();
+    s
+}
+
+/// Fonte completa de um módulo, tal como é entregue ao wgpu.
+pub fn source(def: &ModuleDef, cfg: &WorldConfig) -> String {
+    let mut s = preamble(cfg);
+    for (path, text) in def.files {
+        s += &format!("\n// ---- {path} ----\n");
+        s += text;
+    }
+    s
+}
+
+pub fn create(device: &wgpu::Device, def: &ModuleDef, cfg: &WorldConfig) -> wgpu::ShaderModule {
+    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(def.name),
+        source: wgpu::ShaderSource::Wgsl(source(def, cfg).into()),
+    })
+}
+
+/// Devolve o nome do entry point depois de confirmar que está registado.
+/// Um entry point usado no Rust e ausente do registo falha aqui (e no teste),
+/// e não como um pipeline órfão a crashar no arranque.
+pub fn entry(def: &ModuleDef, name: &'static str) -> &'static str {
+    assert!(
+        def.entries.iter().any(|(e, _)| *e == name),
+        "entry point '{name}' não está registado no módulo '{}'",
+        def.name
+    );
+    name
+}
