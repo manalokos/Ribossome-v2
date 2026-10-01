@@ -1,24 +1,40 @@
-// TRANSPORTE E REAÇÕES DOS MONÓMEROS (v3 simulation.wgsl `transport_quanta`).
-// Tudo são trocas inteiras e atómicas: saltos de um quantum entre células
-// vizinhas, ou mudanças de estado no lugar. Nada cria nem destrói matéria.
+// TRANSPORTE E REAÇÕES DOS MONÓMEROS — reescrito na fase 2.
+//
+// Cada passo tem duas fases:
+//   1. `transport_scatter`: cada célula lê o estado ANTES do passo
+//      (chem_grid), aplica as reações locais e envia cada um dos seus
+//      monómeros para uma célula de destino, somando em chem_next.
+//   2. `transport_commit`: chem_grid <- chem_next; chem_next <- 0.
+// As somas inteiras não dependem da ordem das threads, por isso o passo é
+// REPRODUTÍVEL bit a bit e não há interferência entre blocos da GPU (no v3
+// a grelha era alterada no lugar e um monómero podia saltar duas vezes).
+//
+// Movimento de um monómero: parte de um ponto uniforme dentro da sua
+// célula e desloca-se v·dt (sem limite de células por passo: os monómeros
+// andam exatamente com a água, também na pluma rápida), mais um salto de
+// difusão ou de assentamento. Cair num ponto aleatório da célula equivale a
+// repartir a célula pelas células que o quadrado deslocado cobre: um campo
+// uniforme num escoamento sem divergência fica uniforme. Nada cria nem
+// destrói matéria: cada monómero acaba exatamente numa célula.
 
 // ---- Transporte ----
 // Difusão que depende da agitação: água calma só deixa um resíduo
-// browniano (DIFF_HOP_FLOOR); água em movimento mistura à taxa toda. É o
-// mecanismo anti-entropia: zonas calmas ficam reservatórios concentrados.
+// browniano (DIFF_HOP_FLOOR); água em movimento mistura à taxa toda.
 const DIFF_HOP_P: f32 = 0.01;
 const DIFF_HOP_FLOOR: f32 = 0.15;
 const DIFF_AGITATION_SPEED: f32 = 0.5;   // células do fluido / s
-const MONOMER_ADV_CAP: f32 = 0.9;
-const MAX_HOPS_PER_CELL_CH: u32 = 8u;
 // Monómeros dentro de gamma rastejam à taxa base, atenuada pela ocupação.
 const BURIED_DIFF_FACTOR: f32 = 1.0;
 const GAMMA_POROSITY_K: f32 = 0.3;
-// Célula acima da capacidade expulsa o excesso depressa (em todo o lado:
-// no v3 só dentro do terreno; decidido com o Filipe na fase 2).
+// Célula acima da capacidade expulsa o excesso depressa (em todo o lado).
 const CHEM_SQUEEZE_P: f32 = 0.25;
 // Assentamento por passo (× slider "settle").
 const MONOMER_SETTLE_P: f32 = 0.002;
+// Limite de monómeros sorteados por canal e célula (segurança; os
+// restantes ficam no lugar). A capacidade normal é 48 no total.
+const MAX_MOVERS_PER_CH: u32 = 256u;
+// Entulho do terreno levado pela corrente: limite de probabilidade por passo.
+const GRAIN_ADV_CAP: f32 = 0.9;
 
 // ---- Reações ----
 const LIGHT_ACT_P: f32 = 0.006;        // fotoativação por monómero gasto, luz plena
@@ -29,106 +45,95 @@ const CHEM_SHIELD: f32 = 0.5;          // ativados juntos decaem menos
 const TEMP_ACT_THRESHOLD: f32 = 2.0;
 const FUMAROLE_ACT_P: f32 = 0.15;
 
-// Probabilidade de salto pela corrente num ponto (usada pelo entulho do
-// terreno). Norma L1: o fluxo por eixo é k·vx·n / k·vy·n.
+// Probabilidade de um grão de entulho saltar com a corrente (terreno).
 // UNIDADES: v em células do fluido/s; saltos em células do ambiente.
 fn parcel_hop_p(v: vec2<f32>) -> f32 {
     let env_per_fluid = f32(GRID_SIZE) / f32(FLUID_SIZE);
     let l1 = abs(v.x) + abs(v.y);
-    return clamp(l1 * env_per_fluid * max(params.dt, 1e-3), 0.0, MONOMER_ADV_CAP);
+    return clamp(l1 * env_per_fluid * max(params.dt, 1e-3), 0.0, GRAIN_ADV_CAP);
+}
+
+fn rand01(h: u32) -> f32 {
+    return f32(h >> 8u) * (1.0 / 16777216.0);
 }
 
 @compute @workgroup_size(16, 16)
-fn transport_quanta(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = gid.x;
     let y = gid.y;
     if (x >= GRID_SIZE || y >= GRID_SIZE) { return; }
     let idx = y * GRID_SIZE + x;
-    let rseed = params.seed * 1597334677u ^ params.epoch * 3812015801u;
+    let src_total = chem_cell_total(idx);
+    if (src_total == 0u) { return; }
 
     // Célula do ambiente -> posição no MUNDO (não passar coordenadas de
     // célula a funções de mundo: no v3 isso congelou todos os monómeros).
     let cell_w = f32(WORLD_UNITS_PER_CELL);
-    let fluid_on = params.fluid_enabled != 0u;
-    var v = vec2<f32>(0.0);
-    if (fluid_on) {
-        v = fluid_velocity_at_world(vec2<f32>(f32(x) + 0.5, f32(y) + 0.5) * cell_w);
-    }
-    // ADVECÇÃO POR FACES (volumes finitos upwind). A velocidade de cada face
-    // é a média dos centros das duas células; uma face que dá para rocha ou
-    // para fora do aquário tem velocidade ZERO (impermeável). O salto A->B e
-    // o salto B->A usam o MESMO valor de face, por isso um escoamento sem
-    // divergência mantém a densidade uniforme. (Com a velocidade só no
-    // centro, como no v3, o salto para dentro de uma parede era bloqueado
-    // mas a matéria continuava a chegar: acumulava em camadas nas margens.)
-    // Ordem das faces: 0 = +x, 1 = -x, 2 = +y, 3 = -y.
-    var face_out = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
-    if (fluid_on) {
-        let k = f32(GRID_SIZE) / f32(FLUID_SIZE) * max(params.dt, 1e-3);
-        let c = vec2<f32>(f32(x) + 0.5, f32(y) + 0.5) * cell_w;
-        if (x + 1u < GRID_SIZE && gamma_count(idx + 1u) == 0u) {
-            face_out[0] = max(0.5 * (v.x + fluid_velocity_at_world(c + vec2<f32>(cell_w, 0.0)).x), 0.0) * k;
-        }
-        if (x > 0u && gamma_count(idx - 1u) == 0u) {
-            face_out[1] = max(-0.5 * (v.x + fluid_velocity_at_world(c - vec2<f32>(cell_w, 0.0)).x), 0.0) * k;
-        }
-        if (y + 1u < GRID_SIZE && gamma_count(idx + GRID_SIZE) == 0u) {
-            face_out[2] = max(0.5 * (v.y + fluid_velocity_at_world(c + vec2<f32>(0.0, cell_w)).y), 0.0) * k;
-        }
-        if (y > 0u && gamma_count(idx - GRID_SIZE) == 0u) {
-            face_out[3] = max(-0.5 * (v.y + fluid_velocity_at_world(c - vec2<f32>(0.0, cell_w)).y), 0.0) * k;
-        }
-    }
-    let out_sum = face_out[0] + face_out[1] + face_out[2] + face_out[3];
-    let p_adv = min(out_sum, MONOMER_ADV_CAP);
-    let agitation = clamp(length(v) / DIFF_AGITATION_SPEED, 0.0, 1.0);
-    let p_diff = clamp(DIFF_HOP_P * mix(DIFF_HOP_FLOOR, 1.0, agitation) * max(params.diffusion, 0.0), 0.0, 0.5);
-
     let g_src = gamma_count(idx);
-    let src_total = chem_cell_total(idx);
-    let src_over = src_total > chem_capacity(idx);
-    var p_adv_eff = p_adv;
-    var p_diff_eff = p_diff;
+    var v = vec2<f32>(0.0);
+    if (params.fluid_enabled != 0u && g_src == 0u) {
+        // PONTO MÉDIO (Runge-Kutta 2): usa a velocidade a meio do caminho.
+        // Com a velocidade só no início (Euler), cada passo segue a tangente
+        // e atira os monómeros para fora dos remoinhos: os núcleos esvaziavam
+        // (os pontos escuros na pluma).
+        let c = vec2<f32>(f32(x) + 0.5, f32(y) + 0.5) * cell_w;
+        let v0 = fluid_velocity_at_world(c);
+        let world_per_fluid = SIM_SIZE / f32(FLUID_SIZE);
+        v = fluid_velocity_at_world(c + v0 * world_per_fluid * max(params.dt, 0.0) * 0.5);
+    }
+    // Deslocamento por passo, em células do ambiente.
+    let disp = v * (f32(GRID_SIZE) / f32(FLUID_SIZE)) * max(params.dt, 0.0);
+    let agitation = clamp(length(v) / DIFF_AGITATION_SPEED, 0.0, 1.0);
+    var p_diff = clamp(DIFF_HOP_P * mix(DIFF_HOP_FLOOR, 1.0, agitation) * max(params.diffusion, 0.0), 0.0, 0.5);
     if (g_src > 0u) {
         // Dentro do terreno não há correntes; só difusão lenta.
-        p_adv_eff = 0.0;
-        p_diff_eff = DIFF_HOP_P * BURIED_DIFF_FACTOR / (1.0 + GAMMA_POROSITY_K * f32(g_src));
+        p_diff = DIFF_HOP_P * BURIED_DIFF_FACTOR / (1.0 + GAMMA_POROSITY_K * f32(g_src));
     }
-    if (src_over) {
-        p_diff_eff = CHEM_SQUEEZE_P;
+    if (src_total > chem_capacity(idx)) {
+        p_diff = CHEM_SQUEEZE_P;
+    }
+    var p_settle = 0.0;
+    if (g_src == 0u) {
+        p_settle = MONOMER_SETTLE_P * max(params.settle, 0.0);
     }
 
+    // Janela de destinos 4×4 à volta de floor(disp): o ponto de partida
+    // (0..1) mais disp mais um salto de ±1 cai sempre dentro dela.
+    let base = vec2<i32>(i32(floor(disp.x)) - 1, i32(floor(disp.y)) - 1);
     let light_t = uv_light_at_cell(x, y);
+    let rseed = params.seed * 1597334677u ^ params.epoch * 3812015801u;
 
     for (var ch = 0u; ch < 4u; ch++) {
         let slot = idx * 4u + ch;
         let v_ch = atomicLoad(&chem_grid[slot]);
-        let act_n = v_ch & CHEM_STATE_MASK;
-        let spent_n = v_ch >> 16u;
+        var act_n = v_ch & CHEM_STATE_MASK;
+        var spent_n = v_ch >> 16u;
+        if (act_n + spent_n == 0u) { continue; }
 
-        // FOTOATIVAÇÃO (com sensibilização: os ativados são antenas; a
-        // energia continua a vir só da luz).
+        // ---- Reações locais (determinísticas: só dependem do estado antes) ----
+        // FOTOATIVAÇÃO com sensibilização: os ativados são antenas; a
+        // energia continua a vir só da luz.
         if (spent_n > 0u) {
             let sens = 1.0 + CHEM_SENSITIZE * f32(min(act_n, 8u));
             let exp_act = f32(min(spent_n, 8u)) * LIGHT_ACT_P * max(params.uv_strength, 0.0) * light_t * sens;
-            let wa = u32(floor(exp_act));
-            var na = wa;
-            if (hash_f32(slot ^ rseed) < exp_act - f32(wa)) { na += 1u; }
-            for (var ai = 0u; ai < min(na, 8u); ai++) {
-                if (!chem_activate_one(slot)) { break; }
-            }
+            var na = u32(floor(exp_act));
+            if (rand01(hash(slot ^ rseed)) < exp_act - f32(na)) { na += 1u; }
+            na = min(na, min(spent_n, 8u));
+            act_n += na;
+            spent_n -= na;
         }
-        // DECAIMENTO com BLINDAGEM.
+        // DECAIMENTO com blindagem.
         if (act_n > 0u) {
             let shield = 1.0 / (1.0 + CHEM_SHIELD * f32(min(act_n, 8u) - 1u));
             let exp_dec = f32(min(act_n, 8u)) * CHEM_DECAY_P * shield;
-            if (hash_f32(slot ^ (params.seed * 2654435761u) ^ (params.epoch * 668265263u)) < exp_dec) {
-                chem_spend_one(slot);
+            if (rand01(hash(slot ^ (params.seed * 2654435761u) ^ (params.epoch * 668265263u))) < exp_dec) {
+                act_n -= 1u;
+                spent_n += 1u;
             }
         }
 
-        // COESÃO: os ativados difundem-se de preferência para vizinhos ricos
-        // em ativados do mesmo tipo (gotículas, coacervados).
+        // COESÃO (por omissão desligada): os ativados difundem-se de
+        // preferência para vizinhos ricos em ativados do mesmo tipo.
         var coh = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
         if (act_n > 0u && params.cohesion > 0.0) {
             if (x + 1u < GRID_SIZE) { coh[0] = 1.0 + params.cohesion * f32(min(chem_act_count(idx + 1u, ch), 8u)); }
@@ -138,68 +143,78 @@ fn transport_quanta(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         let coh_sum = coh[0] + coh[1] + coh[2] + coh[3];
 
-        let n = min(act_n + spent_n, MAX_HOPS_PER_CELL_CH);
+        // ---- Movimento: histograma de destinos (ativados nos 16 bits baixos) ----
+        var bins = array<u32, 16>(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
+        var stay = 0u;
+        let n = act_n + spent_n;
         for (var k = 0u; k < n; k++) {
-            let h = hash(slot ^ (k * 668265263u) ^ (params.seed * 2246822519u) ^ (params.epoch * 374761393u));
-            let r = f32(h) / 4294967295.0;
-            var dx = 0;
-            var dy = 0;
-            var is_adv = false;
-            let pick_spent = hash_f32(h ^ 0x51ED270Bu) < f32(spent_n) / f32(max(act_n + spent_n, 1u));
-            if (r < p_adv_eff) {
-                // Salto a jusante: face escolhida em proporção do fluxo de saída.
-                is_adv = true;
-                var u = hash_f32(h ^ 0x85EBCA6Bu) * out_sum;
-                var f = 3u;
-                for (var fi = 0u; fi < 4u; fi++) {
-                    if (u < face_out[fi]) { f = fi; break; }
-                    u -= face_out[fi];
-                }
-                if (f == 0u) { dx = 1; } else if (f == 1u) { dx = -1; }
-                else if (f == 2u) { dy = 1; } else { dy = -1; }
-            } else if (r < p_adv_eff + p_diff_eff) {
-                var d = hash(h ^ 0xC2B2AE35u) & 3u;
-                if (!pick_spent && coh_sum > 4.0001) {
-                    var u = hash_f32(h ^ 0x9E3779B9u) * coh_sum;
+            let unit = select(CHEM_SPENT_ONE, 1u, k < act_n);
+            if (k >= MAX_MOVERS_PER_CH) {
+                stay += unit;
+                continue;
+            }
+            let h0 = hash(slot ^ (k * 668265263u) ^ (params.seed * 2246822519u) ^ (params.epoch * 374761393u));
+            let h1 = hash(h0 ^ 0x85EBCA6Bu);
+            let h2 = hash(h1 ^ 0xC2B2AE35u);
+            var p = vec2<f32>(rand01(h0), rand01(h1)) + disp;
+            let r = rand01(h2);
+            if (r < p_diff) {
+                var d = hash(h2 ^ 0x27D4EB2Fu) & 3u;
+                if (k < act_n && coh_sum > 4.0001) {
+                    var u = rand01(hash(h2 ^ 0x9E3779B9u)) * coh_sum;
                     d = 3u;
                     for (var cd = 0u; cd < 4u; cd++) {
                         if (u < coh[cd]) { d = cd; break; }
                         u -= coh[cd];
                     }
                 }
-                if (d == 0u) { dx = 1; } else if (d == 1u) { dx = -1; }
-                else if (d == 2u) { dy = 1; } else { dy = -1; }
-            } else if (g_src == 0u && r < p_adv_eff + p_diff_eff + MONOMER_SETTLE_P * max(params.settle, 0.0)) {
-                // ASSENTAMENTO para o fundo (-y). Não entra em rocha: o
-                // sedimento pousa EM CIMA das pedras.
-                dy = -1;
-                if (y > 0u && gamma_count(idx - GRID_SIZE) > 0u) { continue; }
+                if (d == 0u) { p.x += 1.0; } else if (d == 1u) { p.x -= 1.0; }
+                else if (d == 2u) { p.y += 1.0; } else { p.y -= 1.0; }
+            } else if (r < p_diff + p_settle) {
+                p.y -= 1.0;
+            }
+            let off = vec2<i32>(floor(p)) - base;
+            let bi = u32(clamp(off.y, 0, 3)) * 4u + u32(clamp(off.x, 0, 3));
+            bins[bi] += unit;
+        }
+
+        // ---- Emitir: uma soma atómica por destino ----
+        for (var b = 0u; b < 16u; b++) {
+            let cnt = bins[b];
+            if (cnt == 0u) { continue; }
+            // Paredes do aquário: o monómero fica na célula da borda.
+            let tx = clamp(i32(x) + base.x + i32(b & 3u), 0, i32(GRID_SIZE) - 1);
+            let ty = clamp(i32(y) + base.y + i32(b >> 2u), 0, i32(GRID_SIZE) - 1);
+            let t_idx = u32(ty) * GRID_SIZE + u32(tx);
+            // Rocha: a água não entra, o monómero também não. Dentro do
+            // terreno só se passa por difusão lenta, com a porosidade.
+            var blocked = false;
+            if (t_idx != idx) {
+                let g_tgt = gamma_count(t_idx);
+                if (g_tgt > 0u) {
+                    let gperm = 1.0 / (1.0 + GAMMA_POROSITY_K * f32(g_tgt));
+                    blocked = g_src == 0u || rand01(hash(slot ^ t_idx ^ rseed)) >= gperm;
+                }
+            }
+            if (blocked) {
+                stay += cnt;
             } else {
-                continue;
-            }
-            let nx = i32(x) + dx;
-            let ny = i32(y) + dy;
-            if (nx < 0 || ny < 0 || nx >= i32(GRID_SIZE) || ny >= i32(GRID_SIZE)) { continue; }
-            let t_idx = u32(ny) * GRID_SIZE + u32(nx);
-            let g_tgt = gamma_count(t_idx);
-            let tgt_total = chem_cell_total(t_idx);
-            if (tgt_total >= chem_capacity(t_idx)) {
-                // Percolação por sobrepressão: uma célula acima da capacidade
-                // pode empurrar para um vizinho não mais carregado (<=, não <:
-                // com < um campo uniforme de entulho congelava).
-                if (!(src_over && tgt_total <= src_total)) { continue; }
-            }
-            if (g_tgt > 0u) {
-                // As correntes nunca empurram monómeros para dentro da rocha.
-                if (is_adv) { continue; }
-                let gperm = 1.0 / (1.0 + GAMMA_POROSITY_K * f32(g_tgt));
-                if (hash_f32(h ^ 0x27D4EB2Fu) >= gperm) { continue; }
-            }
-            if (chem_take_state_one(slot, pick_spent)) {
-                chem_add_state(t_idx, ch, 1u, pick_spent);
+                atomicAdd(&chem_next[t_idx * 4u + ch], cnt);
             }
         }
+        if (stay > 0u) {
+            atomicAdd(&chem_next[slot], stay);
+        }
     }
+}
+
+// chem_grid <- chem_next; chem_next <- 0.
+@compute @workgroup_size(256)
+fn transport_commit(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.y * 65535u * 256u + gid.x;
+    if (i >= GRID_SIZE * GRID_SIZE * 4u) { return; }
+    atomicStore(&chem_grid[i], atomicLoad(&chem_next[i]));
+    atomicStore(&chem_next[i], 0u);
 }
 
 // ATIVAÇÃO TÉRMICA (v3 `inject_fumarole_dye`, o nome era histórico): água

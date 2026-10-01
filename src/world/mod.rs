@@ -80,6 +80,7 @@ impl Default for WorldSettings {
 
 struct Pipelines {
     transport: wgpu::ComputePipeline,
+    commit: wgpu::ComputePipeline,
     thermal_activation: wgpu::ComputePipeline,
     ledger: wgpu::ComputePipeline,
     uv_light: wgpu::ComputePipeline,
@@ -164,6 +165,7 @@ impl World {
             mapped_at_creation: false,
         });
         let chem_buf = storage_buffer(device, "chem grid", cells * 16);
+        let chem_next = storage_buffer(device, "chem next", cells * 16);
         let ledger_buf = storage_buffer(device, "ledger", 8 * 4);
         let gamma_buf = storage_buffer(device, "gamma grid", cells * 4);
         let light_buf = storage_buffer(device, "uv light", cells * 4);
@@ -202,7 +204,7 @@ impl World {
         // Grupo 1 — mundo (resolução do ambiente).
         let world_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("world layout"),
-            entries: &(0..5).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
+            entries: &(0..6).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
         });
         // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
         let fluid_entries: Vec<_> = (0..10).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
@@ -231,8 +233,11 @@ impl World {
                 .collect();
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(label), layout, entries: &entries })
         };
-        let world_bg =
-            bind_all("world bg", &world_layout, &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf]);
+        let world_bg = bind_all(
+            "world bg",
+            &world_layout,
+            &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf, &chem_next],
+        );
         // Ping-pong: "ab" lê a e escreve b (velocidade e pressão em simultâneo).
         let fluid_ab = bind_all(
             "fluid ab",
@@ -262,7 +267,8 @@ impl World {
             })
         };
         let pipelines = Pipelines {
-            transport: compute("transport_quanta"),
+            transport: compute("transport_scatter"),
+            commit: compute("transport_commit"),
             thermal_activation: compute("thermal_activation"),
             ledger: compute("ledger_reduce"),
             uv_light: compute("compute_uv_light"),
@@ -365,6 +371,10 @@ impl World {
         let g = groups(self.cfg.grid_size, 16);
         let fg = groups(self.cfg.fluid_size, 16);
         let jacobi_iters = (st.jacobi_iters.clamp(2, 128) + 1) & !1;
+        // transport_commit: uma thread por u32 da grelha; o shader assume
+        // linhas de 65535 workgroups quando é preciso uma segunda dimensão.
+        let commit_wg = (self.cfg.cells() * 4).div_ceil(256) as u32;
+        let commit_groups = [commit_wg.min(65535), commit_wg.div_ceil(65535)];
         let pl = &self.pipelines;
         let (ab, ba) = (&self.fluid_ab, &self.fluid_ba);
         let mut pass =
@@ -414,7 +424,10 @@ impl World {
                 run(&mut pass, &pl.thermal_activation, ab, [g, g]);
             }
 
+            // TRANSPORTE em duas fases (reprodutível): espalhar para chem_next
+            // a partir do estado antes do passo, depois copiar de volta.
             run(&mut pass, &pl.transport, ab, [g, g]);
+            run(&mut pass, &pl.commit, ab, commit_groups);
         }
         drop(pass);
         self.params.epoch = self.params.epoch.wrapping_add(steps);

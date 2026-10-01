@@ -41,7 +41,8 @@ pub const WORLD: ModuleDef = ModuleDef {
         "world/ledger.wgsl",
     ],
     entries: &[
-        ("transport_quanta", Stage::Compute),
+        ("transport_scatter", Stage::Compute),
+        ("transport_commit", Stage::Compute),
         ("thermal_activation", Stage::Compute),
         ("ledger_reduce", Stage::Compute),
         ("compute_uv_light", Stage::Compute),

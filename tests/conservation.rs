@@ -101,3 +101,29 @@ fn fluid_and_light_are_sane() {
     eprintln!("luz: topo {top:.3}, fundo {bottom:.5}");
     assert!(top > 0.9 && bottom < top * 0.01, "a luz não cai com a profundidade como esperado");
 }
+
+/// O resultado é reprodutível bit a bit e não depende de como os passos são
+/// agrupados por frame (64 por submissão vs um a um). Física do terreno
+/// desligada: o terreno ainda mexe nas células no lugar.
+#[test]
+fn simulation_is_deterministic() {
+    let gpu = Gpu::new_headless().expect("este teste precisa de uma GPU");
+    let go = |batch: u32| {
+        let mut world = World::new(&gpu, WorldConfig::TEST, 9);
+        world.seed_matter(&gpu, 9);
+        world.settings.terrain_enabled = false;
+        let mut done = 0;
+        while done < 256 {
+            let k = batch.min(256 - done);
+            let mut enc = gpu.device.create_command_encoder(&Default::default());
+            world.encode_steps(&gpu.queue, &mut enc, k);
+            gpu.queue.submit([enc.finish()]);
+            done += k;
+        }
+        gpu.wait_idle();
+        world.read_cells_blocking(&gpu)
+    };
+    let a = go(64);
+    assert_eq!(a, go(64), "duas corridas iguais deram resultados diferentes");
+    assert_eq!(a, go(1), "o resultado depende do agrupamento dos passos por frame");
+}

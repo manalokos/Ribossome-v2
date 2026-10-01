@@ -13,6 +13,8 @@
 @group(1) @binding(3) var<storage, read_write> light_grid: array<f32>;
 // Declive do terreno por unidade do mundo (recalculado a cada passo).
 @group(1) @binding(4) var<storage, read_write> slope_grid: array<vec2<f32>>;
+// Grelha de destino do transporte (mesmo formato que chem_grid; zero entre passos).
+@group(1) @binding(5) var<storage, read_write> chem_next: array<atomic<u32>>;
 
 // ---- Grupo 2: fluido (resolução FLUID_SIZE) ----
 // Velocidade em células do fluido por segundo. Pares in/out alternam por bind group.

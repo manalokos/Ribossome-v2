@@ -9,6 +9,7 @@ use ribossome::world::World;
 fn run(gpu: &Gpu, batch: u32, steps: u32) -> Vec<u32> {
     let mut world = World::new(gpu, WorldConfig::TEST, 9);
     world.seed_matter(gpu, 9);
+    world.settings.terrain_enabled = std::env::var("TERRAIN").is_ok();
     let mut done = 0;
     while done < steps {
         let k = batch.min(steps - done);
