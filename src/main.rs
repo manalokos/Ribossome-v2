@@ -157,7 +157,7 @@ impl Running {
         // UI primeiro (pode mudar params e vista neste frame).
         let raw = self.egui_state.take_egui_input(&self.window);
         let ctx = self.egui_state.egui_ctx().clone();
-        let out =
+        let mut out =
             ctx.run_ui(raw, |root| ui::draw(root.ctx(), &mut self.ui, &mut self.world.params, &mut self.profiler));
         self.egui_state.handle_platform_output(&self.window, out.platform_output);
         let jobs = ctx.tessellate(out.shapes, out.pixels_per_point);
@@ -165,9 +165,9 @@ impl Running {
             size_in_pixels: [self.surface_cfg.width, self.surface_cfg.height],
             pixels_per_point: out.pixels_per_point,
         };
-        for (id, deltas) in &out.textures_delta.set {
+        for (id, deltas) in out.textures_delta.set.drain() {
             for delta in deltas {
-                self.egui_renderer.update_texture(&self.gpu.device, &self.gpu.queue, *id, delta);
+                self.egui_renderer.update_texture(&self.gpu.device, &self.gpu.queue, id, &delta);
             }
         }
         self.view.update(&self.gpu.queue, &self.cam, screen, self.ui.view_mode);
@@ -212,8 +212,8 @@ impl Running {
 
         self.window.pre_present_notify();
         self.gpu.queue.present(tex);
-        for id in &out.textures_delta.free {
-            self.egui_renderer.free_texture(id);
+        for id in out.textures_delta.free.drain() {
+            self.egui_renderer.free_texture(&id);
         }
     }
 
