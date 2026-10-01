@@ -37,7 +37,7 @@ fn main() {
             rot0 = a.rot;
         }
         if let Some((x, y)) = last {
-            path += ((a.pos_x - x) as f32).hypot(a.pos_y - y);
+            path += (a.pos_x - x).hypot(a.pos_y - y);
         }
         last = Some((a.pos_x, a.pos_y));
         if t % 6 == 0 {
