@@ -141,8 +141,23 @@ fn spawn_seeds(@builtin(global_invocation_id) gid: vec3<u32>) {
     var n = 0u;
     var ok = true;
 
+    // GENOMA ESCOLHIDO: cada base, por ordem, é tirada da sopa (a mais
+    // próxima do tipo pedido). Matéria exata como nas outras sementes.
+    if ((req.flags & 2u) != 0u) {
+        var words = array<u32, 16>(req.genome0, req.genome1, req.genome2, req.genome3, req.genome4, req.genome5,
+            req.genome6, req.genome7, req.genome8, req.genome9, req.genome10, req.genome11, req.genome12,
+            req.genome13, req.genome14, req.genome15);
+        for (var i = 0u; i < want; i++) {
+            let b = (words[i / 16u] >> ((i % 16u) * 2u)) & 3u;
+            if (!take_nearest(cx, cy, b)) { ok = false; break; }
+            gset(&g, n, b);
+            taken[b] += 1u;
+            n += 1u;
+        }
+    }
+
     // Opção: começar por AUG, com A, U e G também tirados da vizinhança.
-    if ((req.flags & 1u) != 0u) {
+    if ((req.flags & 3u) == 1u) {
         for (var b = 0u; b < 3u; b++) {
             if (!take_nearest(cx, cy, b)) { ok = false; break; }
             gset(&g, n, b);
@@ -221,9 +236,9 @@ fn die(slot: u32, a_in: Agent) {
     atomicAdd(&life_counters[LC_DEATHS], 1u);
 }
 
-fn energy_capacity(a: Agent) -> f32 {
-    // v3: cada aminoácido guarda 1. O RNA nu (sem corpo) guarda 1.
-    return max(f32(a.body_len), 1.0);
+fn energy_capacity(slot: u32, a: Agent) -> f32 {
+    // v3: cada aminoácido guarda 1 (o RNA nu guarda 1); o armazenamento soma.
+    return max(f32(a.body_len), 1.0) + organ_capacity(slot, a.body_len);
 }
 
 @compute @workgroup_size(64)
@@ -233,7 +248,10 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     var a = agents[slot];
     if (a.alive == 0u) { return; }
 
-    // ---- JUNTAS: dobragem ao nascer, depois agitação térmica ----
+    // ---- SINAIS INTERNOS (sensores, relógio, relé) e custo dos músculos ----
+    a.energy -= signals_step(slot, a, energy_capacity(slot, a));
+
+    // ---- JUNTAS: dobragem ao nascer, depois agitação térmica e músculos ----
     let kt_here = params.thermal_kt * (1.0 + temp_in[fluid_index_at_world(vec2<f32>(a.pos_x, a.pos_y))] / 12.0);
     let swim = joints_step(slot, a, kt_here);
     // Natação: o movimento rígido vem no referencial do corpo; roda-o para o mundo.
@@ -263,7 +281,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     a.pos_x = p.x;
     a.pos_y = p.y;
-    let cap = energy_capacity(a);
+    let cap = energy_capacity(slot, a);
 
     // ---- COMER = CICLO CATALÍTICO de cada resíduo ----
     // livre --liga um ativado--> ligado --hidrolisa--> produto --solta--> livre
@@ -285,7 +303,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // catalisa sempre que há substrato e a energia a mais perde-se como
         // calor. (A regulação pela fome do v3 fica como opção.)
         let hunger = select(1.0, clamp(1.0 - a.energy / cap, 0.0, 1.0), params.hunger_regulation != 0u);
-        let pe = clamp(params.uptake_rate * cat[body_get(slot, k)] * f32(tot) * hunger, 0.0, 1.0);
+        let pe = clamp(params.uptake_rate * cat[body_get(slot, k)] * organ_catalysis_mult(slot, k) * f32(tot) * hunger, 0.0, 1.0);
         let si = slot * MAX_BODY + k;
         let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
@@ -316,7 +334,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             joint_state[si] = 0u;
         }
     }
-    a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * f32(a.body_len);
+    a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * (f32(a.body_len) + organ_upkeep(slot, a.body_len));
 
     // ---- DIFUSIOFORESE (v3): consumo assimétrico empurra o corpo para o
     // lado onde consome. (O sentido real depende de a superfície atrair ou

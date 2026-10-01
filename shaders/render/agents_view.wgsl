@@ -9,6 +9,7 @@
 @group(0) @binding(2) var<storage, read> bodies_view: array<u32>;
 @group(0) @binding(3) var<storage, read> body_pos_view: array<vec2<f32>>;
 @group(0) @binding(4) var<storage, read> draw_list_view: array<u32>;
+@group(0) @binding(5) var<storage, read> organs_view: array<u32>;
 
 const MAX_BODY_V: u32 = 64u;
 
@@ -16,6 +17,8 @@ struct AgentVsOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) local: vec2<f32>,
     @location(1) color: vec3<f32>,
+    // 1 = órgão (desenhado maior, com anel branco).
+    @location(2) @interpolate(flat) organ: u32,
 };
 
 // Classes (v3): alifáticos A I L M V, aromáticos F W Y, polares S T N Q,
@@ -52,6 +55,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     var centre = vec2<f32>(a.pos_x, a.pos_y);
     var r_world = 6.0;
     var col = vec3<f32>(0.55, 0.55, 0.55);
+    var is_organ = 0u;
     if (!naked) {
         let aa = (bodies_view[slot * 16u + k / 4u] >> ((k % 4u) * 8u)) & 0xFFu;
         let lp = body_pos_view[slot * MAX_BODY_V + k];
@@ -62,6 +66,10 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         var vol = AA_VOLUME;
         r_world = 4.0 * sqrt(vol[aa] / 130.0) + 2.0;
         col = class_color(aa);
+        if (((organs_view[slot * 16u + k / 4u] >> ((k % 4u) * 8u)) & 0xFFu) != 0u) {
+            is_organ = 1u;
+            r_world *= 1.5;
+        }
     }
     // Nunca menos de 1,5 píxeis, para se ver com o zoom afastado.
     let r = max(r_world, 1.5 / view.zoom);
@@ -69,6 +77,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     let px = vec2<f32>((w.x - view.center_x) * view.zoom, (w.y - view.center_y) * view.zoom);
     o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);
     o.local = c;
+    o.organ = is_organ;
     // Pouca energia = mais escuro.
     o.color = col * mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
     return o;
@@ -79,5 +88,8 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
     let d = length(in.local);
     if (d > 1.0) { discard; }
     let rim = smoothstep(0.75, 0.98, d);
+    if (in.organ != 0u) {
+        return vec4<f32>(mix(in.color, vec3<f32>(1.0), smoothstep(0.6, 0.8, d)), 1.0);
+    }
     return vec4<f32>(mix(in.color, vec3<f32>(0.0), rim * 0.7), 1.0);
 }

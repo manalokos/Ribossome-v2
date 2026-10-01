@@ -70,10 +70,9 @@ fn case(gpu: &Gpu, name: &str, rft: bool, motor: f32, kt: f32, coupling: f32) {
 
 fn main() {
     let gpu = Gpu::new_headless().unwrap();
-    case(&gpu, "kT 0,3, sem motor", true, 0.0, 0.3, 0.9);
-    case(&gpu, "kT 0,3, motor 0,3, acopl. 0,9", true, 0.3, 0.3, 0.9);
-    case(&gpu, "kT 1, motor 0,3, acopl. 0,9", true, 0.3, 1.0, 0.9);
-    case(&gpu, "kT 0,3, motor 0,5, acopl. 0,95", true, 0.5, 0.3, 0.95);
+    case(&gpu, "órgãos, kT 0,3", true, 0.0, 0.3, 0.9);
+    case(&gpu, "órgãos, sem RFT", false, 0.0, 0.3, 0.9);
+    case(&gpu, "órgãos, kT 0 (só músculos)", true, 0.0, 0.0, 0.9);
 }
 
 #[allow(dead_code)]

@@ -46,6 +46,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         "life/drawlist.wgsl",
         "life/contact.wgsl",
         "life/fold.wgsl",
+        "life/organs.wgsl",
     ],
     entries: &[
         ("transport_scatter", Stage::Compute),
@@ -120,6 +121,7 @@ pub fn preamble(cfg: &WorldConfig) -> String {
     s += &SpawnRequest::wgsl();
     s += &MgLevel::wgsl();
     s += &crate::life::amino::wgsl();
+    s += &crate::life::organs::wgsl();
     s
 }
 

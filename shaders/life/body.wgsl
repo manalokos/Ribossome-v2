@@ -39,9 +39,13 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
             break;
         }
     }
-    for (var w = 0u; w < 16u; w++) { bodies[slot * 16u + w] = 0u; }
+    for (var w = 0u; w < 16u; w++) {
+        bodies[slot * 16u + w] = 0u;
+        organs[slot * 16u + w] = 0u;
+    }
     if (start == 0xFFFFFFFFu) { return 0u; }
     var codons = CODON_TABLE;
+    var promo = AA_IS_PROMOTER;
     var n = 0u;
     var i = start;
     loop {
@@ -50,8 +54,18 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
         let aa = codons[c];
         if (aa == AA_STOP) { break; }
         bodies[slot * 16u + n / 4u] |= aa << ((n % 4u) * 8u);
+        // ÓRGÃO: promotor seguido de um modificador que não é stop (6 bases).
+        var step = 3u;
+        if (promo[aa] != 0u && i + 5u < gene_len) {
+            let m = genome_get(slot, i + 3u) * 16u + genome_get(slot, i + 4u) * 4u + genome_get(slot, i + 5u);
+            if (codons[m] != AA_STOP) {
+                let ob = ((m % 8u) + 1u) | ((m / 8u) << 4u);
+                organs[slot * 16u + n / 4u] |= ob << ((n % 4u) * 8u);
+                step = 6u;
+            }
+        }
         n += 1u;
-        i += 3u;
+        i += step;
     }
     // Geometria inicial: dobras homoquirais pela tendência local; a
     // dobragem (fold.wgsl) parte daqui nos primeiros passos de vida.
@@ -61,6 +75,7 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
         joint_base[slot * MAX_BODY + k] = b;
         joint_state[slot * MAX_BODY + k] = 0u;
         joint_active[slot * MAX_BODY + k] = 0.0;
+        signals[slot * MAX_BODY + k] = vec2<f32>(0.0);
     }
     rebuild_body(slot, n);
     return n;

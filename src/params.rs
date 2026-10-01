@@ -172,9 +172,11 @@ impl Default for SimParams {
             phoretic_gain: 100.0,
             chain_stiffness: 20.0,
             thermal_kt: 0.3,
-            motor_amplitude: 0.3,
+            // 0: com órgãos, quem move as juntas são os músculos (o motor
+            // catalítico "puro" fica como opção).
+            motor_amplitude: 0.0,
             rft_enabled: 1,
-            require_start: 0,
+            require_start: 1,
             joint_coupling: 0.9,
             hunger_regulation: 0,
             _pad0: 0,
@@ -238,7 +240,48 @@ gpu_struct! {
         /// Número de bases a montar.
         pub gene_len: u32,
         /// bit 0: começar por AUG (bases também tiradas da vizinhança).
+        /// bit 1: genoma ESCOLHIDO (em `genome`); cada base é tirada da sopa,
+        /// a mais próxima do tipo pedido (a matéria continua exata).
         pub flags: u32,
+        pub genome0: u32,
+        pub genome1: u32,
+        pub genome2: u32,
+        pub genome3: u32,
+        pub genome4: u32,
+        pub genome5: u32,
+        pub genome6: u32,
+        pub genome7: u32,
+        pub genome8: u32,
+        pub genome9: u32,
+        pub genome10: u32,
+        pub genome11: u32,
+        pub genome12: u32,
+        pub genome13: u32,
+        pub genome14: u32,
+        pub genome15: u32,
+    }
+}
+
+impl SpawnRequest {
+    /// Pedido com posição, comprimento e flags (genoma vazio).
+    pub fn new(pos_x: f32, pos_y: f32, gene_len: u32, flags: u32) -> Self {
+        let mut r: Self = bytemuck::Zeroable::zeroed();
+        r.pos_x = pos_x;
+        r.pos_y = pos_y;
+        r.gene_len = gene_len;
+        r.flags = flags;
+        r
+    }
+
+    /// Pedido com um genoma escolhido (bases 0 = A, 1 = U, 2 = G, 3 = C).
+    pub fn with_genome(pos_x: f32, pos_y: f32, genome: &[u8]) -> Self {
+        let n = genome.len().min(256);
+        let mut r = Self::new(pos_x, pos_y, n as u32, 2);
+        let words: &mut [u32] = bytemuck::cast_slice_mut(std::slice::from_mut(&mut r));
+        for (i, &b) in genome[..n].iter().enumerate() {
+            words[4 + i / 16] |= (b as u32 & 3) << ((i % 16) * 2);
+        }
+        r
     }
 }
 

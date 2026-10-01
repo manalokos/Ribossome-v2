@@ -1,6 +1,7 @@
 //! Vida: genoma, aminoácidos, organismos.
 
 pub mod amino;
+pub mod organs;
 
 use crate::params::SpawnRequest;
 
@@ -29,11 +30,9 @@ impl SplitMix {
 pub fn seed_requests(n: u32, len: [u32; 2], aug: bool, sim_size: f32, rng: &mut SplitMix) -> Vec<SpawnRequest> {
     let (lo, hi) = (len[0].min(len[1]).max(3), len[0].max(len[1]).min(256));
     (0..n)
-        .map(|_| SpawnRequest {
-            pos_x: rng.f32() * sim_size,
-            pos_y: rng.f32() * sim_size,
-            gene_len: lo + (rng.next_u64() % (hi - lo + 1) as u64) as u32,
-            flags: aug as u32,
+        .map(|_| {
+            let (x, y) = (rng.f32() * sim_size, rng.f32() * sim_size);
+            SpawnRequest::new(x, y, lo + (rng.next_u64() % (hi - lo + 1) as u64) as u32, aug as u32)
         })
         .collect()
 }

@@ -191,6 +191,7 @@ pub struct World {
     pub body_pos_buf: wgpu::Buffer,
     pub draw_list_buf: wgpu::Buffer,
     pub joint_state_buf: wgpu::Buffer,
+    pub organs_buf: wgpu::Buffer,
     pub draw_args_buf: wgpu::Buffer,
     pub life_counters_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
@@ -282,6 +283,8 @@ impl World {
         let joint_base = storage_buffer(device, "joint base", max_agents * 64 * 4);
         let joint_state_buf = storage_buffer(device, "joint state", max_agents * 64 * 4);
         let joint_active = storage_buffer(device, "joint active", max_agents * 64 * 4);
+        let organs_buf = storage_buffer(device, "organs", max_agents * SLOT_WORDS * 4);
+        let signals = storage_buffer(device, "signals", max_agents * 64 * 8);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
             size: 16,
@@ -322,7 +325,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..16).map(|b| storage_entry(b, b == 4)).collect();
+        let life_entries: Vec<_> = (0..18).map(|b| storage_entry(b, b == 4)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -461,6 +464,8 @@ impl World {
                 &joint_base,
                 &joint_state_buf,
                 &joint_active,
+                &organs_buf,
+                &signals,
             ],
         );
 
@@ -571,6 +576,7 @@ impl World {
             body_pos_buf,
             draw_list_buf,
             joint_state_buf,
+            organs_buf,
             draw_args_buf,
             life_counters_buf,
             free_buf,

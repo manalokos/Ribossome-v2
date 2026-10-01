@@ -142,12 +142,12 @@ fn life_cycle_conserves_matter() {
     let reqs: Vec<SpawnRequest> = (0..300)
         .map(|i| {
             let f = i as f32 / 300.0;
-            SpawnRequest {
-                pos_x: s * (0.05 + 0.9 * ((f * 37.0).fract())),
-                pos_y: s * (0.3 + 0.65 * ((f * 13.0).fract())),
-                gene_len: 6 + (i % 120),
-                flags: i % 2,
-            }
+            SpawnRequest::new(
+                s * (0.05 + 0.9 * ((f * 37.0).fract())),
+                s * (0.3 + 0.65 * ((f * 13.0).fract())),
+                6 + (i % 120),
+                i % 2,
+            )
         })
         .collect();
     world.request_seeds(&reqs);

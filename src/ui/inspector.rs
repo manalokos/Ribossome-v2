@@ -7,13 +7,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gpu::Gpu;
 use crate::life::amino::{AA_LETTERS, BASES};
+use crate::life::organs::{ORGAN_NAMES, ORGAN_SYMBOLS};
 use crate::params::Agent;
 use crate::render::Camera;
 use crate::render::capture::Capture;
 use crate::world::World;
 
-/// Bytes lidos por agente: Agent (64) + genoma (64) + corpo (64).
-const READ_BYTES: u64 = 192;
+/// Bytes lidos por agente: Agent (64) + genoma (64) + corpo (64) + órgãos (64).
+const READ_BYTES: u64 = 256;
 const PREVIEW_SIZE: u32 = 256;
 
 #[derive(Clone, Copy)]
@@ -26,6 +27,8 @@ pub struct InspectData {
     pub agent: Agent,
     pub genome: Vec<u8>,
     pub body: Vec<u8>,
+    /// Byte de órgão por resíduo (0 = nenhum; (tipo + 1) | (parâmetro << 4)).
+    pub organs: Vec<u8>,
 }
 
 enum Readback {
@@ -108,6 +111,7 @@ impl Inspector {
         enc.copy_buffer_to_buffer(&world.agents_buf, s * 64, &self.staging, 0, 64);
         enc.copy_buffer_to_buffer(&world.genomes_buf, s * 64, &self.staging, 64, 64);
         enc.copy_buffer_to_buffer(&world.bodies_buf, s * 64, &self.staging, 128, 64);
+        enc.copy_buffer_to_buffer(&world.organs_buf, s * 64, &self.staging, 192, 64);
         self.state = Readback::Encoded;
     }
 
@@ -154,7 +158,9 @@ impl Inspector {
         let genome = (0..agent.gene_len as usize).map(|i| ((words[i / 16] >> ((i % 16) * 2)) & 3) as u8).collect();
         let bw: &[u32] = bytemuck::cast_slice(&bytes[128..192]);
         let body = (0..agent.body_len as usize).map(|i| ((bw[i / 4] >> ((i % 4) * 8)) & 0xFF) as u8).collect();
-        self.data = Some(InspectData { agent, genome, body });
+        let ow: &[u32] = bytemuck::cast_slice(&bytes[192..256]);
+        let organs = (0..agent.body_len as usize).map(|i| ((ow[i / 4] >> ((i % 4) * 8)) & 0xFF) as u8).collect();
+        self.data = Some(InspectData { agent, genome, body, organs });
     }
 }
 
@@ -233,8 +239,32 @@ pub fn draw(ctx: &egui::Context, ins: &mut Inspector) {
         ui.strong(format!("Genoma ({} bases)", d.genome.len()));
         colored_seq(ui, d.genome.iter().map(|&b| (BASES[b as usize], base_color(b))));
         if !d.body.is_empty() {
-            ui.strong(format!("Proteína ({} resíduos)", d.body.len()));
-            colored_seq(ui, d.body.iter().map(|&aa| (AA_LETTERS[aa as usize], aa_color(aa))));
+            ui.strong(format!("Proteína ({} resíduos; órgãos a branco)", d.body.len()));
+            colored_seq(
+                ui,
+                d.body.iter().zip(&d.organs).map(|(&aa, &o)| {
+                    if o != 0 {
+                        (ORGAN_SYMBOLS[((o & 0xF) - 1) as usize], egui::Color32::WHITE)
+                    } else {
+                        (AA_LETTERS[aa as usize], aa_color(aa))
+                    }
+                }),
+            );
+            let list: Vec<String> = d
+                .organs
+                .iter()
+                .enumerate()
+                .filter(|(_, o)| **o != 0)
+                .map(|(k, &o)| format!("{k}: {} ({})", ORGAN_NAMES[((o & 0xF) - 1) as usize], o >> 4))
+                .collect();
+            if list.is_empty() {
+                ui.label("sem órgãos");
+            } else {
+                ui.strong("Órgãos (posição: tipo (parâmetro))");
+                for l in list {
+                    ui.label(l);
+                }
+            }
         }
     });
     ins.open = open;
