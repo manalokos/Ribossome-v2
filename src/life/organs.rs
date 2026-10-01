@@ -62,7 +62,49 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'F', 'L'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ'];
+
+/// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
+/// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
+pub fn describe(t: u8, p: u8, gain_idx: u8) -> String {
+    let g = organ_gain(gain_idx);
+    let canal = if p & 1 == 0 { "α" } else { "β" };
+    let sensor = |o_que: &str, aspeto: &str| {
+        format!(
+            "{o_que} [{aspeto}]: emite em {canal}, {}, {}, força ×{g:.2}",
+            if p & 2 == 0 { "positivo" } else { "invertido (negativo)" },
+            if p & 4 == 0 { "pelo NÍVEL" } else { "pela VARIAÇÃO desde o passo anterior" },
+        )
+    };
+    match t {
+        0 => format!("boca [disco com abertura escura]: come ×{} mais depressa", 2 + p as u32),
+        1 => format!(
+            "músculo [elipse vermelha às riscas]: a junta dobra ×{:.2} mais com os sinais",
+            (2.0 + 0.5 * p as f32) * g
+        ),
+        2 => sensor("sensor de comida TOTAL, mede os ativados num raio à volta", "coroa de 6 antenas verdes"),
+        3 => sensor("sensor de luz TOTAL, mede a luz num raio à volta", "coroa de 6 antenas amarelas"),
+        4 => sensor("sensor de energia, mede a energia interna", "disco com anel dourado"),
+        5 => format!(
+            "relógio [mostrador com ponteiro]: oscila em {canal} com período {} passos, força ×{g:.2}",
+            CLOCK_PERIOD_BASE as u32 * (1 << (p >> 1))
+        ),
+        6 => {
+            let modo = ["converte α em β", "converte β em α", "inverte α", "inverte β"][(p & 3) as usize];
+            let k = if p & 4 != 0 { 2.0 } else { 1.0 };
+            format!("relé [losango]: {modo}, força ×{:.2}", k * g)
+        }
+        7 => format!("armazenamento [disco com anéis]: +{} de capacidade de energia", 4 * (p as u32 + 1)),
+        8 => sensor(
+            "sensor de comida DIRECIONAL, compara o lado esquerdo com o direito",
+            "2 antenas verdes, uma de cada lado",
+        ),
+        _ => sensor(
+            "sensor de luz DIRECIONAL, compara o lado esquerdo com o direito",
+            "2 antenas amarelas, uma de cada lado",
+        ),
+    }
+}
 
 /// Custo de manutenção por passo de um órgão, em múltiplos do custo de um resíduo.
 pub const ORGAN_UPKEEP: [f32; ORGAN_TYPES] = [3.0, 4.0, 2.0, 2.0, 1.0, 2.0, 1.0, 1.0, 3.0, 3.0];

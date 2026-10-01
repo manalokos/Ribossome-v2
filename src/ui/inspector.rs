@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gpu::Gpu;
 use crate::life::amino::{AA_LETTERS, BASES};
-use crate::life::organs::{ORGAN_NAMES, ORGAN_SYMBOLS, organ_gain};
+use crate::life::organs::{ORGAN_SYMBOLS, describe};
 use crate::params::Agent;
 use crate::render::Camera;
 use crate::render::capture::Capture;
@@ -256,21 +256,22 @@ pub fn draw(ctx: &egui::Context, ins: &mut Inspector) {
                 .enumerate()
                 .filter(|(_, o)| **o != 0)
                 .map(|(k, &o)| {
+                    let t = ((o & 0xF) - 1) as u8;
                     format!(
-                        "{k}: {} (p {}, ganho ×{:.2})",
-                        ORGAN_NAMES[((o & 0xF) - 1) as usize],
-                        (o >> 4) & 0xF,
-                        organ_gain((o >> 8) as u8)
+                        "{}  posição {k}: {}",
+                        ORGAN_SYMBOLS[t as usize],
+                        describe(t, ((o >> 4) & 0xF) as u8, (o >> 8) as u8)
                     )
                 })
                 .collect();
             if list.is_empty() {
                 ui.label("sem órgãos");
             } else {
-                ui.strong("Órgãos (posição: tipo, parâmetro, ganho)");
+                ui.strong("Órgãos (símbolo na proteína, posição: o que faz)");
                 for l in list {
                     ui.label(l);
                 }
+                ui.small("posição 0 = ponta N (início da proteína); esquerdo/direito = lados da cadeia de N para C");
             }
         }
     });
