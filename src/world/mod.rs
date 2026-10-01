@@ -961,23 +961,25 @@ impl SplitMix {
     }
 }
 
-/// Matéria inicial provisória: manchas suaves e diferentes por canal, metade
+/// Matéria inicial: manchas fractais (fBm) independentes por canal, metade
 /// ativada. Nunca passa da capacidade da célula.
 fn seed_cells(cfg: &WorldConfig, seed: u64) -> Vec<u32> {
     let n = cfg.grid_size as usize;
     let mut rng = SplitMix(seed);
-    let phase: Vec<f32> = (0..8).map(|_| rng.f32() * std::f32::consts::TAU).collect();
     let max_per_channel = CHEM_CELL_CAP / 4;
+    // Densidade por canal: ruído fractal calculado a 1/4 da resolução e
+    // interpolado (as oitavas mais finas têm 4 células; abaixo disso o
+    // arredondamento ao acaso de cada célula dá o grão).
+    let m = (n / 4).max(2);
+    let fields: Vec<Vec<f32>> = (0..4u64).map(|ch| fbm_field(m, seed ^ (ch + 1).wrapping_mul(0xA24B_AED4_963E_E407))).collect();
     let mut cells = vec![0u32; n * n * 4];
     for y in 0..n {
         for x in 0..n {
-            let u = x as f32 / n as f32 * std::f32::consts::TAU;
-            let v = y as f32 / n as f32 * std::f32::consts::TAU;
-            for ch in 0..4 {
-                let d = 0.5
-                    + 0.25 * (3.0 * u + phase[ch]).sin() * (2.0 * v + phase[ch + 4]).cos()
-                    + 0.25 * (5.0 * v + phase[ch + 4] + ch as f32).sin();
-                let expect = d.clamp(0.0, 1.0) * (max_per_channel as f32 - 2.0);
+            let fx = (x as f32 + 0.5) / n as f32 * m as f32 - 0.5;
+            let fy = (y as f32 + 0.5) / n as f32 * m as f32 - 0.5;
+            for (ch, f) in fields.iter().enumerate() {
+                let d = (0.5 + 1.6 * (bilinear(f, m, fx, fy) - 0.5)).clamp(0.0, 1.0);
+                let expect = d * (max_per_channel as f32 - 2.0);
                 let count = ((expect + rng.f32()) as u32).min(max_per_channel);
                 let act = (0..count).filter(|_| rng.f32() < 0.5).count() as u32;
                 cells[(y * n + x) * 4 + ch] = act | ((count - act) << 16);
@@ -985,4 +987,52 @@ fn seed_cells(cfg: &WorldConfig, seed: u64) -> Vec<u32> {
         }
     }
     cells
+}
+
+/// Ruído fractal (fBm de value noise, 6 oitavas, persistência 0,65) numa
+/// grelha m×m, valores ~0..1, média ~0,5. A oitava mais grossa tem ~4
+/// células de rede no mundo; cada oitava duplica a frequência.
+fn fbm_field(m: usize, seed: u64) -> Vec<f32> {
+    let lattice = |o: u64, ix: i64, iy: i64| -> f32 {
+        let mut h = SplitMix(seed ^ o.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (ix as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93)
+            ^ (iy as u64).wrapping_mul(0xCA5A_8263_9512_1157));
+        h.f32()
+    };
+    let mut out = vec![0.0f32; m * m];
+    let mut amp = 0.5;
+    let mut norm = 0.0;
+    let mut freq = 4.0f32;
+    for o in 0..6u64 {
+        for y in 0..m {
+            for x in 0..m {
+                let px = x as f32 / m as f32 * freq;
+                let py = y as f32 / m as f32 * freq;
+                let (ix, iy) = (px.floor(), py.floor());
+                let (tx, ty) = (px - ix, py - iy);
+                let (sx, sy) = (tx * tx * (3.0 - 2.0 * tx), ty * ty * (3.0 - 2.0 * ty));
+                let (ix, iy) = (ix as i64, iy as i64);
+                let a = lattice(o, ix, iy) + (lattice(o, ix + 1, iy) - lattice(o, ix, iy)) * sx;
+                let b = lattice(o, ix, iy + 1) + (lattice(o, ix + 1, iy + 1) - lattice(o, ix, iy + 1)) * sx;
+                out[y * m + x] += amp * (a + (b - a) * sy);
+            }
+        }
+        norm += amp;
+        amp *= 0.65;
+        freq *= 2.0;
+    }
+    for v in out.iter_mut() {
+        *v /= norm;
+    }
+    out
+}
+
+fn bilinear(f: &[f32], m: usize, x: f32, y: f32) -> f32 {
+    let x = x.clamp(0.0, (m - 1) as f32);
+    let y = y.clamp(0.0, (m - 1) as f32);
+    let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+    let (x1, y1) = ((x0 + 1).min(m - 1), (y0 + 1).min(m - 1));
+    let (tx, ty) = (x - x0 as f32, y - y0 as f32);
+    let a = f[y0 * m + x0] + (f[y0 * m + x1] - f[y0 * m + x0]) * tx;
+    let b = f[y1 * m + x0] + (f[y1 * m + x1] - f[y1 * m + x0]) * tx;
+    a + (b - a) * ty
 }
