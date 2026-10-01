@@ -57,7 +57,7 @@ fn main() {
             .iter()
             .filter(|(s, a)| {
                 (0..a.body_len as usize).any(|k| {
-                    let o = (organs[s * 16 + k / 4] >> ((k % 4) * 8)) & 0xFF;
+                    let o = (organs[s * 32 + k / 2] >> ((k % 2) * 16)) & 0xFF;
                     o != 0 && (o & 0xF) - 1 == 5
                 })
             })
@@ -66,7 +66,7 @@ fn main() {
             .iter()
             .filter(|(s, a)| {
                 (0..a.body_len as usize).any(|k| {
-                    let o = (organs[s * 16 + k / 4] >> ((k % 4) * 8)) & 0xFF;
+                    let o = (organs[s * 32 + k / 2] >> ((k % 2) * 16)) & 0xFF;
                     o != 0 && matches!((o & 0xF) - 1, 2..=4)
                 })
             })

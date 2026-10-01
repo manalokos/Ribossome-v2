@@ -29,7 +29,8 @@
 @group(3) @binding(14) var<storage, read_write> joint_state: array<u32>;
 // Deformação ATIVA de cada junta (a que vem do ciclo catalítico, propagada).
 @group(3) @binding(15) var<storage, read_write> joint_active: array<f32>;
-// Órgãos: 1 byte por resíduo (0 = nenhum; (tipo + 1) | (parâmetro << 4)), 16 u32 por slot.
+// Órgãos: 16 bits por resíduo (0 = nenhum; (tipo + 1) | (parâmetro << 4) |
+// (intensidade << 8)), 32 u32 por slot.
 @group(3) @binding(16) var<storage, read_write> organs: array<u32>;
 // Sinais internos (α, β) por resíduo.
 @group(3) @binding(17) var<storage, read_write> signals: array<vec2<f32>>;

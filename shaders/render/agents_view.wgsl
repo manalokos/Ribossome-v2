@@ -66,7 +66,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         var vol = AA_VOLUME;
         r_world = 4.0 * sqrt(vol[aa] / 130.0) + 2.0;
         col = class_color(aa);
-        if (((organs_view[slot * 16u + k / 4u] >> ((k % 4u) * 8u)) & 0xFFu) != 0u) {
+        if (((organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu) != 0u) {
             is_organ = 1u;
             r_world *= 1.5;
         }

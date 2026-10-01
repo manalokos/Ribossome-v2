@@ -3,7 +3,7 @@
 //! lido é igual ao corpo que a GPU construiu.
 
 use ribossome::gpu::Gpu;
-use ribossome::life::organs::{organ_byte, translate_organs};
+use ribossome::life::organs::{organ_code, translate_organs};
 use ribossome::params::WorldConfig;
 use ribossome::ui::inspector::Inspector;
 use ribossome::world::World;
@@ -39,7 +39,7 @@ fn inspector_reads_genome_and_body() {
     assert_eq!(d.genome.len() as u32, d.agent.gene_len);
     let cpu = translate_organs(&d.genome, world.params.require_start != 0);
     let aa: Vec<u8> = cpu.iter().map(|r| r.aa).collect();
-    let organs: Vec<u8> = cpu.iter().map(organ_byte).collect();
+    let organs: Vec<u16> = cpu.iter().map(organ_code).collect();
     assert_eq!(aa, d.body, "proteína do CPU ≠ corpo da GPU");
     assert_eq!(organs, d.organs, "órgãos do CPU ≠ órgãos da GPU");
 }
@@ -66,11 +66,12 @@ fn gpu_translation_matches_cpu_everywhere() {
         let genome: Vec<u8> =
             (0..a.gene_len as usize).map(|i| ((gw[s * 16 + i / 16] >> ((i % 16) * 2)) & 3) as u8).collect();
         let byte = |w: &[u32], i: usize| ((w[s * 16 + i / 4] >> ((i % 4) * 8)) & 0xFF) as u8;
+        let code = |w: &[u32], i: usize| ((w[s * 32 + i / 2] >> ((i % 2) * 16)) & 0xFFFF) as u16;
         let cpu = translate_organs(&genome, world.params.require_start != 0);
         assert_eq!(cpu.len() as u32, a.body_len, "comprimento do corpo difere (slot {s})");
         for (k, r) in cpu.iter().enumerate() {
             assert_eq!(r.aa, byte(&bw, k), "aminoácido difere (slot {s}, resíduo {k})");
-            assert_eq!(organ_byte(r), byte(&ow, k), "órgão difere (slot {s}, resíduo {k})");
+            assert_eq!(organ_code(r), code(&ow, k), "órgão difere (slot {s}, resíduo {k})");
             organs_seen += r.organ.is_some() as usize;
         }
         checked += 1;

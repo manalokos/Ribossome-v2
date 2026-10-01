@@ -285,7 +285,7 @@ impl World {
         let joint_base = storage_buffer(device, "joint base", max_agents * 64 * 4);
         let joint_state_buf = storage_buffer(device, "joint state", max_agents * 64 * 4);
         let joint_active = storage_buffer(device, "joint active", max_agents * 64 * 4);
-        let organs_buf = storage_buffer(device, "organs", max_agents * SLOT_WORDS * 4);
+        let organs_buf = storage_buffer(device, "organs", max_agents * 32 * 4);
         let signals = storage_buffer(device, "signals", max_agents * 64 * 8);
         let sensor_mem = storage_buffer(device, "sensor memory", max_agents * 64 * 4);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {

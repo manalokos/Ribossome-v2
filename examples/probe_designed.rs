@@ -27,7 +27,7 @@ fn trial(gpu: &Gpu, name: &str, genome: &str) {
     let body = translate_organs(&g, true);
     let organs: Vec<String> = body
         .iter()
-        .filter_map(|r| r.organ.map(|(t, p)| format!("{}({p})", ribossome::life::organs::ORGAN_NAMES[t as usize])))
+        .filter_map(|r| r.organ.map(|(t, p, _)| format!("{}({p})", ribossome::life::organs::ORGAN_NAMES[t as usize])))
         .collect();
     // Laboratório: piscina 1024² sem fluido nem terreno.
     let cfg = WorldConfig { grid_size: 1024, fluid_size: 512, max_agents: 20_000, ..WorldConfig::DEFAULT };

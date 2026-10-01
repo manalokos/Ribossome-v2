@@ -24,7 +24,12 @@ const SENSOR_CHANGE_GAIN: f32 = 20.0;
 const STORAGE_CAPACITY: f32 = 4.0;
 
 fn organ_get(slot: u32, k: u32) -> u32 {
-    return (organs[slot * 16u + k / 4u] >> ((k % 4u) * 8u)) & 0xFFu;
+    return (organs[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
+}
+
+// Ganho da intensidade do órgão: 2^((índice − 32)/8).
+fn organ_gain(o: u32) -> f32 {
+    return exp2((f32(o >> 8u) - 32.0) / 8.0);
 }
 
 // Tipo do órgão (0..7) ou 0xFF se não houver.
@@ -33,7 +38,7 @@ fn organ_type(o: u32) -> u32 {
 }
 
 fn organ_param(o: u32) -> u32 {
-    return o >> 4u;
+    return (o >> 4u) & 0xFu;
 }
 
 // Capacidade extra de energia e custo de manutenção dos órgãos do agente.
@@ -71,7 +76,7 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     let aa = body_get(slot, k);
     let s = signals[slot * MAX_BODY + k];
     let o = organ_get(slot, k);
-    let amp = select(1.0, 2.0 + 0.5 * f32(organ_param(o)), organ_type(o) == ORGAN_MUSCLE);
+    let amp = select(1.0, (2.0 + 0.5 * f32(organ_param(o))) * organ_gain(o), organ_type(o) == ORGAN_MUSCLE);
     return clamp(SIGNAL_GAIN * amp * (s.x * sa[aa] + s.y * sb[aa]), -MAX_SIGNAL_ANGLE, MAX_SIGNAL_ANGLE);
 }
 
@@ -121,7 +126,7 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 v = (sensed - sensor_mem[mi]) * SENSOR_CHANGE_GAIN;
             }
             sensor_mem[mi] = sensed;
-            v = select(v, -v, (p & 2u) != 0u);
+            v = select(v, -v, (p & 2u) != 0u) * organ_gain(o);
             if ((p & 1u) == 0u) { emit[k].x = v; } else { emit[k].y = v; }
             continue;
         }
@@ -129,12 +134,12 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             case ORGAN_CLOCK: {
                 // bit 0 = canal; bits 1–2 = período (20, 40, 80 ou 160 passos).
                 let period = CLOCK_PERIOD_BASE * f32(1u << (p >> 1u));
-                let v = sin(6.2831853 * f32(a.age) / period);
+                let v = sin(6.2831853 * f32(a.age) / period) * organ_gain(o);
                 if ((p & 1u) == 0u) { emit[k].x = v; } else { emit[k].y = v; }
             }
             case ORGAN_RELAY: {
                 // bits 0–1: 0 α->β, 1 β->α, 2 inverte α, 3 inverte β; bit 2 = ganho ×2.
-                let g = select(1.0, 2.0, (p & 4u) != 0u);
+                let g = select(1.0, 2.0, (p & 4u) != 0u) * organ_gain(o);
                 switch (p & 3u) {
                     case 0u: { emit[k].y = g * s.x; }
                     case 1u: { emit[k].x = g * s.y; }

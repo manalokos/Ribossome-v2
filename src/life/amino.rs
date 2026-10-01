@@ -219,6 +219,32 @@ pub fn flexibility() -> [f32; 20] {
     f
 }
 
+/// Ângulo de repouso de cada junta (rad, COM SINAL): os ângulos base do v3
+/// (commit 7199600, jan. 2026; valores de desenho). Substitui a tendência de
+/// volta de Chou-Fasman, que era sempre do mesmo lado (homoquiral).
+pub const REST_ANGLE: [f32; 20] = [
+    0.10,      // A
+    0.13,      // C
+    0.05,      // D
+    -0.12,     // E
+    0.03,      // F
+    -0.06,     // G
+    -0.07,     // H
+    0.09,      // I
+    0.31,      // K
+    -0.24,     // L
+    -0.52,     // M
+    0.21,      // N
+    -0.333,    // P
+    -0.221,    // Q
+    -0.27,     // R
+    -0.349066, // S
+    0.10112,   // T
+    0.09,      // V
+    0.349066,  // W
+    -0.523599, // Y
+];
+
 /// Sensibilidade de cada junta ao sinal α e ao sinal β (valores do v3, ordem de `AMINO`).
 pub const SIGNAL_SENSITIVITY: [(f32, f32); 20] = [
     (-0.2, 0.2),      // A
@@ -268,6 +294,8 @@ pub fn wgsl() -> String {
     let sa: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.0)).collect();
     let sb: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.1)).collect();
     s += &format!("const AA_ALPHA_SENS = array<f32, 20>({});\n", sa.join(", "));
+    let ra: Vec<String> = REST_ANGLE.iter().map(|v| format!("{v:.5}")).collect();
+    s += &format!("const AA_REST_ANGLE = array<f32, 20>({});\n", ra.join(", "));
     s += &format!("const AA_BETA_SENS = array<f32, 20>({});\n", sb.join(", "));
     let flex = flexibility();
     let fv: Vec<String> = flex.iter().map(|v| format!("{v:.4}")).collect();

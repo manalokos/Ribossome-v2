@@ -4,10 +4,10 @@
 // até ao primeiro stop ou 64 resíduos. A tabela
 // CODON_TABLE e as propriedades AA_* vêm de src/life/amino.rs (dados reais).
 //
-// Geometria (v3): cadeia principal de comprimento constante; em cada junta
-// a cadeia dobra sempre para o MESMO lado (homoquiralidade em 2D) com um
-// ângulo da tendência de volta/hélice de Chou-Fasman:
-//   dobra = clamp(0,55·(Pt − 0,6) + 0,25·max(Pa − 1, 0), 0, 0,6) rad.
+// Geometria: cadeia principal de comprimento constante; cada junta tem um
+// ângulo de repouso COM SINAL, próprio do aminoácido (tabela do v3; a
+// homoquiralidade, com todas as dobras para o mesmo lado, foi abandonada a
+// pedido do Filipe).
 // As posições locais (centradas no centro de massa) ficam em body_pos.
 
 const MAX_BODY: u32 = 64u;
@@ -23,10 +23,10 @@ fn residue_mass(aa: u32) -> f32 {
     return 0.02 * m[aa] / 118.0;
 }
 
+// Ângulo de repouso da junta (com sinal; tabela do v3 em src/life/amino.rs).
 fn residue_bend(aa: u32) -> f32 {
-    var pt = AA_P_TURN;
-    var pa = AA_P_HELIX;
-    return clamp(0.55 * (pt[aa] - 0.6) + 0.25 * max(pa[aa] - 1.0, 0.0), 0.0, 0.6);
+    var ra = AA_REST_ANGLE;
+    return ra[aa];
 }
 
 // Traduz o genoma do slot, escreve bodies e body_pos e devolve o nº de resíduos.
@@ -39,10 +39,8 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
             break;
         }
     }
-    for (var w = 0u; w < 16u; w++) {
-        bodies[slot * 16u + w] = 0u;
-        organs[slot * 16u + w] = 0u;
-    }
+    for (var w = 0u; w < 16u; w++) { bodies[slot * 16u + w] = 0u; }
+    for (var w = 0u; w < 32u; w++) { organs[slot * 32u + w] = 0u; }
     if (start == 0xFFFFFFFFu) { return 0u; }
     var codons = CODON_TABLE;
     var promo = AA_IS_PROMOTER;
@@ -59,9 +57,18 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
         if (promo[aa] != 0u && i + 5u < gene_len) {
             let m = genome_get(slot, i + 3u) * 16u + genome_get(slot, i + 4u) * 4u + genome_get(slot, i + 5u);
             if (codons[m] != AA_STOP) {
-                let ob = ((m % 8u) + 1u) | ((m / 8u) << 4u);
-                organs[slot * 16u + n / 4u] |= ob << ((n % 4u) * 8u);
+                // Segundo modificador: intensidade (senão 32 = ganho 1, 6 bases).
+                var gain = 32u;
                 step = 6u;
+                if (i + 8u < gene_len) {
+                    let m2 = genome_get(slot, i + 6u) * 16u + genome_get(slot, i + 7u) * 4u + genome_get(slot, i + 8u);
+                    if (codons[m2] != AA_STOP) {
+                        gain = m2;
+                        step = 9u;
+                    }
+                }
+                let ob = ((m % 8u) + 1u) | ((m / 8u) << 4u) | (gain << 8u);
+                organs[slot * 32u + n / 2u] |= ob << ((n % 2u) * 16u);
             }
         }
         n += 1u;

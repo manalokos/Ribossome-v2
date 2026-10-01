@@ -2,8 +2,12 @@
 //!
 //! Codificação: um PROMOTOR (aminoácidos C, H ou W) seguido de um codão
 //! MODIFICADOR que não seja stop forma um órgão, que ocupa UMA posição do
-//! corpo e gasta 6 bases. O modificador (índice do codão 0..63, ordem A U G C)
-//! define o tipo (modificador % 8) e o parâmetro (modificador / 8, 0..7).
+//! corpo. O modificador (índice do codão 0..63, ordem A U G C) define o tipo
+//! (modificador % 8) e o parâmetro (modificador / 8, 0..7). Um SEGUNDO
+//! modificador (se não for stop) dá a INTENSIDADE: 64 níveis logarítmicos,
+//! ganho = 2^((índice − 32)/8), de ×0,06 a ×15 (9 bases no total); sem ele o
+//! ganho é 1 (6 bases). A intensidade multiplica a emissão dos sensores,
+//! relógios e relés e a amplificação do músculo.
 //! Fisicamente (massa, dobragem MJ, catálise) o órgão continua a ser o
 //! aminoácido promotor; o órgão acrescenta-lhe uma função.
 //!
@@ -67,16 +71,25 @@ pub fn is_promoter(aa: u8) -> bool {
     PROMOTERS.iter().any(|&l| aa_index(l) == aa)
 }
 
-/// Um resíduo do corpo: aminoácido e, opcionalmente, órgão (tipo, parâmetro).
+/// Índice de intensidade por omissão (ganho 1).
+pub const GAIN_DEFAULT: u8 = 32;
+
+/// Ganho de um índice de intensidade (0..63).
+pub fn organ_gain(idx: u8) -> f32 {
+    2f32.powf((idx as f32 - 32.0) / 8.0)
+}
+
+/// Um resíduo do corpo: aminoácido e, opcionalmente, órgão (tipo, parâmetro, intensidade).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Residue {
     pub aa: u8,
-    pub organ: Option<(u8, u8)>,
+    pub organ: Option<(u8, u8, u8)>,
 }
 
-/// Byte de órgão guardado na GPU: 0 = nenhum; senão (tipo + 1) | (param << 4).
-pub fn organ_byte(r: &Residue) -> u8 {
-    r.organ.map_or(0, |(t, p)| (t + 1) | (p << 4))
+/// Código de órgão guardado na GPU (16 bits): 0 = nenhum; senão
+/// (tipo + 1) | (parâmetro << 4) | (intensidade << 8).
+pub fn organ_code(r: &Residue) -> u16 {
+    r.organ.map_or(0, |(t, p, g)| (t as u16 + 1) | ((p as u16) << 4) | ((g as u16) << 8))
 }
 
 /// Tradução com órgãos (espelho exato do shader): a partir do primeiro AUG
@@ -99,8 +112,15 @@ pub fn translate_organs(genome: &[u8], require_start: bool) -> Vec<Residue> {
             let m = (genome[i + 3], genome[i + 4], genome[i + 5]);
             if codon(m.0, m.1, m.2) != STOP {
                 let idx = m.0 * 16 + m.1 * 4 + m.2;
-                body.push(Residue { aa, organ: Some((idx % ORGAN_TYPES as u8, idx / ORGAN_TYPES as u8)) });
-                i += 6;
+                // Segundo modificador (intensidade), se existir e não for stop.
+                let (gain, used) =
+                    if i + 9 <= genome.len() && codon(genome[i + 6], genome[i + 7], genome[i + 8]) != STOP {
+                        (genome[i + 6] * 16 + genome[i + 7] * 4 + genome[i + 8], 9)
+                    } else {
+                        (GAIN_DEFAULT, 6)
+                    };
+                body.push(Residue { aa, organ: Some((idx % ORGAN_TYPES as u8, idx / ORGAN_TYPES as u8, gain)) });
+                i += used;
                 continue;
             }
         }
@@ -136,14 +156,19 @@ mod tests {
 
     #[test]
     fn promoter_plus_modifier_makes_an_organ() {
-        // AUG (M) | UGU (C, promotor) + GCA (modificador) | UUU (F) | UAA (stop)
-        let g = bases("AUGUGUGCAUUUUAA");
+        // AUG (M) | UGU (C, promotor) + GCA (modificador) + UUU (intensidade) | GGU (G) | UAA
+        let g = bases("AUGUGUGCAUUUGGUUAA");
         let body = translate_organs(&g, true);
         assert_eq!(body.len(), 3);
         assert_eq!(body[0].organ, None);
-        // GCA: G=2, C=3, A=0 -> 2*16 + 3*4 + 0 = 44 -> tipo 44 % 8 = 4, param 44 / 8 = 5.
-        assert_eq!(body[1], Residue { aa: aa_index('C'), organ: Some((4, 5)) });
+        // GCA: 2*16 + 3*4 + 0 = 44 -> tipo 4, param 5; UUU: 1*16 + 1*4 + 1 = 21 -> intensidade 21.
+        assert_eq!(body[1], Residue { aa: aa_index('C'), organ: Some((4, 5, 21)) });
         assert_eq!(body[2].organ, None);
+        // Sem segundo modificador (stop a seguir): intensidade por omissão, 6 bases.
+        let g2 = bases("AUGUGUGCAUAA");
+        let b2 = translate_organs(&g2, true);
+        assert_eq!(b2[1].organ, Some((4, 5, GAIN_DEFAULT)));
+        assert!((organ_gain(GAIN_DEFAULT) - 1.0).abs() < 1e-6);
     }
 
     #[test]
