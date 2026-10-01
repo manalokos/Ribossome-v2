@@ -162,6 +162,12 @@ massa (Da), volume da cadeia lateral, carga a pH 7, hidrofobicidade
 flexibilidade. **Nenhum outro número por aminoácido.**
 
 ### 8.3 Dobragem ao nascer
+
+> **Retirada (out. 2026).** Custava O(n²) por agente nos primeiros passos de
+> vida e pouco acrescentava num modelo 2D com um segmento por resíduo. O
+> corpo nasce com o ângulo de repouso de cada aminoácido (`REST_ANGLE`,
+> valores do v3), como no v3. O texto abaixo fica como registo.
+
 - Energia de contacto da **matriz de Miyazawa–Jernigan** (20×20, valores
   medidos), mais uma penalização de ângulo pela tendência local.
 - Cerca de 50 iterações de relaxação quando o agente nasce, num kernel que

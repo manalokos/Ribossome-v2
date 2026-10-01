@@ -1,6 +1,6 @@
 //! Os organismos nadam? Desliga tudo o que os move por fora (fluido,
 //! browniano, difusioforese, contacto) e mede o deslocamento só pela
-//! mudança de forma (RFT), depois da dobragem.
+//! mudança de forma (RFT).
 use std::collections::HashMap;
 
 use ribossome::gpu::Gpu;
@@ -37,7 +37,7 @@ fn case(gpu: &Gpu, name: &str, rft: bool, motor: f32, kt: f32, coupling: f32) {
         std::env::var("MAINT").ok().and_then(|v| v.parse().ok()).unwrap_or(world.params.maintenance_cost);
     let mut rng = ribossome::life::SplitMix(4);
     world.request_seeds(&ribossome::life::seed_requests(2000, [40, 200], true, cfg.sim_size(), &mut rng));
-    run(gpu, &mut world, 150); // dobragem
+    run(gpu, &mut world, 150); // assentar
     let before: HashMap<u32, (f32, f32)> = world
         .read_agents_blocking(gpu)
         .iter()

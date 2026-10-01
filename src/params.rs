@@ -183,7 +183,7 @@ impl Default for SimParams {
             phoretic_gain: 100.0,
             chain_stiffness: 20.0,
             // 0 por omissão (pedido do Filipe): sem tremor térmico, o movimento
-            // próprio vem só dos sinais; a dobragem fica um gradiente puro.
+            // próprio vem só dos sinais.
             thermal_kt: 0.0,
             // 0: com órgãos, quem move as juntas são os músculos (o motor
             // catalítico "puro" fica como opção).

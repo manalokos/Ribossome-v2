@@ -8,7 +8,7 @@
 //! ganho = 2^((índice − 32)/8), de ×0,06 a ×15 (9 bases no total); sem ele o
 //! ganho é 1 (6 bases). A intensidade multiplica a emissão dos sensores,
 //! relógios e relés e a amplificação do músculo.
-//! Fisicamente (massa, dobragem MJ, catálise) o órgão continua a ser o
+//! Fisicamente (massa, ângulo de repouso, catálise) o órgão continua a ser o
 //! aminoácido promotor; o órgão acrescenta-lhe uma função.
 //!
 //! Os sinais internos são dois canais (α, β) por resíduo, conduzidos entre

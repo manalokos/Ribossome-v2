@@ -272,9 +272,6 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         a.rot += swim.z + swim_raw.w;
     }
-    if (a.age + 1u == FOLD_STEPS) {
-        a.radius = contact_radius(slot, a.body_len);
-    }
     a.age += 1u;
 
     // ---- Deriva passiva: levado à velocidade da água (baixo Reynolds). ----
