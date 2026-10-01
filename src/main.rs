@@ -28,6 +28,10 @@ struct Running {
     ui: UiState,
     cursor: [f32; 2],
     dragging: bool,
+    /// Onde o botão esquerdo foi premido e se o rato já se mexeu (clique vs arrastar).
+    press_pos: [f32; 2],
+    press_moved: bool,
+    inspector: ui::inspector::Inspector,
     seed: u64,
     seed_rng: ribossome::life::SplitMix,
 }
@@ -98,7 +102,9 @@ impl Running {
             None,
             Some(gpu.device.limits().max_texture_dimension_2d as usize),
         );
-        let egui_renderer = egui_wgpu::Renderer::new(&gpu.device, format, egui_wgpu::RendererOptions::default());
+        let mut egui_renderer = egui_wgpu::Renderer::new(&gpu.device, format, egui_wgpu::RendererOptions::default());
+        let mut inspector = ui::inspector::Inspector::new(&gpu, &world);
+        inspector.register(&gpu.device, &mut egui_renderer);
 
         Self {
             window,
@@ -114,6 +120,9 @@ impl Running {
             ui: UiState::new(baseline),
             cursor: [0.0; 2],
             dragging: false,
+            press_pos: [0.0; 2],
+            press_moved: false,
+            inspector,
             seed,
             seed_rng: ribossome::life::SplitMix(seed ^ 0x5EED),
         }
@@ -130,6 +139,12 @@ impl Running {
     }
 
     fn redraw(&mut self) {
+        self.inspector.poll(&self.gpu.device);
+        if self.inspector.follow
+            && let Some(d) = &self.inspector.data
+        {
+            self.cam.center = [d.agent.pos_x, d.agent.pos_y];
+        }
         if let Some(l) = self.world.poll_ledger(&self.gpu.device) {
             self.ui.ledger = Some(l);
             self.ui.ledger_epoch = self.world.params.epoch;
@@ -173,7 +188,10 @@ impl Running {
         // UI primeiro (pode mudar params e vista neste frame).
         let raw = self.egui_state.take_egui_input(&self.window);
         let ctx = self.egui_state.egui_ctx().clone();
-        let mut out = ctx.run_ui(raw, |root| ui::draw(root.ctx(), &mut self.ui, &mut self.world, &mut self.profiler));
+        let mut out = ctx.run_ui(raw, |root| {
+            ui::draw(root.ctx(), &mut self.ui, &mut self.world, &mut self.profiler);
+            ui::inspector::draw(root.ctx(), &mut self.inspector);
+        });
         self.egui_state.handle_platform_output(&self.window, out.platform_output);
         let jobs = ctx.tessellate(out.shapes, out.pixels_per_point);
         let sd = egui_wgpu::ScreenDescriptor {
@@ -187,7 +205,7 @@ impl Running {
         }
         self.view.update(&self.gpu.queue, &self.cam, screen, self.ui.view_mode, self.ui.monomer_brightness);
 
-        let Running { gpu, world, view, egui_renderer, profiler, ui: st, .. } = self;
+        let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, .. } = self;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {
             let n = st.steps_per_frame;
@@ -195,6 +213,10 @@ impl Running {
         }
         frame.segment("ledger", |enc| world.encode_ledger_readback(enc));
         frame.segment("draw list", |enc| world.encode_draw_list(enc));
+        frame.segment("inspect", |enc| {
+            inspector.encode(world, enc);
+            inspector.encode_preview(&gpu.queue, enc);
+        });
 
         let mut egui_enc = gpu.device.create_command_encoder(&Default::default());
         let mut extra = egui_renderer.update_buffers(&gpu.device, &gpu.queue, &mut egui_enc, &jobs, &sd);
@@ -225,6 +247,7 @@ impl Running {
         });
         frame.finish();
         world.ledger_after_submit();
+        inspector.after_submit();
 
         self.window.pre_present_notify();
         self.gpu.queue.present(tex);
@@ -251,13 +274,31 @@ impl Running {
                 let p = [position.x as f32, position.y as f32];
                 if self.dragging {
                     self.cam.pan_pixels([p[0] - self.cursor[0], p[1] - self.cursor[1]]);
+                    let (dx, dy) = (p[0] - self.press_pos[0], p[1] - self.press_pos[1]);
+                    if dx * dx + dy * dy > 16.0 {
+                        self.press_moved = true;
+                    }
                 }
                 self.cursor = p;
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let pan_button = matches!(button, MouseButton::Left | MouseButton::Right | MouseButton::Middle);
                 if pan_button {
+                    let was_dragging = self.dragging;
                     self.dragging = state == ElementState::Pressed && !egui_mouse;
+                    if self.dragging {
+                        self.press_pos = self.cursor;
+                        self.press_moved = false;
+                    }
+                    // Clique esquerdo sem arrastar: seleciona o organismo mais próximo.
+                    if button == MouseButton::Left
+                        && state == ElementState::Released
+                        && was_dragging
+                        && !self.press_moved
+                    {
+                        let w = self.cam.screen_to_world(self.cursor, self.screen());
+                        self.inspector.pick(&self.gpu, &self.world, w);
+                    }
                 }
             }
             WindowEvent::MouseWheel { delta, .. } if !egui_mouse => {

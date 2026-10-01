@@ -1,4 +1,6 @@
-//! Painéis egui: livro-razão, profiler, sliders do mundo, vistas de debug.
+//! Painéis egui: livro-razão, profiler, sliders do mundo, vistas de debug, inspetor.
+
+pub mod inspector;
 
 use crate::gpu::profiler::Profiler;
 use crate::world::{Ledger, MAX_STEPS_PER_FRAME, World};
@@ -58,7 +60,15 @@ pub const VIEW_NAMES: [&str; 10] = [
 const CH: [&str; 4] = ["A", "U", "G", "C"];
 
 pub fn draw(ctx: &egui::Context, st: &mut UiState, world: &mut World, prof: &mut Profiler) {
-    egui::Window::new("Ribossome v4").default_pos([12.0, 12.0]).show(ctx, |ui| {
+    // Altura máxima e barra de deslocamento: o painel é comprido.
+    let max_h = ctx.content_rect().height() - 40.0;
+    egui::Window::new("Ribossome v4").default_pos([12.0, 12.0]).max_height(max_h).show(ctx, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| main_panel(ui, st, world, prof));
+    });
+}
+
+fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut Profiler) {
+    {
         ui.horizontal(|ui| {
             if ui.button(if st.paused { "▶ continuar" } else { "⏸ pausa" }).clicked() {
                 st.paused = !st.paused;
@@ -96,7 +106,7 @@ pub fn draw(ctx: &egui::Context, st: &mut UiState, world: &mut World, prof: &mut
                 }
             });
         }
-    });
+    }
 }
 
 fn world_panel(ui: &mut egui::Ui, world: &mut World) {
