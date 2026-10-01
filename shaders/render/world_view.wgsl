@@ -100,6 +100,14 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         return vec4<f32>(mix(water, vec3<f32>(0.75), t), 1.0);
     }
 
+    // Terreno: rocha (>= 3) e entulho (1–2), com textura da contagem.
+    let g = gamma_view[idx];
+    if (g > 0u) {
+        let rock = vec3<f32>(0.32, 0.29, 0.26) + 0.04 * f32(g % 3u);
+        let rubble = vec3<f32>(0.22, 0.20, 0.18);
+        return vec4<f32>(select(rubble, rock, g >= 3u), 1.0);
+    }
+
     // Normal: tom = mistura dos canais ativados; gastos puxam para cinzento.
     let act_sum = dot(act, vec4<f32>(1.0));
     let total = act_sum + dot(spent, vec4<f32>(1.0));

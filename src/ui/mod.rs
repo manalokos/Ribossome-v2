@@ -92,11 +92,13 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
     egui::CollapsingHeader::new("Monómeros").default_open(true).show(ui, |ui| {
         ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("difusão ×"));
         ui.add(egui::Slider::new(&mut p.settle, 0.0..=10.0).text("assentamento ×"));
+        ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));
         ui.add(egui::Slider::new(&mut p.uv_strength, 0.0..=10.0).text("força UV"));
         light_changed = ui.add(egui::Slider::new(&mut p.uv_depth, 0.5..=30.0).text("atenuação UV")).changed();
     });
     egui::CollapsingHeader::new("Fluido").default_open(true).show(ui, |ui| {
         ui.checkbox(&mut st.fluid_enabled, "fluido ligado");
+        ui.checkbox(&mut st.terrain_enabled, "física do terreno ligada");
         ui.add(egui::Slider::new(&mut st.jacobi_iters, 2..=256).text("iterações Jacobi"));
         ui.add(egui::Slider::new(&mut st.fluid_substep, 1..=4).text("resolve de N em N passos"));
         ui.add(egui::Slider::new(&mut p.fluid_vorticity, 0.0..=10.0).text("vorticidade"));

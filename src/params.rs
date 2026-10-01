@@ -77,6 +77,14 @@ gpu_struct! {
         pub uv_strength: f32,
         /// Atenuação da UV pela água, do topo ao fundo (slider "uv_depth" do v3).
         pub uv_depth: f32,
+        /// 1 = fluido ligado (com 0 os monómeros e grãos não são advectados).
+        pub fluid_enabled: u32,
+        /// Permeabilidade pelo declive: perm = 1/(1 + k·|declive|).
+        pub fluid_obstacle_strength: f32,
+        /// Rapidez com que o escoamento roda para "declive abaixo" (1/s).
+        pub slope_steer_rate: f32,
+        /// Coesão: enviesamento da difusão dos ativados para vizinhos do mesmo tipo.
+        pub cohesion: f32,
     }
 }
 
@@ -95,6 +103,10 @@ impl Default for SimParams {
             fumarole_count: 0,
             uv_strength: 3.0,
             uv_depth: 11.0,
+            fluid_enabled: 1,
+            fluid_obstacle_strength: 1000.0,
+            slope_steer_rate: 210.0,
+            cohesion: 0.6,
         }
     }
 }

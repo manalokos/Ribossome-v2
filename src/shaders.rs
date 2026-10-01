@@ -37,6 +37,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         "world/fluid.wgsl",
         "world/light.wgsl",
         "world/transport.wgsl",
+        "world/terrain.wgsl",
         "world/ledger.wgsl",
     ],
     entries: &[
@@ -58,6 +59,9 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("jacobi_pressure", Stage::Compute),
         ("subtract_gradient", Stage::Compute),
         ("enforce_boundaries", Stage::Compute),
+        ("compute_gamma_slope", Stage::Compute),
+        ("relax_gamma_a", Stage::Compute),
+        ("relax_gamma_b", Stage::Compute),
     ],
 };
 

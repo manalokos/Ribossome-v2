@@ -1,5 +1,7 @@
 //! O mundo: grelha de monómeros, fluido com temperatura, luz UV e terreno.
 
+pub mod terrain;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -64,13 +66,15 @@ pub struct WorldSettings {
     pub jacobi_iters: u32,
     /// Recalcula a luz UV de N em N passos.
     pub light_interval: u32,
+    /// Física dos grãos do terreno ligada.
+    pub terrain_enabled: bool,
 }
 
 impl Default for WorldSettings {
     fn default() -> Self {
         // Jacobi 128 (o v3 usava 10): com 10 a pressão não convergia e o fluido
         // criava e destruía água (~50% de fluxo líquido através de uma linha).
-        Self { fluid_enabled: true, fluid_substep: 2, jacobi_iters: 128, light_interval: 100 }
+        Self { fluid_enabled: true, fluid_substep: 2, jacobi_iters: 128, light_interval: 100, terrain_enabled: true }
     }
 }
 
@@ -93,6 +97,9 @@ struct Pipelines {
     jacobi: wgpu::ComputePipeline,
     subtract_gradient: wgpu::ComputePipeline,
     boundaries: wgpu::ComputePipeline,
+    slope: wgpu::ComputePipeline,
+    relax_a: wgpu::ComputePipeline,
+    relax_b: wgpu::ComputePipeline,
 }
 
 pub struct World {
@@ -105,6 +112,7 @@ pub struct World {
     pub chem_buf: wgpu::Buffer,
     pub gamma_buf: wgpu::Buffer,
     pub light_buf: wgpu::Buffer,
+    pub slope_buf: wgpu::Buffer,
     /// Velocidade final do fluido (velocity_a).
     pub velocity_buf: wgpu::Buffer,
     /// Temperatura publicada (temp_in).
@@ -159,6 +167,7 @@ impl World {
         let ledger_buf = storage_buffer(device, "ledger", 8 * 4);
         let gamma_buf = storage_buffer(device, "gamma grid", cells * 4);
         let light_buf = storage_buffer(device, "uv light", cells * 4);
+        let slope_buf = storage_buffer(device, "gamma slope", cells * 8);
         let ledger_staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ledger staging"),
             size: 8 * 4,
@@ -193,12 +202,7 @@ impl World {
         // Grupo 1 — mundo (resolução do ambiente).
         let world_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("world layout"),
-            entries: &[
-                storage_entry(0, false),
-                storage_entry(1, false),
-                storage_entry(2, false),
-                storage_entry(3, false),
-            ],
+            entries: &(0..5).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
         });
         // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
         let fluid_entries: Vec<_> = (0..10).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
@@ -227,7 +231,8 @@ impl World {
                 .collect();
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(label), layout, entries: &entries })
         };
-        let world_bg = bind_all("world bg", &world_layout, &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf]);
+        let world_bg =
+            bind_all("world bg", &world_layout, &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf]);
         // Ping-pong: "ab" lê a e escreve b (velocidade e pressão em simultâneo).
         let fluid_ab = bind_all(
             "fluid ab",
@@ -275,6 +280,9 @@ impl World {
             jacobi: compute("jacobi_pressure"),
             subtract_gradient: compute("subtract_gradient"),
             boundaries: compute("enforce_boundaries"),
+            slope: compute("compute_gamma_slope"),
+            relax_a: compute("relax_gamma_a"),
+            relax_b: compute("relax_gamma_b"),
         };
 
         Self {
@@ -287,6 +295,7 @@ impl World {
             chem_buf,
             gamma_buf,
             light_buf,
+            slope_buf,
             velocity_buf: vel_a,
             temp_buf: temp_a,
             fumarole_buf,
@@ -301,12 +310,26 @@ impl World {
         }
     }
 
-    /// Enche o mundo com matéria inicial (determinista para a semente).
-    /// Devolve a contagem exata do que foi escrito.
+    /// Gera o terreno e a matéria inicial (determinista para a semente).
+    /// As células com gamma ficam sem monómeros. Devolve a contagem exata
+    /// dos monómeros escritos.
     pub fn seed_matter(&mut self, gpu: &Gpu, seed: u64) -> Ledger {
-        let cells = seed_cells(&self.cfg, seed);
+        let gamma = terrain::generate(&self.cfg, seed as u32, &self.fumaroles);
+        let mut cells = seed_cells(&self.cfg, seed);
+        for (i, &g) in gamma.iter().enumerate() {
+            if g > 0 {
+                cells[i * 4..i * 4 + 4].fill(0);
+            }
+        }
+        gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
         gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
+        self.light_dirty = true;
         Ledger::from_cells(&cells)
+    }
+
+    /// Lê o terreno inteiro de forma síncrona (testes).
+    pub fn read_gamma_blocking(&self, gpu: &Gpu) -> Vec<u32> {
+        bytemuck::cast_slice(&gpu.read_buffer_blocking(&self.gamma_buf)).to_vec()
     }
 
     /// Pede que a luz seja recalculada no próximo passo (p. ex. o terreno mudou).
@@ -329,6 +352,7 @@ impl World {
         }
         self.params.fumarole_count = nfum as u32;
         self.params.fluid_dt = self.params.dt * substep as f32;
+        self.params.fluid_enabled = st.fluid_enabled as u32;
 
         let mut bytes = vec![0u8; (PARAMS_STRIDE * steps as u64) as usize];
         for i in 0..steps {
@@ -354,6 +378,13 @@ impl World {
         for i in 0..steps {
             let epoch = self.params.epoch.wrapping_add(i);
             pass.set_bind_group(0, &self.frame_bg, &[(PARAMS_STRIDE * i as u64) as u32]);
+
+            // TERRENO: duas passagens de relaxação dos grãos e o declive.
+            if st.terrain_enabled {
+                run(&mut pass, &pl.relax_a, ab, [g, g]);
+                run(&mut pass, &pl.relax_b, ab, [g, g]);
+            }
+            run(&mut pass, &pl.slope, ab, [g, g]);
 
             if self.light_dirty || epoch % st.light_interval.max(1) == 0 {
                 self.light_dirty = false;

@@ -83,11 +83,31 @@ fn gamma_solidity_at_fluid_cell(x: u32, y: u32) -> f32 {
 }
 
 // 1 = água livre, 0 = sólido. Maioria sólida = parede (penínsulas finas
-// também bloqueiam). A permeabilidade pelo declive do v3 entra com o terreno.
+// também bloqueiam); declives fortes são pouco permeáveis:
+// perm = 1 / (1 + k·|declive|).
 fn permeability(x: u32, y: u32) -> f32 {
     let solidity = gamma_solidity_at_fluid_cell(x, y);
     if (solidity >= 0.5) { return 0.0; }
-    return clamp(1.0 - solidity * 2.0, 0.0, 1.0);
+    let slope = sanitize_vec2(slope_grid[env_cell_for_fluid(x, y)]);
+    let slope_perm = clamp(1.0 / (1.0 + max(params.fluid_obstacle_strength, 0.0) * length(slope)), 0.0, 1.0);
+    return min(slope_perm, clamp(1.0 - solidity * 2.0, 0.0, 1.0));
+}
+
+// DESVIO PELO DECLIVE: mantém |v| e roda a direção para "declive abaixo",
+// mais quanto mais desalinhada estiver (independente do dt).
+fn slope_steer_velocity(x: u32, y: u32, v_in: vec2<f32>, dt: f32) -> vec2<f32> {
+    let s = -sanitize_vec2(slope_grid[env_cell_for_fluid(x, y)]);
+    let v_len = length(v_in);
+    let s_len = length(s);
+    if (v_len < 1e-5 || s_len < 1e-5) { return v_in; }
+    let v_dir = v_in / v_len;
+    let s_dir = s / s_len;
+    let misalign = clamp(1.0 - dot(v_dir, s_dir), 0.0, 2.0);
+    let t = clamp(1.0 - exp(-max(params.slope_steer_rate, 0.0) * misalign * dt), 0.0, 1.0);
+    let dir_raw = v_dir + (s_dir - v_dir) * t;
+    let dir_len = length(dir_raw);
+    if (dir_len < 1e-5) { return v_in; }
+    return (dir_raw / dir_len) * v_len;
 }
 
 fn is_effectively_solid(x: u32, y: u32) -> bool {
@@ -125,7 +145,7 @@ fn solid_normal_from_neighbors(x: u32, y: u32) -> vec2<f32> {
 fn reflect_if_into_solid(x: u32, y: u32, v_in: vec2<f32>) -> vec2<f32> {
     let n = solid_normal_from_neighbors(x, y);
     let d = dot(v_in, n);
-    if (length(n) > 1e-6 && d < 0.0) { return v_in - 2.0 * n * d; }
+    if (length(n) > 1e-6 && d < 0.0) { return v_in - n * d; }
     return v_in;
 }
 
@@ -314,6 +334,7 @@ fn add_forces(@builtin(global_invocation_id) gid: vec3<u32>) {
         + (force_at(xm, ym) + force_at(xp, ym) + force_at(xm, yp) + force_at(xp, yp)) + 20.0 * f_c) * (1.0 / 36.0);
     let f_user = clamp_vec2_len(mix(f_c, f_avg, FORCE_SMOOTH_MIX), MAX_FORCE);
     var v = sanitize_vec2(sanitize_vec2(velocity_in[idx]) + f_user * dt);
+    v = slope_steer_velocity(x, y, v, dt);
     v = reflect_if_into_solid(x, y, v);
     velocity_out[idx] = clamp_vec2_len(v, MAX_VEL);
 }
@@ -404,20 +425,36 @@ fn vorticity_confinement(@builtin(global_invocation_id) gid: vec3<u32>) {
     velocity_out[idx] = clamp_vec2_len(v, MAX_VEL);
 }
 
+// Vizinho para a divergência. Se for parede (fora do domínio) ou sólido,
+// usa uma célula-fantasma que ESPELHA a componente normal da célula atual:
+// a velocidade na face da parede fica exatamente zero (impermeável). Assim
+// a projeção "vê" as paredes; antes a divergência era forçada a zero nas
+// bordas e uma deriva uniforme atravessava o teto sem ser corrigida.
+fn div_neighbor(v_c: vec2<f32>, nx: i32, ny: i32, axis_x: bool) -> vec2<f32> {
+    let outside = nx < 0 || ny < 0 || nx >= i32(FLUID_SIZE) || ny >= i32(FLUID_SIZE);
+    if (outside || is_effectively_solid(u32(nx), u32(ny))) {
+        return select(vec2<f32>(v_c.x, -v_c.y), vec2<f32>(-v_c.x, v_c.y), axis_x);
+    }
+    return raw_velocity_cell(u32(nx), u32(ny));
+}
+
 @compute @workgroup_size(16, 16)
 fn compute_divergence(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = gid.x;
     let y = gid.y;
     if (x >= FLUID_SIZE || y >= FLUID_SIZE) { return; }
     let idx = fgrid(x, y);
-    if (is_effectively_solid(x, y) || x == 0u || x == FLUID_SIZE - 1u || y == 0u || y == FLUID_SIZE - 1u) {
+    if (is_effectively_solid(x, y)) {
         divergence[idx] = 0.0;
         return;
     }
-    let v_l = reflect_if_into_solid(x - 1u, y, raw_velocity_cell(x - 1u, y));
-    let v_r = reflect_if_into_solid(x + 1u, y, raw_velocity_cell(x + 1u, y));
-    let v_b = reflect_if_into_solid(x, y - 1u, raw_velocity_cell(x, y - 1u));
-    let v_t = reflect_if_into_solid(x, y + 1u, raw_velocity_cell(x, y + 1u));
+    let v_c = raw_velocity_cell(x, y);
+    let xi = i32(x);
+    let yi = i32(y);
+    let v_l = div_neighbor(v_c, xi - 1, yi, true);
+    let v_r = div_neighbor(v_c, xi + 1, yi, true);
+    let v_b = div_neighbor(v_c, xi, yi - 1, false);
+    let v_t = div_neighbor(v_c, xi, yi + 1, false);
     divergence[idx] = 0.5 * ((v_r.x - v_l.x) + (v_t.y - v_b.y));
 }
 

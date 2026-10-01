@@ -11,6 +11,8 @@
 @group(1) @binding(2) var<storage, read_write> gamma_grid: array<atomic<u32>>;
 // Luz UV por célula (0..1), recalculada de tempos a tempos.
 @group(1) @binding(3) var<storage, read_write> light_grid: array<f32>;
+// Declive do terreno por unidade do mundo (recalculado a cada passo).
+@group(1) @binding(4) var<storage, read_write> slope_grid: array<vec2<f32>>;
 
 // ---- Grupo 2: fluido (resolução FLUID_SIZE) ----
 // Velocidade em células do fluido por segundo. Pares in/out alternam por bind group.

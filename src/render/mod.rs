@@ -1,5 +1,7 @@
 //! Render: vista do mundo e câmara. (Aminoácidos instanciados na fase 4.)
 
+pub mod capture;
+
 use crate::params::{ViewParams, WorldConfig};
 use crate::shaders;
 use crate::world::World;

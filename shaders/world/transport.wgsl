@@ -25,7 +25,6 @@ const LIGHT_ACT_P: f32 = 0.006;        // fotoativação por monómero gasto, lu
 const CHEM_DECAY_P: f32 = 0.0002;      // hidrólise da ativação
 const CHEM_SENSITIZE: f32 = 0.5;       // ativados na célula ajudam a ativar os gastos
 const CHEM_SHIELD: f32 = 0.5;          // ativados juntos decaem menos
-const CHEM_COHESION: f32 = 0.6;        // difusão enviesada para vizinhos ativados do mesmo tipo
 // Ativação térmica: água acima deste T reativa monómeros gastos.
 const TEMP_ACT_THRESHOLD: f32 = 2.0;
 const FUMAROLE_ACT_P: f32 = 0.15;
@@ -54,7 +53,10 @@ fn transport_quanta(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Célula do ambiente -> posição no MUNDO (não passar coordenadas de
     // célula a funções de mundo: no v3 isso congelou todos os monómeros).
     let cell_w = f32(WORLD_UNITS_PER_CELL);
-    let v = fluid_velocity_at_world(vec2<f32>(f32(x) + 0.5, f32(y) + 0.5) * cell_w);
+    var v = vec2<f32>(0.0);
+    if (params.fluid_enabled != 0u) {
+        v = fluid_velocity_at_world(vec2<f32>(f32(x) + 0.5, f32(y) + 0.5) * cell_w);
+    }
     let p_adv = parcel_hop_p(v);
     let agitation = clamp(length(v) / DIFF_AGITATION_SPEED, 0.0, 1.0);
     let p_diff = clamp(DIFF_HOP_P * mix(DIFF_HOP_FLOOR, 1.0, agitation) * max(params.diffusion, 0.0), 0.0, 0.5);
@@ -105,11 +107,11 @@ fn transport_quanta(@builtin(global_invocation_id) gid: vec3<u32>) {
         // COESÃO: os ativados difundem-se de preferência para vizinhos ricos
         // em ativados do mesmo tipo (gotículas, coacervados).
         var coh = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
-        if (act_n > 0u && CHEM_COHESION > 0.0) {
-            if (x + 1u < GRID_SIZE) { coh[0] = 1.0 + CHEM_COHESION * f32(min(chem_act_count(idx + 1u, ch), 8u)); }
-            if (x > 0u) { coh[1] = 1.0 + CHEM_COHESION * f32(min(chem_act_count(idx - 1u, ch), 8u)); }
-            if (y + 1u < GRID_SIZE) { coh[2] = 1.0 + CHEM_COHESION * f32(min(chem_act_count(idx + GRID_SIZE, ch), 8u)); }
-            if (y > 0u) { coh[3] = 1.0 + CHEM_COHESION * f32(min(chem_act_count(idx - GRID_SIZE, ch), 8u)); }
+        if (act_n > 0u && params.cohesion > 0.0) {
+            if (x + 1u < GRID_SIZE) { coh[0] = 1.0 + params.cohesion * f32(min(chem_act_count(idx + 1u, ch), 8u)); }
+            if (x > 0u) { coh[1] = 1.0 + params.cohesion * f32(min(chem_act_count(idx - 1u, ch), 8u)); }
+            if (y + 1u < GRID_SIZE) { coh[2] = 1.0 + params.cohesion * f32(min(chem_act_count(idx + GRID_SIZE, ch), 8u)); }
+            if (y > 0u) { coh[3] = 1.0 + params.cohesion * f32(min(chem_act_count(idx - GRID_SIZE, ch), 8u)); }
         }
         let coh_sum = coh[0] + coh[1] + coh[2] + coh[3];
 

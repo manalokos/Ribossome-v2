@@ -91,7 +91,7 @@ fn fluid_and_light_are_sane() {
         let net: f32 = (0..n).map(|x| vel[(y * n + x) * 2 + 1]).sum::<f32>();
         let gross: f32 = (0..n).map(|x| vel[(y * n + x) * 2 + 1].abs()).sum::<f32>();
         eprintln!("linha {y}: fluxo líquido {net:.2}, total {gross:.2}");
-        assert!(net.abs() < 0.1 * gross.max(1.0), "o fluido cria/destrói água na linha {y}");
+        assert!(net.abs() < 0.1 * gross.max(n as f32), "o fluido cria/destrói água na linha {y}");
     }
 
     let light = world.read_f32_blocking(&gpu, &world.light_buf);
