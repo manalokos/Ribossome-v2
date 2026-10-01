@@ -2,6 +2,7 @@
 //! Ver `docs/ARQUITETURA_V4.md`.
 
 pub mod gpu;
+pub mod life;
 pub mod params;
 pub mod render;
 pub mod shaders;
