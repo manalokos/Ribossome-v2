@@ -53,11 +53,10 @@ fn organ_capacity(slot: u32, n: u32) -> f32 {
 }
 
 fn organ_upkeep(slot: u32, n: u32) -> f32 {
-    var up = ORGAN_UPKEEP;
     var u = 0.0;
     for (var k = 0u; k < n; k++) {
         let t = organ_type(organ_get(slot, k));
-        if (t != 0xFFu) { u += up[t]; }
+        if (t != 0xFFu) { u += ORGAN_UPKEEP[t]; }
     }
     return u;
 }
@@ -72,15 +71,12 @@ fn organ_catalysis_mult(slot: u32, k: u32) -> f32 {
 // aminoácido com a sua sensibilidade a α e a β; o órgão "músculo" amplifica
 // a resposta local ×(2 + parâmetro/2).
 fn signal_deflection(slot: u32, k: u32) -> f32 {
-    var sa = AA_ALPHA_SENS;
-    var sb = AA_BETA_SENS;
     let aa = body_get(slot, k);
     let s = signals[slot * MAX_BODY + k];
     let o = organ_get(slot, k);
     let amp = select(1.0, (2.0 + 0.5 * f32(organ_param(o))) * organ_gain(o), organ_type(o) == ORGAN_MUSCLE);
-    var mb = AA_MAX_BEND;
-    let lim = mb[aa];
-    return lim * tanh(SIGNAL_GAIN * amp * (s.x * sa[aa] + s.y * sb[aa]) / lim);
+    let lim = AA_MAX_BEND[aa];
+    return lim * tanh(SIGNAL_GAIN * amp * (s.x * AA_ALPHA_SENS[aa] + s.y * AA_BETA_SENS[aa]) / lim);
 }
 
 // Amostra as células num disco de raio SENSOR_RADIUS à volta de `pos`:
@@ -202,12 +198,11 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
     // Condução com um passo de atraso: o resíduo k recebe o que os vizinhos
     // k−1 (lado N) e k+1 (lado C) tinham no passo anterior, pesado pela
     // condutividade do seu aminoácido, perdendo SIGNAL_DECAY, mais a emissão.
-    var cond = AA_CONDUCTANCE;
     var prev = vec2<f32>(0.0);
     for (var k = 0u; k < n; k++) {
         let here = signals[base + k];
         let next = select(vec2<f32>(0.0), signals[base + k + 1u], k + 1u < n);
-        let c = cond[body_get(slot, k)];
+        let c = AA_CONDUCTANCE[body_get(slot, k)];
         let incoming = vec2<f32>(c.x * prev.x + c.y * next.x, c.z * prev.y + c.w * next.y);
         let s = SIGNAL_DECAY * incoming + emit[k];
         signals[base + k] = clamp(s, vec2<f32>(-SIGNAL_MAX), vec2<f32>(SIGNAL_MAX));

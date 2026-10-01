@@ -296,7 +296,6 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // (M-CSA), à comida na célula e à fome. Na hidrólise o monómero fica no
     // lugar, gasto, e a ativação vira energia do agente. Cada estado desvia
     // o ângulo da junta (fold.wgsl): o ciclo irreversível é um motor.
-    var cat = AA_CATALYTIC;
     // Fluxo de consumo por direção (difusioforese): soma de taxa × direção
     // do resíduo a partir do centro de massa. Consumo simétrico cancela.
     var phoretic = vec2<f32>(0.0);
@@ -310,7 +309,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // catalisa sempre que há substrato e a energia a mais perde-se como
         // calor. (A regulação pela fome do v3 fica como opção.)
         let hunger = select(1.0, clamp(1.0 - a.energy / cap, 0.0, 1.0), params.hunger_regulation != 0u);
-        let pe = clamp(params.uptake_rate * cat[body_get(slot, k)] * organ_catalysis_mult(slot, k) * f32(tot) * hunger, 0.0, 1.0);
+        let pe = clamp(params.uptake_rate * AA_CATALYTIC[body_get(slot, k)] * organ_catalysis_mult(slot, k) * f32(tot) * hunger, 0.0, 1.0);
         let si = slot * MAX_BODY + k;
         let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);

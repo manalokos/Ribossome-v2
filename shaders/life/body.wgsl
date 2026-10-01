@@ -19,14 +19,12 @@ fn body_get(slot: u32, i: u32) -> u32 {
 
 // Massa de um resíduo nas unidades do v3 (0,02 por 118 Da).
 fn residue_mass(aa: u32) -> f32 {
-    var m = AA_MASS;
-    return 0.02 * m[aa] / 118.0;
+    return 0.02 * AA_MASS[aa] / 118.0;
 }
 
 // Ângulo de repouso da junta (com sinal; tabela do v3 em src/life/amino.rs).
 fn residue_bend(aa: u32) -> f32 {
-    var ra = AA_REST_ANGLE;
-    return ra[aa];
+    return AA_REST_ANGLE[aa];
 }
 
 // Traduz o genoma do slot, escreve bodies e body_pos e devolve o nº de resíduos.
@@ -42,27 +40,25 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
     for (var w = 0u; w < 16u; w++) { bodies[slot * 16u + w] = 0u; }
     for (var w = 0u; w < 32u; w++) { organs[slot * 32u + w] = 0u; }
     if (start == 0xFFFFFFFFu) { return 0u; }
-    var codons = CODON_TABLE;
-    var promo = AA_IS_PROMOTER;
     var n = 0u;
     var i = start;
     loop {
         if (i + 2u >= gene_len || n >= MAX_BODY) { break; }
         let c = genome_get(slot, i) * 16u + genome_get(slot, i + 1u) * 4u + genome_get(slot, i + 2u);
-        let aa = codons[c];
+        let aa = CODON_TABLE[c];
         if (aa == AA_STOP) { break; }
         bodies[slot * 16u + n / 4u] |= aa << ((n % 4u) * 8u);
         // ÓRGÃO: promotor seguido de um modificador que não é stop (6 bases).
         var step = 3u;
-        if (promo[aa] != 0u && i + 5u < gene_len) {
+        if (AA_IS_PROMOTER[aa] != 0u && i + 5u < gene_len) {
             let m = genome_get(slot, i + 3u) * 16u + genome_get(slot, i + 4u) * 4u + genome_get(slot, i + 5u);
-            if (codons[m] != AA_STOP) {
+            if (CODON_TABLE[m] != AA_STOP) {
                 // Segundo modificador: intensidade (senão 32 = ganho 1, 6 bases).
                 var gain = 32u;
                 step = 6u;
                 if (i + 8u < gene_len) {
                     let m2 = genome_get(slot, i + 6u) * 16u + genome_get(slot, i + 7u) * 4u + genome_get(slot, i + 8u);
-                    if (codons[m2] != AA_STOP) {
+                    if (CODON_TABLE[m2] != AA_STOP) {
                         gain = m2;
                         step = 9u;
                     }

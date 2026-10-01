@@ -30,9 +30,11 @@ Documentos: `docs/ARQUITETURA_V4.md`, `docs/handoff/*.md`.
    que faz X", procura antes a versão química.
 
 ## Armadilhas técnicas (aprendidas no v3)
-- **naga do wgpu 22** proíbe indexar dinamicamente arrays locais por valor e
-  `const` arrays: copia para `var` ou indexa o storage. (Se o v4 usar um
-  wgpu mais recente, verifica se ainda se aplica.)
+- **naga do wgpu 30 aceita indexar `const` arrays diretamente**
+  (`AA_MJ[i]`). NUNCA copiar uma tabela para `var` dentro de uma função
+  (era a regra do wgpu 22): cada chamada copia a tabela inteira para
+  memória privada. Com `mj()` na dobragem O(n²), isto tornava o passo 10×
+  mais lento (12 ms -> 1,2 ms com ~4500 agentes).
 - Valida todos os shaders com a versão exata do naga do wgpu em uso, com as
   constantes injetadas reais (os módulos são concatenados em Rust).
 - Verifica que todos os `entry_point` referidos em Rust existem nos shaders

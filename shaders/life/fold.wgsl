@@ -29,13 +29,11 @@ const JOINT_MAX_STEP: f32 = 0.05;
 const S_JOINT: u32 = 5u << 16u;     // + índice da junta
 
 fn mj(a: u32, b: u32) -> f32 {
-    var m = AA_MJ;
-    return m[a * 20u + b];
+    return AA_MJ[a * 20u + b];
 }
 
 fn joint_stiffness(aa: u32) -> f32 {
-    var f = AA_FLEX;
-    return params.chain_stiffness / (f[aa] * f[aa]);
+    return params.chain_stiffness / (AA_FLEX[aa] * AA_FLEX[aa]);
 }
 
 // Reconstrói as posições locais (centradas no centro de massa) a partir dos ângulos.
