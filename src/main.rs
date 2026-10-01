@@ -40,7 +40,7 @@ fn world_config_from_env() -> WorldConfig {
     let mut cfg = WorldConfig::DEFAULT;
     if let Some(g) = std::env::var("RIBO_GRID").ok().and_then(|v| v.parse::<u32>().ok()) {
         cfg.grid_size = g;
-        cfg.fluid_size = (g / 4).max(16);
+        cfg.fluid_size = (g / 2).max(16);
     }
     cfg
 }
@@ -82,7 +82,7 @@ impl Running {
         let seed = 1;
         let mut world = World::new(&gpu, cfg, seed as u32);
         let baseline = world.seed_matter(&gpu, seed);
-        let view = WorldView::new(&gpu.device, &cfg, &world.chem_buf, format);
+        let view = WorldView::new(&gpu.device, &world, format);
         let cam = Camera::fit(&cfg, [surface_cfg.width as f32, surface_cfg.height as f32]);
 
         let egui_ctx = egui::Context::default();
@@ -157,8 +157,7 @@ impl Running {
         // UI primeiro (pode mudar params e vista neste frame).
         let raw = self.egui_state.take_egui_input(&self.window);
         let ctx = self.egui_state.egui_ctx().clone();
-        let mut out =
-            ctx.run_ui(raw, |root| ui::draw(root.ctx(), &mut self.ui, &mut self.world.params, &mut self.profiler));
+        let mut out = ctx.run_ui(raw, |root| ui::draw(root.ctx(), &mut self.ui, &mut self.world, &mut self.profiler));
         self.egui_state.handle_platform_output(&self.window, out.platform_output);
         let jobs = ctx.tessellate(out.shapes, out.pixels_per_point);
         let sd = egui_wgpu::ScreenDescriptor {
@@ -176,7 +175,7 @@ impl Running {
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {
             let n = st.steps_per_frame;
-            frame.segment("chem", |enc| world.encode_steps(&gpu.queue, enc, n));
+            frame.segment("world", |enc| world.encode_steps(&gpu.queue, enc, n));
         }
         frame.segment("ledger", |enc| world.encode_ledger_readback(enc));
 
@@ -260,7 +259,7 @@ impl Running {
                     Key::Named(NamedKey::Home) => self.cam = Camera::fit(&self.world.cfg, self.screen()),
                     Key::Character(c) => {
                         if let Some(d) = c.chars().next().and_then(|c| c.to_digit(10))
-                            && d <= 5
+                            && d <= 9
                         {
                             // A mesma tecla volta à vista normal.
                             self.ui.view_mode = if self.ui.view_mode == d { 0 } else { d };

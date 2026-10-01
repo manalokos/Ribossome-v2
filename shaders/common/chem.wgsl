@@ -23,9 +23,10 @@ fn chem_cell_total(cell: u32) -> u32 {
     return t;
 }
 
-// Capacidade de uma célula (todos os canais e estados). No v3 é 0 em
-// células com gamma; o terreno entra na fase 2.
+// Capacidade de uma célula (todos os canais e estados): QUALQUER gamma
+// (rocha ou entulho) não guarda monómeros. O terreno é matéria sólida.
 fn chem_capacity(cell: u32) -> u32 {
+    if (gamma_count(cell) > 0u) { return 0u; }
     return CHEM_CELL_CAP;
 }
 

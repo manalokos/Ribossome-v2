@@ -5,7 +5,7 @@
 //! também os entry points que o Rust usa: o teste `tests/shaders.rs` valida
 //! cada módulo com o naga do próprio wgpu e confirma que todos existem.
 
-use crate::params::{SimParams, ViewParams, WorldConfig};
+use crate::params::{Fumarole, SimParams, ViewParams, WorldConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -32,11 +32,33 @@ pub const WORLD: ModuleDef = ModuleDef {
     files: wgsl_files![
         "world/bindings.wgsl",
         "common/rng.wgsl",
+        "common/terrain.wgsl",
         "common/chem.wgsl",
+        "world/fluid.wgsl",
+        "world/light.wgsl",
         "world/transport.wgsl",
         "world/ledger.wgsl",
     ],
-    entries: &[("transport_quanta", Stage::Compute), ("ledger_reduce", Stage::Compute)],
+    entries: &[
+        ("transport_quanta", Stage::Compute),
+        ("thermal_activation", Stage::Compute),
+        ("ledger_reduce", Stage::Compute),
+        ("compute_uv_light", Stage::Compute),
+        ("clear_force_vectors", Stage::Compute),
+        ("update_temperature", Stage::Compute),
+        ("copy_temperature", Stage::Compute),
+        ("buoyancy", Stage::Compute),
+        ("gather_forces", Stage::Compute),
+        ("add_forces", Stage::Compute),
+        ("clear_forces", Stage::Compute),
+        ("diffuse_velocity", Stage::Compute),
+        ("advect_velocity", Stage::Compute),
+        ("vorticity_confinement", Stage::Compute),
+        ("compute_divergence", Stage::Compute),
+        ("jacobi_pressure", Stage::Compute),
+        ("subtract_gradient", Stage::Compute),
+        ("enforce_boundaries", Stage::Compute),
+    ],
 };
 
 pub const WORLD_VIEW: ModuleDef = ModuleDef {
@@ -60,6 +82,7 @@ pub fn preamble(cfg: &WorldConfig) -> String {
     s += &format!("const CHEM_CELL_CAP: u32 = {}u;\n", CHEM_CELL_CAP);
     s += &SimParams::wgsl();
     s += &ViewParams::wgsl();
+    s += &Fumarole::wgsl();
     s
 }
 

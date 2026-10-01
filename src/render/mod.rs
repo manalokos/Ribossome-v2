@@ -2,6 +2,7 @@
 
 use crate::params::{ViewParams, WorldConfig};
 use crate::shaders;
+use crate::world::World;
 
 /// Câmara em unidades do MUNDO. Cima no ecrã = +y no mundo.
 #[derive(Clone, Copy, Debug)]
@@ -44,7 +45,8 @@ pub struct WorldView {
 }
 
 impl WorldView {
-    pub fn new(device: &wgpu::Device, cfg: &WorldConfig, chem_buf: &wgpu::Buffer, format: wgpu::TextureFormat) -> Self {
+    pub fn new(device: &wgpu::Device, world: &World, format: wgpu::TextureFormat) -> Self {
+        let cfg = &world.cfg;
         let view_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("view params"),
             size: size_of::<ViewParams>() as u64,
@@ -74,6 +76,46 @@ impl WorldView {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -81,7 +123,11 @@ impl WorldView {
             layout: &layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: view_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: chem_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: world.chem_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: world.gamma_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: world.light_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: world.temp_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: world.velocity_buf.as_entire_binding() },
             ],
         });
         let pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

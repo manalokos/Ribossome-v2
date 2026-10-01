@@ -49,21 +49,83 @@ macro_rules! gpu_struct {
 }
 
 gpu_struct! {
-    /// Parâmetros por frame (grupo 0, binding 0).
+    /// Parâmetros por passo (grupo 0, binding 0). Uma cópia por passo.
+    /// Os valores por omissão são os da última corrida do v3
+    /// (`simulation_settings.json`, que se sobrepunha aos defaults do código).
     pub struct SimParams {
         /// Contador de passos da simulação (semente temporal do RNG).
         pub epoch: u32,
         /// Semente do mundo.
         pub seed: u32,
-        /// Multiplicador da difusão (slider; 1 = valor afinado do v3).
+        /// Tempo por passo (s). O fluido e os monómeros usam o mesmo.
+        pub dt: f32,
+        /// Multiplicador da difusão dos monómeros (slider "monomer_diffusion" do v3).
         pub diffusion: f32,
-        pub _pad0: u32,
+        /// Multiplicador do assentamento dos monómeros (slider "gravity_monomer" do v3).
+        pub settle: f32,
+        /// dt de uma resolução do fluido = dt × fluid_substep.
+        pub fluid_dt: f32,
+        /// Amortecimento da velocidade por frame a 60 fps.
+        pub fluid_decay: f32,
+        /// Força do confinamento de vorticidade (limitada a 10).
+        pub fluid_vorticity: f32,
+        /// Viscosidade (células²/s).
+        pub fluid_viscosity: f32,
+        /// Número de fumarolas no buffer.
+        pub fumarole_count: u32,
+        /// Força da fotoativação UV (slider "uv_strength" do v3).
+        pub uv_strength: f32,
+        /// Atenuação da UV pela água, do topo ao fundo (slider "uv_depth" do v3).
+        pub uv_depth: f32,
     }
 }
 
 impl Default for SimParams {
     fn default() -> Self {
-        Self { epoch: 0, seed: 1, diffusion: 1.0, _pad0: 0 }
+        Self {
+            epoch: 0,
+            seed: 1,
+            dt: 0.017,
+            diffusion: 20.0,
+            settle: 0.0,
+            fluid_dt: 0.017 * 2.0,
+            fluid_decay: 0.999,
+            fluid_vorticity: 7.0,
+            fluid_viscosity: 3.7,
+            fumarole_count: 0,
+            uv_strength: 3.0,
+            uv_depth: 11.0,
+        }
+    }
+}
+
+gpu_struct! {
+    /// Fumarola: fonte de calor no fundo. A flutuação vem só da temperatura.
+    /// (No v3 havia também direção, variação e taxas de dye: já não eram usadas.)
+    pub struct Fumarole {
+        /// Posição em fração do mundo (0..1).
+        pub x_frac: f32,
+        pub y_frac: f32,
+        /// Intensidade do aquecimento.
+        pub strength: f32,
+        /// Raio, em unidades do MUNDO.
+        pub spread: f32,
+        pub enabled: u32,
+        pub _pad0: u32,
+        pub _pad1: u32,
+        pub _pad2: u32,
+    }
+}
+
+impl Fumarole {
+    pub fn new(x_frac: f32, y_frac: f32, strength: f32, spread_world: f32) -> Self {
+        Self { x_frac, y_frac, strength, spread: spread_world, enabled: 1, _pad0: 0, _pad1: 0, _pad2: 0 }
+    }
+
+    /// A fumarola ativa da última corrida do v3. O raio era 13,65 células de
+    /// um fluido de 1024² num mundo de 61440 → 13,65 × 60 = 819 unidades.
+    pub fn v3_default() -> Self {
+        Self::new(0.359, 0.0425, 5000.0, 819.0)
     }
 }
 
@@ -96,9 +158,11 @@ pub struct WorldConfig {
 }
 
 impl WorldConfig {
-    pub const DEFAULT: Self = Self { grid_size: 2048, fluid_size: 512, world_units_per_cell: 30 };
+    /// Fluido a 1024²: era o que o v3 corria (as constantes do fluido estão
+    /// afinadas em células do fluido).
+    pub const DEFAULT: Self = Self { grid_size: 2048, fluid_size: 1024, world_units_per_cell: 30 };
     /// Mundo pequeno para testes.
-    pub const TEST: Self = Self { grid_size: 256, fluid_size: 64, world_units_per_cell: 30 };
+    pub const TEST: Self = Self { grid_size: 256, fluid_size: 128, world_units_per_cell: 30 };
 
     pub fn sim_size(&self) -> f32 {
         (self.grid_size * self.world_units_per_cell) as f32
@@ -106,5 +170,9 @@ impl WorldConfig {
 
     pub fn cells(&self) -> u64 {
         self.grid_size as u64 * self.grid_size as u64
+    }
+
+    pub fn fluid_cells(&self) -> u64 {
+        self.fluid_size as u64 * self.fluid_size as u64
     }
 }

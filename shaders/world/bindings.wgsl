@@ -1,9 +1,27 @@
-// Grupo 0: frame. Grupo 1: mundo.
+// Grupo 0: frame. Grupo 1: mundo (resolução do ambiente). Grupo 2: fluido.
 @group(0) @binding(0) var<uniform> params: SimParams;
 
+// ---- Grupo 1: mundo ----
 // Grelha de monómeros: 4 u32 atómicos por célula (idx*4 + canal; 0=A 1=U 2=G 3=C).
 // 16 bits baixos = ATIVADOS, 16 bits altos = GASTOS.
 @group(1) @binding(0) var<storage, read_write> chem_grid: array<atomic<u32>>;
-
 // Livro-razão: [ativados A U G C, gastos A U G C].
 @group(1) @binding(1) var<storage, read_write> ledger: array<atomic<u32>, 8>;
+// Terreno: quanta inteiros de gamma por célula (rocha >= GAMMA_SOLID_THRESHOLD).
+@group(1) @binding(2) var<storage, read_write> gamma_grid: array<atomic<u32>>;
+// Luz UV por célula (0..1), recalculada de tempos a tempos.
+@group(1) @binding(3) var<storage, read_write> light_grid: array<f32>;
+
+// ---- Grupo 2: fluido (resolução FLUID_SIZE) ----
+// Velocidade em células do fluido por segundo. Pares in/out alternam por bind group.
+@group(2) @binding(0) var<storage, read> velocity_in: array<vec2<f32>>;
+@group(2) @binding(1) var<storage, read_write> velocity_out: array<vec2<f32>>;
+@group(2) @binding(2) var<storage, read> pressure_in: array<f32>;
+@group(2) @binding(3) var<storage, read_write> pressure_out: array<f32>;
+@group(2) @binding(4) var<storage, read_write> divergence: array<f32>;
+@group(2) @binding(5) var<storage, read_write> temp_in: array<f32>;
+@group(2) @binding(6) var<storage, read_write> temp_out: array<f32>;
+// Forças acumuladas (f32 como bits, atómico: muitos escritores por célula).
+@group(2) @binding(7) var<storage, read_write> force_vectors: array<atomic<u32>>;
+@group(2) @binding(8) var<storage, read_write> fluid_forces: array<vec2<f32>>;
+@group(2) @binding(9) var<storage, read> fumaroles: array<Fumarole>;

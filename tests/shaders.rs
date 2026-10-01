@@ -3,7 +3,7 @@
 //! também que os entry points registados existem com o estágio certo e que
 //! as structs geradas têm o mesmo tamanho no WGSL e no Rust.
 
-use ribossome::params::{SimParams, ViewParams, WorldConfig};
+use ribossome::params::{Fumarole, SimParams, ViewParams, WorldConfig};
 use ribossome::shaders::{self, MODULES, Stage};
 use wgpu::naga;
 
@@ -62,9 +62,11 @@ fn generated_structs_match_rust_layout() {
     let (module, _) = parse_and_validate("preâmbulo", &src);
     let mut layouter = naga::proc::Layouter::default();
     layouter.update(module.to_ctx()).expect("layout");
-    for (name, rust_size) in
-        [(SimParams::WGSL_NAME, size_of::<SimParams>()), (ViewParams::WGSL_NAME, size_of::<ViewParams>())]
-    {
+    for (name, rust_size) in [
+        (SimParams::WGSL_NAME, size_of::<SimParams>()),
+        (ViewParams::WGSL_NAME, size_of::<ViewParams>()),
+        (Fumarole::WGSL_NAME, size_of::<Fumarole>()),
+    ] {
         let (handle, _) = module
             .types
             .iter()

@@ -1,16 +1,17 @@
-//! O mundo: grelha de monómeros e (nas fases seguintes) fluido, luz e terreno.
+//! O mundo: grelha de monómeros, fluido com temperatura, luz UV e terreno.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gpu::{Gpu, groups};
-use crate::params::{SimParams, WorldConfig};
+use crate::params::{Fumarole, SimParams, WorldConfig};
 use crate::shaders::{self, CHEM_CELL_CAP};
 
 /// Máximo de passos de simulação por frame (cada um tem a sua cópia dos params).
 pub const MAX_STEPS_PER_FRAME: u32 = 64;
 /// Alinhamento dos offsets dinâmicos de uniform (o mínimo garantido é 256).
 const PARAMS_STRIDE: u64 = 256;
+pub const MAX_FUMAROLES: usize = 64;
 
 /// Contagem exata da matéria livre, por canal (A U G C) e estado.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -53,24 +54,98 @@ enum Readback {
     Mapping(Arc<AtomicBool>),
 }
 
+/// Definições do mundo que não vão para a GPU como parâmetros.
+#[derive(Clone, Copy, Debug)]
+pub struct WorldSettings {
+    pub fluid_enabled: bool,
+    /// Resolve o fluido de N em N passos, com dt×N (2 no v3).
+    pub fluid_substep: u32,
+    /// Iterações de Jacobi (arredondado para par: o resultado tem de cair em pressure_a).
+    pub jacobi_iters: u32,
+    /// Recalcula a luz UV de N em N passos.
+    pub light_interval: u32,
+}
+
+impl Default for WorldSettings {
+    fn default() -> Self {
+        Self { fluid_enabled: true, fluid_substep: 2, jacobi_iters: 10, light_interval: 100 }
+    }
+}
+
+struct Pipelines {
+    transport: wgpu::ComputePipeline,
+    thermal_activation: wgpu::ComputePipeline,
+    ledger: wgpu::ComputePipeline,
+    uv_light: wgpu::ComputePipeline,
+    clear_force_vectors: wgpu::ComputePipeline,
+    update_temperature: wgpu::ComputePipeline,
+    copy_temperature: wgpu::ComputePipeline,
+    buoyancy: wgpu::ComputePipeline,
+    gather_forces: wgpu::ComputePipeline,
+    add_forces: wgpu::ComputePipeline,
+    clear_forces: wgpu::ComputePipeline,
+    diffuse_velocity: wgpu::ComputePipeline,
+    advect_velocity: wgpu::ComputePipeline,
+    vorticity: wgpu::ComputePipeline,
+    divergence: wgpu::ComputePipeline,
+    jacobi: wgpu::ComputePipeline,
+    subtract_gradient: wgpu::ComputePipeline,
+    boundaries: wgpu::ComputePipeline,
+}
+
 pub struct World {
     pub cfg: WorldConfig,
     pub params: SimParams,
+    pub settings: WorldSettings,
+    pub fumaroles: Vec<Fumarole>,
+    light_dirty: bool,
     params_buf: wgpu::Buffer,
     pub chem_buf: wgpu::Buffer,
+    pub gamma_buf: wgpu::Buffer,
+    pub light_buf: wgpu::Buffer,
+    /// Velocidade final do fluido (velocity_a).
+    pub velocity_buf: wgpu::Buffer,
+    /// Temperatura publicada (temp_in).
+    pub temp_buf: wgpu::Buffer,
+    fumarole_buf: wgpu::Buffer,
     ledger_buf: wgpu::Buffer,
     ledger_staging: wgpu::Buffer,
     readback: Readback,
     frame_bg: wgpu::BindGroup,
     world_bg: wgpu::BindGroup,
-    transport_pl: wgpu::ComputePipeline,
-    ledger_pl: wgpu::ComputePipeline,
+    fluid_ab: wgpu::BindGroup,
+    fluid_ba: wgpu::BindGroup,
+    pipelines: Pipelines,
+}
+
+fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+fn storage_buffer(device: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    })
 }
 
 impl World {
     pub fn new(gpu: &Gpu, cfg: WorldConfig, seed: u32) -> Self {
         let device = &gpu.device;
         let params = SimParams { seed, ..Default::default() };
+        let cells = cfg.cells();
+        let fcells = cfg.fluid_cells();
 
         let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sim params"),
@@ -78,24 +153,26 @@ impl World {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let chem_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("chem grid"),
-            size: cfg.cells() * 4 * 4,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-        let ledger_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ledger"),
-            size: 8 * 4,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let chem_buf = storage_buffer(device, "chem grid", cells * 16);
+        let ledger_buf = storage_buffer(device, "ledger", 8 * 4);
+        let gamma_buf = storage_buffer(device, "gamma grid", cells * 4);
+        let light_buf = storage_buffer(device, "uv light", cells * 4);
         let ledger_staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ledger staging"),
             size: 8 * 4,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let vel_a = storage_buffer(device, "velocity a", fcells * 8);
+        let vel_b = storage_buffer(device, "velocity b", fcells * 8);
+        let p_a = storage_buffer(device, "pressure a", fcells * 4);
+        let p_b = storage_buffer(device, "pressure b", fcells * 4);
+        let div = storage_buffer(device, "divergence", fcells * 4);
+        let temp_a = storage_buffer(device, "temperature in", fcells * 4);
+        let temp_b = storage_buffer(device, "temperature out", fcells * 4);
+        let force_vec = storage_buffer(device, "force vectors", fcells * 8);
+        let forces = storage_buffer(device, "fluid forces", fcells * 8);
+        let fumarole_buf = storage_buffer(device, "fumaroles", (MAX_FUMAROLES * size_of::<Fumarole>()) as u64);
 
         // Grupo 0 — frame: params com offset dinâmico (uma cópia por passo).
         let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -111,20 +188,21 @@ impl World {
                 count: None,
             }],
         });
-        // Grupo 1 — mundo.
-        let storage_rw = |binding| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        };
+        // Grupo 1 — mundo (resolução do ambiente).
         let world_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("world layout"),
-            entries: &[storage_rw(0), storage_rw(1)],
+            entries: &[
+                storage_entry(0, false),
+                storage_entry(1, false),
+                storage_entry(2, false),
+                storage_entry(3, false),
+            ],
+        });
+        // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
+        let fluid_entries: Vec<_> = (0..10).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
+        let fluid_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fluid layout"),
+            entries: &fluid_entries,
         });
 
         let frame_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -139,18 +217,30 @@ impl World {
                 }),
             }],
         });
-        let world_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("world bg"),
-            layout: &world_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: chem_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: ledger_buf.as_entire_binding() },
-            ],
-        });
+        let bind_all = |label, layout: &wgpu::BindGroupLayout, bufs: &[&wgpu::Buffer]| {
+            let entries: Vec<wgpu::BindGroupEntry> = bufs
+                .iter()
+                .enumerate()
+                .map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() })
+                .collect();
+            device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(label), layout, entries: &entries })
+        };
+        let world_bg = bind_all("world bg", &world_layout, &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf]);
+        // Ping-pong: "ab" lê a e escreve b (velocidade e pressão em simultâneo).
+        let fluid_ab = bind_all(
+            "fluid ab",
+            &fluid_layout,
+            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &fumarole_buf],
+        );
+        let fluid_ba = bind_all(
+            "fluid ba",
+            &fluid_layout,
+            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &fumarole_buf],
+        );
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("world pipeline layout"),
-            bind_group_layouts: &[Some(&frame_layout), Some(&world_layout)],
+            bind_group_layouts: &[Some(&frame_layout), Some(&world_layout), Some(&fluid_layout)],
             immediate_size: 0,
         });
         let module = shaders::create(device, &shaders::WORLD, &cfg);
@@ -164,21 +254,48 @@ impl World {
                 cache: None,
             })
         };
-        let transport_pl = compute("transport_quanta");
-        let ledger_pl = compute("ledger_reduce");
+        let pipelines = Pipelines {
+            transport: compute("transport_quanta"),
+            thermal_activation: compute("thermal_activation"),
+            ledger: compute("ledger_reduce"),
+            uv_light: compute("compute_uv_light"),
+            clear_force_vectors: compute("clear_force_vectors"),
+            update_temperature: compute("update_temperature"),
+            copy_temperature: compute("copy_temperature"),
+            buoyancy: compute("buoyancy"),
+            gather_forces: compute("gather_forces"),
+            add_forces: compute("add_forces"),
+            clear_forces: compute("clear_forces"),
+            diffuse_velocity: compute("diffuse_velocity"),
+            advect_velocity: compute("advect_velocity"),
+            vorticity: compute("vorticity_confinement"),
+            divergence: compute("compute_divergence"),
+            jacobi: compute("jacobi_pressure"),
+            subtract_gradient: compute("subtract_gradient"),
+            boundaries: compute("enforce_boundaries"),
+        };
 
         Self {
             cfg,
             params,
+            settings: WorldSettings::default(),
+            fumaroles: vec![Fumarole::v3_default()],
+            light_dirty: true,
             params_buf,
             chem_buf,
+            gamma_buf,
+            light_buf,
+            velocity_buf: vel_a,
+            temp_buf: temp_a,
+            fumarole_buf,
             ledger_buf,
             ledger_staging,
             readback: Readback::Idle,
             frame_bg,
             world_bg,
-            transport_pl,
-            ledger_pl,
+            fluid_ab,
+            fluid_ba,
+            pipelines,
         }
     }
 
@@ -190,6 +307,11 @@ impl World {
         Ledger::from_cells(&cells)
     }
 
+    /// Pede que a luz seja recalculada no próximo passo (p. ex. o terreno mudou).
+    pub fn invalidate_light(&mut self) {
+        self.light_dirty = true;
+    }
+
     /// Grava `steps` passos de simulação. Os params de cada passo são escritos
     /// já (com epoch próprio) e ficam em offsets diferentes do mesmo buffer.
     pub fn encode_steps(&mut self, queue: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, steps: u32) {
@@ -197,6 +319,15 @@ impl World {
         if steps == 0 {
             return;
         }
+        let st = self.settings;
+        let substep = st.fluid_substep.clamp(1, 4);
+        let nfum = self.fumaroles.len().min(MAX_FUMAROLES);
+        if nfum > 0 {
+            queue.write_buffer(&self.fumarole_buf, 0, bytemuck::cast_slice(&self.fumaroles[..nfum]));
+        }
+        self.params.fumarole_count = nfum as u32;
+        self.params.fluid_dt = self.params.dt * substep as f32;
+
         let mut bytes = vec![0u8; (PARAMS_STRIDE * steps as u64) as usize];
         for i in 0..steps {
             let p = SimParams { epoch: self.params.epoch.wrapping_add(i), ..self.params };
@@ -206,13 +337,51 @@ impl World {
         queue.write_buffer(&self.params_buf, 0, &bytes);
 
         let g = groups(self.cfg.grid_size, 16);
+        let fg = groups(self.cfg.fluid_size, 16);
+        let jacobi_iters = (st.jacobi_iters.clamp(2, 128) + 1) & !1;
+        let pl = &self.pipelines;
+        let (ab, ba) = (&self.fluid_ab, &self.fluid_ba);
         let mut pass =
-            enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("chem"), timestamp_writes: None });
+            enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("world"), timestamp_writes: None });
         pass.set_bind_group(1, &self.world_bg, &[]);
-        pass.set_pipeline(&self.transport_pl);
+        let run = |pass: &mut wgpu::ComputePass, p: &wgpu::ComputePipeline, bg: &wgpu::BindGroup, n: [u32; 2]| {
+            pass.set_bind_group(2, bg, &[]);
+            pass.set_pipeline(p);
+            pass.dispatch_workgroups(n[0], n[1], 1);
+        };
         for i in 0..steps {
+            let epoch = self.params.epoch.wrapping_add(i);
             pass.set_bind_group(0, &self.frame_bg, &[(PARAMS_STRIDE * i as u64) as u32]);
-            pass.dispatch_workgroups(g, g, 1);
+
+            if self.light_dirty || epoch % st.light_interval.max(1) == 0 {
+                self.light_dirty = false;
+                run(&mut pass, &pl.uv_light, ab, [1, 1]);
+            }
+
+            if st.fluid_enabled && epoch % substep == 0 {
+                let f = [fg, fg];
+                run(&mut pass, &pl.clear_force_vectors, ab, f);
+                run(&mut pass, &pl.update_temperature, ab, f);
+                run(&mut pass, &pl.copy_temperature, ab, f);
+                run(&mut pass, &pl.buoyancy, ab, f);
+                run(&mut pass, &pl.gather_forces, ab, f);
+                run(&mut pass, &pl.add_forces, ab, f); // a -> b
+                run(&mut pass, &pl.clear_forces, ba, f);
+                run(&mut pass, &pl.diffuse_velocity, ba, f); // b -> a
+                run(&mut pass, &pl.advect_velocity, ab, f); // a -> b
+                run(&mut pass, &pl.vorticity, ba, f); // b -> a
+                run(&mut pass, &pl.divergence, ab, f); // lê a
+                // Pressão em ARRANQUE QUENTE (nunca é limpa): converge ao longo
+                // dos frames. Número par de iterações: termina em pressure_a.
+                for k in 0..jacobi_iters {
+                    run(&mut pass, &pl.jacobi, if k % 2 == 0 { ab } else { ba }, f);
+                }
+                run(&mut pass, &pl.subtract_gradient, ab, f); // a -> b
+                run(&mut pass, &pl.boundaries, ba, f); // b -> a (final em a)
+                run(&mut pass, &pl.thermal_activation, ab, [g, g]);
+            }
+
+            run(&mut pass, &pl.transport, ab, [g, g]);
         }
         drop(pass);
         self.params.epoch = self.params.epoch.wrapping_add(steps);
@@ -226,7 +395,8 @@ impl World {
             enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("ledger"), timestamp_writes: None });
         pass.set_bind_group(0, &self.frame_bg, &[0]);
         pass.set_bind_group(1, &self.world_bg, &[]);
-        pass.set_pipeline(&self.ledger_pl);
+        pass.set_bind_group(2, &self.fluid_ab, &[]);
+        pass.set_pipeline(&self.pipelines.ledger);
         pass.dispatch_workgroups(g, g, 1);
     }
 
@@ -268,6 +438,11 @@ impl World {
         self.ledger_staging.unmap();
         self.readback = Readback::Idle;
         Some(ledger)
+    }
+
+    /// Lê um buffer f32 inteiro de forma síncrona (testes).
+    pub fn read_f32_blocking(&self, gpu: &Gpu, buf: &wgpu::Buffer) -> Vec<f32> {
+        bytemuck::cast_slice(&gpu.read_buffer_blocking(buf)).to_vec()
     }
 
     /// Lê a grelha inteira de forma síncrona (testes).
