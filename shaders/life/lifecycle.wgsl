@@ -254,7 +254,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // ---- JUNTAS: dobragem ao nascer, depois agitação térmica e músculos ----
     let kt_here = params.thermal_kt * (1.0 + temp_in[fluid_index_at_world(vec2<f32>(a.pos_x, a.pos_y))] / 12.0);
-    let swim = joints_step(slot, a, kt_here);
+    let swim = joints_step(slot, a, kt_here) * max(params.swim_gain, 0.0);
     // Natação: o movimento rígido vem no referencial do corpo; roda-o para o mundo.
     if (any(swim != vec3<f32>(0.0))) {
         // Orientação a meio do passo (o corpo roda Ω durante o passo).

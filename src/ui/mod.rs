@@ -184,6 +184,8 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         let mut aug = world.params.require_start != 0;
         ui.checkbox(&mut aug, "tradução começa no AUG (nascimentos novos)");
         world.params.require_start = aug as u32;
+        ui.add(egui::Slider::new(&mut world.params.swim_gain, 0.0..=50.0).text("ganho da natação"));
+        ui.add(egui::Slider::new(&mut world.params.reactivation_rate, 0.0..=0.02).text("reativação uniforme"));
         let mut rft = world.params.rft_enabled != 0;
         ui.checkbox(&mut rft, "natação (RFT)");
         world.params.rft_enabled = rft as u32;

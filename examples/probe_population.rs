@@ -11,9 +11,20 @@ fn env<T: std::str::FromStr>(k: &str, d: T) -> T {
 
 fn main() {
     let gpu = Gpu::new_headless().unwrap();
-    let cfg = WorldConfig { max_agents: env("CAP", 60_000), ..WorldConfig::DEFAULT };
+    let lab = env("LAB", 0) == 1;
+    let mut cfg = WorldConfig { max_agents: env("CAP", 60_000), ..WorldConfig::DEFAULT };
+    if lab {
+        cfg.grid_size = 1024;
+        cfg.fluid_size = 512;
+    }
     let mut world = World::new(&gpu, cfg, 1);
-    world.seed_matter(&gpu, 1);
+    if lab {
+        world.configure_lab();
+        world.seed_lab(&gpu, 1, env("FOOD", 6.0));
+        world.params.reactivation_rate = env("REACT", world.params.reactivation_rate);
+    } else {
+        world.seed_matter(&gpu, 1);
+    }
     world.params.maintenance_cost = env("MAINT", world.params.maintenance_cost);
     world.params.uptake_rate = env("UPTAKE", world.params.uptake_rate);
     world.params.pairing_cost = env("PCOST", world.params.pairing_cost);

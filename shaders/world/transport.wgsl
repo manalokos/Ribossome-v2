@@ -110,7 +110,10 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         // energia continua a vir só da luz.
         if (spent_n > 0u) {
             let sens = 1.0 + CHEM_SENSITIZE * f32(min(act_n, 8u));
-            let exp_act = f32(min(spent_n, 8u)) * LIGHT_ACT_P * max(params.uv_strength, 0.0) * light_t * sens;
+            // + reativação uniforme (modo laboratório): cada gasto tem a mesma
+            // probabilidade por passo, em qualquer lado.
+            let exp_act = f32(min(spent_n, 8u)) * (LIGHT_ACT_P * max(params.uv_strength, 0.0) * light_t * sens
+                + max(params.reactivation_rate, 0.0));
             var na = u32(floor(exp_act));
             if (rng_f4(slot, params.epoch, S_PHOTO).x < exp_act - f32(na)) { na += 1u; }
             na = min(na, min(spent_n, 8u));

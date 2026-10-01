@@ -29,9 +29,13 @@ fn trial(gpu: &Gpu, name: &str, genome: &str) {
         .iter()
         .filter_map(|r| r.organ.map(|(t, p)| format!("{}({p})", ribossome::life::organs::ORGAN_NAMES[t as usize])))
         .collect();
-    let cfg = WorldConfig::DEFAULT;
+    // Laboratório: piscina 1024² sem fluido nem terreno.
+    let cfg = WorldConfig { grid_size: 1024, fluid_size: 512, max_agents: 20_000, ..WorldConfig::DEFAULT };
     let mut world = World::new(gpu, cfg, 3);
-    world.seed_matter(gpu, 3);
+    world.configure_lab();
+    world.seed_lab(gpu, 3, 6.0);
+    world.params.swim_gain = std::env::var("SWIM").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+    world.params.thermal_kt = std::env::var("KT").ok().and_then(|v| v.parse().ok()).unwrap_or(world.params.thermal_kt);
     world.settings.fluid_enabled = false;
     world.settings.contact_enabled = false;
     world.params.brownian = 0.0;
@@ -70,25 +74,9 @@ fn trial(gpu: &Gpu, name: &str, genome: &str) {
 
 fn main() {
     let gpu = Gpu::new_headless().unwrap();
-    // C (UGU) é promotor; o codão seguinte é o modificador: índice m = 8·parâmetro + tipo.
-    // relógio (tipo 5, parâmetro 2): m = 21 = UUU;  músculo (tipo 1, parâmetro 3): m = 25 = UGU.
-    let spacer = "GCU GCU";
     let clock = "UGU UUU";
-    let muscle = "UGU UGU";
-    let swimmer = format!(
-        "AUG {clock} {spacer} {muscle} {spacer} {muscle} {spacer} {muscle} {spacer} {muscle} {spacer} {muscle} GCU GCU GCU GCU UAA"
-    );
-    let no_clock = format!(
-        "AUG GCU GCU {spacer} {muscle} {spacer} {muscle} {spacer} {muscle} {spacer} {muscle} {spacer} {muscle} GCU GCU GCU GCU UAA"
-    );
-    trial(&gpu, "relógio + 5 músculos", &swimmer);
-    // Com todas as juntas a responder: relógio + 15 glicinas (sens. α 0,7).
     let gly = format!("AUG {clock} {} UAA", "GGU ".repeat(15));
     trial(&gpu, "relógio + 15 glicinas", &gly);
     let gly_noclock = format!("AUG GCU GCU {} UAA", "GGU ".repeat(15));
     trial(&gpu, "15 glicinas, sem relógio", &gly_noclock);
-    // relógio rápido (parâmetro 0 -> período 20): m = 5 = AUU.
-    let fast = swimmer.replacen("UGU UUU", "UGU AUU", 1);
-    trial(&gpu, "relógio rápido + 5 músculos", &fast);
-    trial(&gpu, "5 músculos, sem relógio", &no_clock);
 }

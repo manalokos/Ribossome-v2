@@ -41,8 +41,22 @@ struct App {
     run: Option<Running>,
 }
 
+/// Modo laboratório (RIBO_LAB=1): piscina 1024², sem fluido nem terreno,
+/// monómeros ativados por igual e reativação uniforme.
+fn lab_mode() -> bool {
+    std::env::var("RIBO_LAB").map(|v| v != "0").unwrap_or(false)
+}
+
+/// Monómeros ativados por canal e célula na piscina do modo laboratório.
+const LAB_PER_CHANNEL: f32 = 1.5;
+
 fn world_config_from_env() -> WorldConfig {
     let mut cfg = WorldConfig::DEFAULT;
+    if lab_mode() {
+        cfg.grid_size = 1024;
+        cfg.fluid_size = 512;
+        cfg.max_agents = 100_000;
+    }
     if let Some(g) = std::env::var("RIBO_GRID").ok().and_then(|v| v.parse::<u32>().ok()) {
         cfg.grid_size = g;
         cfg.fluid_size = (g / 2).max(16);
@@ -91,7 +105,12 @@ impl Running {
         log::info!("mundo {}² células, {} unidades", cfg.grid_size, cfg.sim_size());
         let seed = 1;
         let mut world = World::new(&gpu, cfg, seed as u32);
-        let baseline = world.seed_matter(&gpu, seed);
+        let baseline = if lab_mode() {
+            world.configure_lab();
+            world.seed_lab(&gpu, seed, LAB_PER_CHANNEL)
+        } else {
+            world.seed_matter(&gpu, seed)
+        };
         let view = WorldView::new(&gpu.device, &world, format);
         let cam = Camera::fit(&cfg, [surface_cfg.width as f32, surface_cfg.height as f32]);
 
@@ -165,7 +184,11 @@ impl Running {
         if self.ui.reseed {
             self.ui.reseed = false;
             self.seed += 1;
-            self.ui.baseline = self.world.seed_matter(&self.gpu, self.seed);
+            self.ui.baseline = if lab_mode() {
+                self.world.seed_lab(&self.gpu, self.seed, LAB_PER_CHANNEL)
+            } else {
+                self.world.seed_matter(&self.gpu, self.seed)
+            };
             self.ui.ledger = None;
         }
         let want_vsync = matches!(self.surface_cfg.present_mode, wgpu::PresentMode::AutoVsync);

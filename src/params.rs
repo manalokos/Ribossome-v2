@@ -133,6 +133,14 @@ gpu_struct! {
         pub hunger_regulation: u32,
         /// Energia gasta por base emparelhada (polimerizar consome energia).
         pub pairing_cost: f32,
+        /// Reativação UNIFORME: probabilidade por passo de um monómero gasto
+        /// voltar a ativado, em qualquer lado (modo laboratório; 0 = só luz/calor).
+        pub reactivation_rate: f32,
+        /// Ganho da natação: escala o deslocamento (translação e rotação) que o
+        /// RFT calcula por mudança de forma, i.e. a rapidez do corpo face ao mundo.
+        pub swim_gain: f32,
+        pub _pad0: u32,
+        pub _pad1: u32,
     }
 }
 
@@ -174,7 +182,9 @@ impl Default for SimParams {
             brownian: 0.0,
             phoretic_gain: 100.0,
             chain_stiffness: 20.0,
-            thermal_kt: 0.3,
+            // 0 por omissão (pedido do Filipe): sem tremor térmico, o movimento
+            // próprio vem só dos sinais; a dobragem fica um gradiente puro.
+            thermal_kt: 0.0,
             // 0: com órgãos, quem move as juntas são os músculos (o motor
             // catalítico "puro" fica como opção).
             motor_amplitude: 0.0,
@@ -183,6 +193,11 @@ impl Default for SimParams {
             joint_coupling: 0.9,
             hunger_regulation: 0,
             pairing_cost: 0.3,
+            reactivation_rate: 0.0,
+            // 10: com 1 a natação era lenta demais para dar vantagem visível.
+            swim_gain: 10.0,
+            _pad0: 0,
+            _pad1: 0,
         }
     }
 }

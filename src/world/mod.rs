@@ -629,14 +629,49 @@ impl World {
         gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
         gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
         // Mundo novo: não há agentes (a matéria deles pertencia ao mundo antigo).
+        self.clear_agents(gpu);
+        self.light_dirty = true;
+        Ledger::from_cells(&cells)
+    }
+
+    /// MODO LABORATÓRIO: piscina sem terreno, cheia de monómeros ATIVADOS por
+    /// igual (em média `per_channel` por canal e célula, arredondamento ao
+    /// acaso para densidades fracionárias). Limpa os agentes.
+    pub fn seed_lab(&mut self, gpu: &Gpu, seed: u64, per_channel: f32) -> Ledger {
+        let n = self.cfg.cells() as usize;
+        let mut rng = SplitMix(seed);
+        let mut cells = vec![0u32; n * 4];
+        for v in cells.iter_mut() {
+            *v = ((per_channel + rng.f32()) as u32).min(CHEM_CELL_CAP / 4);
+        }
+        gpu.queue.write_buffer(&self.gamma_buf, 0, &vec![0u8; n * 4]);
+        gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
+        self.clear_agents(gpu);
+        self.light_dirty = true;
+        Ledger::from_cells(&cells)
+    }
+
+    /// Configura o modo laboratório: sem fluido, sem terreno a mexer, sem
+    /// fumarolas, sem UV (a reativação é uniforme).
+    pub fn configure_lab(&mut self) {
+        self.settings.fluid_enabled = false;
+        self.settings.terrain_enabled = false;
+        self.fumaroles.clear();
+        self.params.uv_strength = 0.0;
+        self.params.uv_damage = 1.0;
+        self.params.reactivation_rate = 0.002;
+        // Comida pouco densa (~1,5 por canal): a catálise é mais rápida para a
+        // energia chegar; a matéria limita a população (~20 mil agentes médios).
+        self.params.uptake_rate = 0.006;
+    }
+
+    fn clear_agents(&mut self, gpu: &Gpu) {
         let max = self.cfg.max_agents;
         gpu.queue.write_buffer(&self.agents_buf, 0, &vec![0u8; max as usize * size_of::<Agent>()]);
         let free_slots: Vec<u32> = (0..max).rev().collect();
         gpu.queue.write_buffer(&self.free_buf, 0, bytemuck::cast_slice(&free_slots));
         gpu.queue.write_buffer(&self.life_counters_buf, 0, bytemuck::cast_slice(&[max, 0, 0, 0, 0, 0, 0, 0u32]));
         self.pending_spawns.clear();
-        self.light_dirty = true;
-        Ledger::from_cells(&cells)
     }
 
     /// Lê o terreno inteiro de forma síncrona (testes).
