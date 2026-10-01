@@ -1,6 +1,7 @@
-// TRADUÇÃO E CORPO (fase 3: corpo rígido).
-// O corpo é a cadeia de aminoácidos traduzida a partir do primeiro AUG, com
-// o código genético padrão, até ao primeiro stop ou 64 resíduos. A tabela
+// TRADUÇÃO E CORPO.
+// O corpo é a cadeia de aminoácidos traduzida a partir da primeira base (ou
+// do primeiro AUG, se params.require_start), com o código genético padrão,
+// até ao primeiro stop ou 64 resíduos. A tabela
 // CODON_TABLE e as propriedades AA_* vêm de src/life/amino.rs (dados reais).
 //
 // Geometria (v3): cadeia principal de comprimento constante; em cada junta
@@ -30,8 +31,9 @@ fn residue_bend(aa: u32) -> f32 {
 
 // Traduz o genoma do slot, escreve bodies e body_pos e devolve o nº de resíduos.
 fn translate_agent(slot: u32, gene_len: u32) -> u32 {
-    var start = 0xFFFFFFFFu;
-    for (var i = 0u; i + 2u < gene_len; i++) {
+    // Sem AUG obrigatório (por omissão), lê-se a partir da primeira base.
+    var start = select(0xFFFFFFFFu, 0u, params.require_start == 0u);
+    for (var i = 0u; i + 2u < gene_len && start == 0xFFFFFFFFu; i++) {
         if (genome_get(slot, i) == 0u && genome_get(slot, i + 1u) == 1u && genome_get(slot, i + 2u) == 2u) {
             start = i;
             break;
@@ -58,6 +60,7 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
         joint_angle[slot * MAX_BODY + k] = b;
         joint_base[slot * MAX_BODY + k] = b;
         joint_state[slot * MAX_BODY + k] = 0u;
+        joint_active[slot * MAX_BODY + k] = 0.0;
     }
     rebuild_body(slot, n);
     return n;

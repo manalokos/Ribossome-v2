@@ -123,6 +123,15 @@ gpu_struct! {
         pub motor_amplitude: f32,
         /// 1 = natação por forças resistivas (RFT) a partir da mudança de forma.
         pub rft_enabled: u32,
+        /// 1 = a tradução começa no primeiro AUG; 0 = na primeira base
+        /// (por omissão: o AUG é uma convenção da maquinaria moderna).
+        pub require_start: u32,
+        /// Acoplamento mecânico: fração do desvio das juntas vizinhas que
+        /// passa a cada junta (propagação de mudanças de forma ao longo da cadeia).
+        pub joint_coupling: f32,
+        /// 1 = regulação pela fome (v3): um organismo cheio deixa de ligar comida.
+        pub hunger_regulation: u32,
+        pub _pad0: u32,
     }
 }
 
@@ -157,12 +166,18 @@ impl Default for SimParams {
             mutation_rate: 0.003,
             uv_damage: 10.0,
             uptake_rate: 0.001,
-            brownian: 3.0,
+            // 0: a agitação térmica já entra pelo tremor das juntas (RFT); somar
+            // este browniano contava-a duas vezes e afogava a natação.
+            brownian: 0.0,
             phoretic_gain: 100.0,
             chain_stiffness: 20.0,
-            thermal_kt: 1.0,
+            thermal_kt: 0.3,
             motor_amplitude: 0.3,
             rft_enabled: 1,
+            require_start: 0,
+            joint_coupling: 0.9,
+            hunger_regulation: 0,
+            _pad0: 0,
         }
     }
 }

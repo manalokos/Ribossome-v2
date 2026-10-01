@@ -177,6 +177,13 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         ui.add(egui::Slider::new(&mut world.params.chain_stiffness, 1.0..=100.0).text("rigidez das juntas"));
         ui.add(egui::Slider::new(&mut world.params.thermal_kt, 0.0..=5.0).text("agitação térmica (kT)"));
         ui.add(egui::Slider::new(&mut world.params.motor_amplitude, 0.0..=1.0).text("curso do motor (rad)"));
+        ui.add(egui::Slider::new(&mut world.params.joint_coupling, 0.0..=0.95).text("acoplamento entre juntas"));
+        let mut hunger = world.params.hunger_regulation != 0;
+        ui.checkbox(&mut hunger, "regulação pela fome (v3)");
+        world.params.hunger_regulation = hunger as u32;
+        let mut aug = world.params.require_start != 0;
+        ui.checkbox(&mut aug, "tradução começa no AUG (nascimentos novos)");
+        world.params.require_start = aug as u32;
         let mut rft = world.params.rft_enabled != 0;
         ui.checkbox(&mut rft, "natação (RFT)");
         world.params.rft_enabled = rft as u32;

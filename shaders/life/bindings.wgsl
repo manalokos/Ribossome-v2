@@ -27,6 +27,8 @@
 @group(3) @binding(13) var<storage, read_write> joint_base: array<f32>;
 // Estado do ciclo catalítico de cada resíduo: 0 livre, 1 ligado, 2 produto.
 @group(3) @binding(14) var<storage, read_write> joint_state: array<u32>;
+// Deformação ATIVA de cada junta (a que vem do ciclo catalítico, propagada).
+@group(3) @binding(15) var<storage, read_write> joint_active: array<f32>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

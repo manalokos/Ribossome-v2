@@ -67,10 +67,14 @@ fn rebuild_body(slot: u32, n: u32) {
 // recíproco não desloca nada (teorema da vieira).
 const RFT_PERP_RATIO: f32 = 2.0;
 
-fn rft_tangent(slot: u32, n: u32, k: u32) -> vec2<f32> {
+// Tangente da cadeia no resíduo k, a MEIO do passo (média das posições
+// antigas e novas).
+fn rft_tangent(slot: u32, n: u32, k: u32, old: ptr<function, array<vec2<f32>, 64>>) -> vec2<f32> {
     let base = slot * MAX_BODY;
-    let a = body_pos[base + select(k - 1u, k, k == 0u)];
-    let b = body_pos[base + select(k + 1u, k, k + 1u >= n)];
+    let ka = select(k - 1u, k, k == 0u);
+    let kb = select(k + 1u, k, k + 1u >= n);
+    let a = 0.5 * (body_pos[base + ka] + (*old)[ka]);
+    let b = 0.5 * (body_pos[base + kb] + (*old)[kb]);
     let t = b - a;
     let l = length(t);
     return select(vec2<f32>(1.0, 0.0), t / l, l > 1e-5);
@@ -84,9 +88,12 @@ fn rft_solve(slot: u32, n: u32, old: ptr<function, array<vec2<f32>, 64>>) -> vec
     var c = vec3<f32>(0.0);
     let base = slot * MAX_BODY;
     for (var k = 0u; k < n; k++) {
-        let r = body_pos[base + k];
-        let u = r - (*old)[k];
-        let t = rft_tangent(slot, n, k);
+        // Regra do PONTO MÉDIO: geometria avaliada a meio do passo. Com a
+        // geometria do fim do passo, o ruído das juntas era retificado numa
+        // deriva espúria (∝ ruído²) que fazia "nadar" sem motor nenhum.
+        let r = 0.5 * (body_pos[base + k] + (*old)[k]);
+        let u = body_pos[base + k] - (*old)[k];
+        let t = rft_tangent(slot, n, k, old);
         // R = ξ∥·t·tᵀ + ξ⊥·(I − t·tᵀ), com ξ∥ = 1.
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
         let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
@@ -165,11 +172,11 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> vec3<f32> {
         if (k == 0u) { continue; } // θ_0 é a orientação global (o corpo roda livre)
 
         let aa = body_get(slot, k);
-        // Alvo: forma base (ou tendência local durante a dobragem) + o desvio
-        // do estado do ciclo catalítico (ligado +A, produto −A).
-        let st = joint_state[base + k];
-        let motor = select(select(0.0, -params.motor_amplitude, st == 2u), params.motor_amplitude, st == 1u);
-        let goal = select(joint_base[base + k], residue_bend(aa), folding) + motor;
+        // Alvo: forma base (ou tendência local durante a dobragem) + a
+        // deformação ATIVA da junta: o desvio do seu estado catalítico
+        // (ligado +A, produto −A) mais a atividade da junta anterior no passo
+        // anterior (propagação N->C com atraso: uma onda de atividade).
+        let goal = select(joint_base[base + k], residue_bend(aa), folding) + joint_active[base + k];
         let theta = joint_angle[base + k];
         let tau = tau_contacts - joint_stiffness(aa) * (theta - goal);
         // Ruído térmico (Langevin sobreamortecido): σ = √(2·μ·kT).
@@ -178,6 +185,19 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> vec3<f32> {
         let dth = clamp(JOINT_MOBILITY * tau, -JOINT_MAX_STEP, JOINT_MAX_STEP)
             + bm * sqrt(2.0 * JOINT_MOBILITY * max(kt, 0.0));
         joint_angle[base + k] = theta + dth;
+    }
+    // ACOPLAMENTO ATIVO (para o passo seguinte): a atividade da junta k é o
+    // seu próprio motor mais uma fração da atividade da junta k−1 AGORA, que
+    // só chega à k no passo seguinte. Propaga-se só a deformação paga pela
+    // hidrólise; o ruído térmico não (senão o calor faria nadar: 2.ª lei).
+    // A direção N->C é a polaridade da cadeia polipeptídica.
+    var prev_active = 0.0;
+    for (var k = 0u; k < n; k++) {
+        let st = joint_state[base + k];
+        let motor = select(select(0.0, -params.motor_amplitude, st == 2u), params.motor_amplitude, st == 1u);
+        let here = joint_active[base + k];
+        joint_active[base + k] = motor + params.joint_coupling * prev_active;
+        prev_active = here;
     }
     // Fim da dobragem: a forma atual passa a ser a forma base.
     if (a.age + 1u == FOLD_STEPS) {

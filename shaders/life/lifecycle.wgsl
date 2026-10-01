@@ -238,7 +238,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let swim = joints_step(slot, a, kt_here);
     // Natação: o movimento rígido vem no referencial do corpo; roda-o para o mundo.
     if (any(swim != vec3<f32>(0.0))) {
-        let sv = rotate(swim.xy, a.rot);
+        // Orientação a meio do passo (o corpo roda Ω durante o passo).
+        let sv = rotate(swim.xy, a.rot + 0.5 * swim.z);
         let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(np0)) < GAMMA_SOLID_THRESHOLD) {
             a.pos_x = np0.x;
@@ -280,14 +281,17 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         var avail = vec4<u32>(0u);
         for (var ch = 0u; ch < 4u; ch++) { avail[ch] = chem_act_count(cell, ch); }
         let tot = avail.x + avail.y + avail.z + avail.w;
-        let hunger = clamp(1.0 - a.energy / cap, 0.0, 1.0);
+        // Uma enzima real não sabe se a célula está cheia: por omissão
+        // catalisa sempre que há substrato e a energia a mais perde-se como
+        // calor. (A regulação pela fome do v3 fica como opção.)
+        let hunger = select(1.0, clamp(1.0 - a.energy / cap, 0.0, 1.0), params.hunger_regulation != 0u);
         let pe = clamp(params.uptake_rate * cat[body_get(slot, k)] * f32(tot) * hunger, 0.0, 1.0);
         let si = slot * MAX_BODY + k;
         let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
         if (st == 0u) {
-            // Barriga cheia: não liga mais (mas os ciclos em curso acabam).
-            if (r.x < pe && a.energy + params.food_power <= cap) {
+            let full = params.hunger_regulation != 0u && a.energy + params.food_power > cap;
+            if (r.x < pe && !full) {
                 joint_state[si] = 1u;
                 let rc = rw - p;
                 let rl = length(rc);

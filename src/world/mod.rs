@@ -281,6 +281,7 @@ impl World {
         let joint_angle = storage_buffer(device, "joint angle", max_agents * 64 * 4);
         let joint_base = storage_buffer(device, "joint base", max_agents * 64 * 4);
         let joint_state_buf = storage_buffer(device, "joint state", max_agents * 64 * 4);
+        let joint_active = storage_buffer(device, "joint active", max_agents * 64 * 4);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
             size: 16,
@@ -321,7 +322,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..15).map(|b| storage_entry(b, b == 4)).collect();
+        let life_entries: Vec<_> = (0..16).map(|b| storage_entry(b, b == 4)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -459,6 +460,7 @@ impl World {
                 &joint_angle,
                 &joint_base,
                 &joint_state_buf,
+                &joint_active,
             ],
         );
 

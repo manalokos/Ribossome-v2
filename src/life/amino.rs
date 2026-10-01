@@ -164,9 +164,20 @@ pub const fn codon(b1: u8, b2: u8, b3: u8) -> u8 {
 
 pub const MAX_BODY: usize = 64;
 
-/// Traduz a partir do primeiro AUG até ao primeiro stop (ou MAX_BODY resíduos).
+/// Traduz a partir da primeira base (como a GPU, por omissão) até ao
+/// primeiro stop ou MAX_BODY resíduos.
 pub fn translate(genome: &[u8]) -> Vec<u8> {
-    let Some(start) = genome.windows(3).position(|w| w == [0, 1, 2]) else { return Vec::new() };
+    translate_from(genome, false)
+}
+
+/// Traduz a partir do primeiro AUG (`require_start`) ou da primeira base.
+pub fn translate_from(genome: &[u8], require_start: bool) -> Vec<u8> {
+    let start = if require_start {
+        let Some(s) = genome.windows(3).position(|w| w == [0, 1, 2]) else { return Vec::new() };
+        s
+    } else {
+        0
+    };
     let mut body = Vec::new();
     for c in genome[start..].as_chunks::<3>().0 {
         let a = codon(c[0], c[1], c[2]);
@@ -262,8 +273,11 @@ mod tests {
     fn translation_starts_at_aug() {
         // ..G G AUG UUU UGG UAA.. -> M F W
         let g = [2, 2, 0, 1, 2, 1, 1, 1, 1, 2, 2, 1, 0, 0];
-        let body: String = translate(&g).iter().map(|&i| AA_LETTERS[i as usize]).collect();
+        let body: String = translate_from(&g, true).iter().map(|&i| AA_LETTERS[i as usize]).collect();
         assert_eq!(body, "MFW");
+        // Sem AUG obrigatório: lê desde a base 0 (GGA UGU UUU GGU AA -> G C F G).
+        let body0: String = translate(&g).iter().map(|&i| AA_LETTERS[i as usize]).collect();
+        assert_eq!(body0, "GCFG");
     }
 
     #[test]

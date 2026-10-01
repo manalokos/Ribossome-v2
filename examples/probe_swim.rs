@@ -19,7 +19,7 @@ fn run(gpu: &Gpu, world: &mut World, steps: u32) {
     }
 }
 
-fn case(gpu: &Gpu, name: &str, rft: bool, motor: f32, kt: f32) {
+fn case(gpu: &Gpu, name: &str, rft: bool, motor: f32, kt: f32, coupling: f32) {
     let cfg = WorldConfig::DEFAULT;
     let mut world = World::new(gpu, cfg, 2);
     world.seed_matter(gpu, 2);
@@ -32,6 +32,7 @@ fn case(gpu: &Gpu, name: &str, rft: bool, motor: f32, kt: f32) {
     world.params.rft_enabled = rft as u32;
     world.params.motor_amplitude = motor;
     world.params.thermal_kt = kt;
+    world.params.joint_coupling = coupling;
     world.params.maintenance_cost =
         std::env::var("MAINT").ok().and_then(|v| v.parse().ok()).unwrap_or(world.params.maintenance_cost);
     let mut rng = ribossome::life::SplitMix(4);
@@ -43,31 +44,36 @@ fn case(gpu: &Gpu, name: &str, rft: bool, motor: f32, kt: f32) {
         .filter(|a| a.alive != 0 && a.body_len >= 8)
         .map(|a| (a.id, (a.pos_x, a.pos_y)))
         .collect();
-    let steps = 600;
     println!("  estados (livre, ligado, produto): {:?}", states(gpu, &world));
-    run(gpu, &mut world, steps);
-    let mut d = Vec::new();
-    for a in world.read_agents_blocking(gpu).iter().filter(|a| a.alive != 0) {
-        if let Some(&(x, y)) = before.get(&a.id) {
-            d.push(((a.pos_x - x).powi(2) + (a.pos_y - y).powi(2)).sqrt());
+    // Deslocamento a 300 e a 600 passos: balístico (nada numa direção) cresce
+    // ×2; difusivo (aleatório) cresce ×√2 ≈ 1,41.
+    let disp = |world: &World| -> (f32, f32) {
+        let mut d = Vec::new();
+        for a in world.read_agents_blocking(gpu).iter().filter(|a| a.alive != 0) {
+            if let Some(&(x, y)) = before.get(&a.id) {
+                d.push(((a.pos_x - x).powi(2) + (a.pos_y - y).powi(2)).sqrt());
+            }
         }
-    }
-    d.sort_by(f32::total_cmp);
-    let mean = d.iter().sum::<f32>() / d.len().max(1) as f32;
-    let p90 = d.get(d.len() * 9 / 10).copied().unwrap_or(0.0);
-    let max = d.last().copied().unwrap_or(0.0);
+        d.sort_by(f32::total_cmp);
+        (d.iter().sum::<f32>() / d.len().max(1) as f32, d.get(d.len() * 9 / 10).copied().unwrap_or(0.0))
+    };
+    run(gpu, &mut world, 300);
+    let (m300, p300) = disp(&world);
+    run(gpu, &mut world, 300);
+    let (m600, p600) = disp(&world);
     println!(
-        "{name:<34} {} agentes  desloc. médio {mean:7.1}  p90 {p90:7.1}  máx {max:7.1}  (unid. do mundo em {steps} passos; 1 célula = 30)",
-        d.len()
+        "{name:<34} médio {m300:6.1} -> {m600:6.1} (x{:.2})   p90 {p300:6.1} -> {p600:6.1} (x{:.2})   [balístico x2, difusivo x1,41; 1 célula = 30]",
+        m600 / m300.max(1e-6),
+        p600 / p300.max(1e-6)
     );
 }
 
 fn main() {
     let gpu = Gpu::new_headless().unwrap();
-    case(&gpu, "sem RFT", false, 0.3, 1.0);
-    case(&gpu, "RFT, só ruído térmico (motor 0)", true, 0.0, 1.0);
-    case(&gpu, "RFT + motor 0,3", true, 0.3, 1.0);
-    case(&gpu, "RFT + motor 0,3, sem ruído", true, 0.3, 0.0);
+    case(&gpu, "kT 0,3, sem motor", true, 0.0, 0.3, 0.9);
+    case(&gpu, "kT 0,3, motor 0,3, acopl. 0,9", true, 0.3, 0.3, 0.9);
+    case(&gpu, "kT 1, motor 0,3, acopl. 0,9", true, 0.3, 1.0, 0.9);
+    case(&gpu, "kT 0,3, motor 0,5, acopl. 0,95", true, 0.5, 0.3, 0.95);
 }
 
 #[allow(dead_code)]
