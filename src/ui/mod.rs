@@ -119,6 +119,17 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
         ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));
         ui.add(egui::Slider::new(&mut p.uv_strength, 0.0..=10.0).text("força UV"));
         light_changed = ui.add(egui::Slider::new(&mut p.uv_depth, 0.5..=30.0).text("atenuação UV")).changed();
+        // Reativação uniforme (modo laboratório): probabilidade por passo de
+        // um gasto voltar a ativado; escala logarítmica para afinar valores pequenos.
+        ui.add(
+            egui::Slider::new(&mut p.reactivation_rate, 0.0..=0.02)
+                .logarithmic(true)
+                .smallest_positive(1e-5)
+                .text("reativação dos gastos"),
+        );
+        if p.reactivation_rate > 0.0 {
+            ui.label(format!("  pousio médio de um gasto: {:.0} passos", 1.0 / p.reactivation_rate));
+        }
     });
     egui::CollapsingHeader::new("Fluido").default_open(true).show(ui, |ui| {
         ui.checkbox(&mut st.fluid_enabled, "fluido ligado");
@@ -185,7 +196,6 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         ui.checkbox(&mut aug, "tradução começa no AUG (nascimentos novos)");
         world.params.require_start = aug as u32;
         ui.add(egui::Slider::new(&mut world.params.swim_gain, 0.0..=50.0).text("ganho da natação"));
-        ui.add(egui::Slider::new(&mut world.params.reactivation_rate, 0.0..=0.02).text("reativação uniforme"));
         let mut rft = world.params.rft_enabled != 0;
         ui.checkbox(&mut rft, "natação (RFT)");
         world.params.rft_enabled = rft as u32;
