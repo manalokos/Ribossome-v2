@@ -29,6 +29,7 @@ struct Running {
     cursor: [f32; 2],
     dragging: bool,
     seed: u64,
+    seed_rng: ribossome::life::SplitMix,
 }
 
 #[derive(Default)]
@@ -111,6 +112,7 @@ impl Running {
             cursor: [0.0; 2],
             dragging: false,
             seed,
+            seed_rng: ribossome::life::SplitMix(seed ^ 0x5EED),
         }
     }
 
@@ -128,6 +130,17 @@ impl Running {
         if let Some(l) = self.world.poll_ledger(&self.gpu.device) {
             self.ui.ledger = Some(l);
             self.ui.ledger_epoch = self.world.params.epoch;
+        }
+        if self.ui.seed_now {
+            self.ui.seed_now = false;
+            let reqs = ribossome::life::seed_requests(
+                self.ui.seed_count,
+                self.ui.seed_len,
+                self.ui.seed_aug,
+                self.world.cfg.sim_size(),
+                &mut self.seed_rng,
+            );
+            self.world.request_seeds(&reqs);
         }
         if self.ui.reseed {
             self.ui.reseed = false;

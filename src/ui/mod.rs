@@ -16,6 +16,11 @@ pub struct UiState {
     pub vsync: bool,
     /// Brilho da camada de monómeros na vista normal.
     pub monomer_brightness: f32,
+    /// Semear: quantas sementes, comprimento mínimo/máximo, começar por AUG.
+    pub seed_count: u32,
+    pub seed_len: [u32; 2],
+    pub seed_aug: bool,
+    pub seed_now: bool,
 }
 
 impl UiState {
@@ -30,6 +35,10 @@ impl UiState {
             reseed: false,
             vsync: true,
             monomer_brightness: 0.5,
+            seed_count: 500,
+            seed_len: [12, 120],
+            seed_aug: true,
+            seed_now: false,
         }
     }
 }
@@ -70,6 +79,7 @@ pub fn draw(ctx: &egui::Context, st: &mut UiState, world: &mut World, prof: &mut
         });
         ui.add(egui::Slider::new(&mut st.monomer_brightness, 0.0..=1.0).text("brilho dos monómeros"));
         world_panel(ui, world);
+        life_panel(ui, st, world);
 
         ui.separator();
         conservation(ui, st);
@@ -127,6 +137,24 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
     }
 }
 
+fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
+    egui::CollapsingHeader::new("Vida").default_open(true).show(ui, |ui| {
+        ui.add(egui::Slider::new(&mut st.seed_count, 1..=4000).text("sementes"));
+        ui.horizontal(|ui| {
+            ui.label("bases");
+            ui.add(egui::DragValue::new(&mut st.seed_len[0]).range(3..=256));
+            ui.label("a");
+            ui.add(egui::DragValue::new(&mut st.seed_len[1]).range(3..=256));
+        });
+        ui.checkbox(&mut st.seed_aug, "começar por AUG (tirado da sopa)");
+        if ui.button("semear (geração 0, montada da sopa)").clicked() {
+            st.seed_now = true;
+        }
+        ui.add(egui::Slider::new(&mut world.params.death_probability, 0.0..=0.2).text("mortalidade base"));
+        ui.add(egui::Slider::new(&mut world.params.spawn_energy, 0.1..=50.0).text("energia inicial"));
+    });
+}
+
 fn conservation(ui: &mut egui::Ui, st: &UiState) {
     ui.strong("Conservação da matéria");
     let Some(l) = st.ledger else {
@@ -139,6 +167,7 @@ fn conservation(ui: &mut egui::Ui, st: &UiState) {
     let pct = if base > 0 { d as f64 / base as f64 * 100.0 } else { 0.0 };
     let color = if d == 0 { egui::Color32::LIGHT_GREEN } else { egui::Color32::LIGHT_RED };
     ui.colored_label(color, format!("total {now}  Δ {d:+} ({pct:+.4}%)"));
+    ui.label(format!("livre {}  presa em agentes {}", l.free_total(), l.held_total()));
     ui.label(format!("(leitura do epoch ~{}, assíncrona)", st.ledger_epoch));
     egui::Grid::new("ledger").striped(true).show(ui, |ui| {
         ui.label("");

@@ -10,7 +10,7 @@ use wgpu::naga;
 const CONFIGS: [WorldConfig; 3] = [
     WorldConfig::DEFAULT,
     WorldConfig::TEST,
-    WorldConfig { grid_size: 1024, fluid_size: 256, world_units_per_cell: 30 },
+    WorldConfig { grid_size: 1024, fluid_size: 256, world_units_per_cell: 30, max_agents: 1000 },
 ];
 
 fn parse_and_validate(name: &str, src: &str) -> (naga::Module, naga::valid::ModuleInfo) {

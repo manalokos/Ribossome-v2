@@ -38,6 +38,8 @@ Documentos: `docs/ARQUITETURA_V4.md`, `docs/handoff/*.md`.
 - Verifica que todos os `entry_point` referidos em Rust existem nos shaders
   (um pipeline órfão crasha no arranque).
 - `from` é palavra reservada em WGSL.
+- naga (wgpu 30): uma função com valor de retorno não pode acabar só dentro
+  de um `loop` (com `return` lá dentro). Usa `var` + `break` + `return` final.
 - Unidades: `SIM_SIZE` (unidades do mundo, 61440) ≠ `GRID_SIZE` (células,
   2048) ≠ fluido (512). Converter sempre explicitamente; já houve bugs de
   monómeros congelados por passar coordenadas de célula a funções de mundo.

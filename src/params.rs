@@ -85,6 +85,15 @@ gpu_struct! {
         pub slope_steer_rate: f32,
         /// Coesão: enviesamento da difusão dos ativados para vizinhos do mesmo tipo.
         pub cohesion: f32,
+        // ---- vida ----
+        /// Pedidos de sementes (geração 0) a processar neste passo.
+        pub spawn_count: u32,
+        /// Capacidade de agentes (slots).
+        pub max_agents: u32,
+        /// Mortalidade base por passo (÷ energia, como no v3; "death_probability").
+        pub death_probability: f32,
+        /// Energia inicial de uma semente.
+        pub spawn_energy: f32,
     }
 }
 
@@ -109,7 +118,54 @@ impl Default for SimParams {
             // 0 (o v3 tinha 0.6): a coesão separava os nucleótidos por tipo em fios
             // e condensava-os em camadas presas junto ao fundo e às rochas.
             cohesion: 0.0,
+            spawn_count: 0,
+            max_agents: 0,
+            death_probability: 0.02,
+            spawn_energy: 5.0,
         }
+    }
+}
+
+gpu_struct! {
+    /// Agente: dados "quentes" (lidos todos os passos). O genoma vive num
+    /// buffer à parte (16 u32 por slot, 2 bits por base, a partir da base 0).
+    pub struct Agent {
+        /// Posição e velocidade em unidades do MUNDO (e por segundo).
+        pub pos_x: f32,
+        pub pos_y: f32,
+        pub vel_x: f32,
+        pub vel_y: f32,
+        pub rot: f32,
+        /// Energia = ativação colhida (não é matéria; evapora na morte).
+        pub energy: f32,
+        /// 1 = vivo, 0 = slot livre.
+        pub alive: u32,
+        /// Bases do genoma (cada uma é um monómero real preso no agente).
+        pub gene_len: u32,
+        /// Complementos já capturados (também matéria presa).
+        pub pair_count: u32,
+        /// Resíduos do corpo traduzido.
+        pub body_len: u32,
+        pub generation: u32,
+        pub age: u32,
+        /// Identificador único (para o RNG; não muda com o slot).
+        pub id: u32,
+        pub _pad0: u32,
+        pub _pad1: u32,
+        pub _pad2: u32,
+    }
+}
+
+gpu_struct! {
+    /// Pedido de semente (geração 0), escrito pelo CPU.
+    pub struct SpawnRequest {
+        /// Posição em unidades do mundo.
+        pub pos_x: f32,
+        pub pos_y: f32,
+        /// Número de bases a montar.
+        pub gene_len: u32,
+        /// bit 0: começar por AUG (bases também tiradas da vizinhança).
+        pub flags: u32,
     }
 }
 
@@ -170,14 +226,16 @@ pub struct WorldConfig {
     pub fluid_size: u32,
     /// Unidades do mundo por célula do ambiente (61440/2048 = 30 no v3).
     pub world_units_per_cell: u32,
+    /// Capacidade de agentes (slots fixos).
+    pub max_agents: u32,
 }
 
 impl WorldConfig {
     /// Fluido a 1024²: era o que o v3 corria (as constantes do fluido estão
     /// afinadas em células do fluido).
-    pub const DEFAULT: Self = Self { grid_size: 2048, fluid_size: 1024, world_units_per_cell: 30 };
+    pub const DEFAULT: Self = Self { grid_size: 2048, fluid_size: 1024, world_units_per_cell: 30, max_agents: 60_000 };
     /// Mundo pequeno para testes.
-    pub const TEST: Self = Self { grid_size: 256, fluid_size: 128, world_units_per_cell: 30 };
+    pub const TEST: Self = Self { grid_size: 256, fluid_size: 128, world_units_per_cell: 30, max_agents: 4096 };
 
     pub fn sim_size(&self) -> f32 {
         (self.grid_size * self.world_units_per_cell) as f32

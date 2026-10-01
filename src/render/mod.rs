@@ -44,6 +44,9 @@ pub struct WorldView {
     view_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
+    agents_bg: wgpu::BindGroup,
+    agents_pipeline: wgpu::RenderPipeline,
+    max_agents: u32,
 }
 
 impl WorldView {
@@ -160,7 +163,69 @@ impl WorldView {
             multiview_mask: None,
             cache: None,
         });
-        Self { view_buf, bind_group, pipeline }
+        // Agentes: quadrados instanciados (um por slot).
+        let agents_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("agents view layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let agents_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("agents view bg"),
+            layout: &agents_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: view_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: world.agents_buf.as_entire_binding() },
+            ],
+        });
+        let agents_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("agents view pipeline layout"),
+            bind_group_layouts: &[Some(&agents_layout)],
+            immediate_size: 0,
+        });
+        let adef = &shaders::AGENTS_VIEW;
+        let amodule = shaders::create(device, adef, cfg);
+        let agents_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("agents view"),
+            layout: Some(&agents_pl_layout),
+            vertex: wgpu::VertexState {
+                module: &amodule,
+                entry_point: Some(shaders::entry(adef, "vs_agent")),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &amodule,
+                entry_point: Some(shaders::entry(adef, "fs_agent")),
+                compilation_options: Default::default(),
+                targets: &[Some(format.into())],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        Self { view_buf, bind_group, pipeline, agents_bg, agents_pipeline, max_agents: cfg.max_agents }
     }
 
     pub fn update(&self, queue: &wgpu::Queue, cam: &Camera, screen: [f32; 2], view_mode: u32, brightness: f32) {
@@ -181,5 +246,8 @@ impl WorldView {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);
+        pass.set_pipeline(&self.agents_pipeline);
+        pass.set_bind_group(0, &self.agents_bg, &[]);
+        pass.draw(0..6, 0..self.max_agents);
     }
 }

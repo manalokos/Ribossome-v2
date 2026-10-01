@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::gpu::{Gpu, groups};
-use crate::params::{Fumarole, SimParams, WorldConfig};
+use crate::params::{Agent, Fumarole, SimParams, SpawnRequest, WorldConfig};
 use crate::shaders::{self, CHEM_CELL_CAP};
 
 /// Máximo de passos de simulação por frame (cada um tem a sua cópia dos params).
@@ -14,21 +14,36 @@ pub const MAX_STEPS_PER_FRAME: u32 = 64;
 /// Alinhamento dos offsets dinâmicos de uniform (o mínimo garantido é 256).
 const PARAMS_STRIDE: u64 = 256;
 pub const MAX_FUMAROLES: usize = 64;
+const LEDGER_WORDS: u64 = 12;
+/// Máximo de pedidos de sementes por frame.
+pub const MAX_SPAWN_REQUESTS: usize = 4096;
+/// Palavras por slot nos buffers de genoma e de corpo.
+const SLOT_WORDS: u64 = 16;
 
 /// Contagem exata da matéria livre, por canal (A U G C) e estado.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Ledger {
     pub act: [u32; 4],
     pub spent: [u32; 4],
+    /// Matéria presa em agentes (genomas + complementos capturados).
+    pub held: [u32; 4],
 }
 
 impl Ledger {
     pub fn total(&self) -> u64 {
+        self.act.iter().chain(self.spent.iter()).chain(self.held.iter()).map(|&v| v as u64).sum()
+    }
+
+    pub fn free_total(&self) -> u64 {
         self.act.iter().chain(self.spent.iter()).map(|&v| v as u64).sum()
     }
 
+    pub fn held_total(&self) -> u64 {
+        self.held.iter().map(|&v| v as u64).sum()
+    }
+
     pub fn channel(&self, ch: usize) -> u64 {
-        self.act[ch] as u64 + self.spent[ch] as u64
+        self.act[ch] as u64 + self.spent[ch] as u64 + self.held[ch] as u64
     }
 
     /// Conta no CPU a partir do conteúdo bruto da grelha (u32 por célula×canal).
@@ -45,6 +60,7 @@ impl Ledger {
         let mut l = Ledger::default();
         l.act.copy_from_slice(&words[0..4]);
         l.spent.copy_from_slice(&words[4..8]);
+        l.held.copy_from_slice(&words[8..12]);
         l
     }
 }
@@ -101,6 +117,9 @@ struct Pipelines {
     slope: wgpu::ComputePipeline,
     relax_a: wgpu::ComputePipeline,
     relax_b: wgpu::ComputePipeline,
+    spawn: wgpu::ComputePipeline,
+    agents_step: wgpu::ComputePipeline,
+    agents_ledger: wgpu::ComputePipeline,
 }
 
 pub struct World {
@@ -126,7 +145,26 @@ pub struct World {
     world_bg: wgpu::BindGroup,
     fluid_ab: wgpu::BindGroup,
     fluid_ba: wgpu::BindGroup,
+    life_bg: wgpu::BindGroup,
+    pub agents_buf: wgpu::Buffer,
+    pub genomes_buf: wgpu::Buffer,
+    pub life_counters_buf: wgpu::Buffer,
+    free_buf: wgpu::Buffer,
+    spawn_buf: wgpu::Buffer,
+    /// Pedidos de sementes à espera do próximo `encode_steps`.
+    pending_spawns: Vec<SpawnRequest>,
     pipelines: Pipelines,
+}
+
+/// Contadores do ciclo de vida (life_counters na GPU).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LifeCounters {
+    pub free_top: u32,
+    pub next_id: u32,
+    pub spawned: u32,
+    pub spawn_failed: u32,
+    pub deaths: u32,
+    pub births: u32,
 }
 
 fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
@@ -166,13 +204,13 @@ impl World {
         });
         let chem_buf = storage_buffer(device, "chem grid", cells * 16);
         let chem_next = storage_buffer(device, "chem next", cells * 16);
-        let ledger_buf = storage_buffer(device, "ledger", 8 * 4);
+        let ledger_buf = storage_buffer(device, "ledger", LEDGER_WORDS * 4);
         let gamma_buf = storage_buffer(device, "gamma grid", cells * 4);
         let light_buf = storage_buffer(device, "uv light", cells * 4);
         let slope_buf = storage_buffer(device, "gamma slope", cells * 8);
         let ledger_staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ledger staging"),
-            size: 8 * 4,
+            size: LEDGER_WORDS * 4,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -186,6 +224,18 @@ impl World {
         let force_vec = storage_buffer(device, "force vectors", fcells * 8);
         let forces = storage_buffer(device, "fluid forces", fcells * 8);
         let fumarole_buf = storage_buffer(device, "fumaroles", (MAX_FUMAROLES * size_of::<Fumarole>()) as u64);
+        // Organismos: slots fixos; todos começam livres.
+        let max_agents = cfg.max_agents as u64;
+        let agents_buf = storage_buffer(device, "agents", max_agents * size_of::<Agent>() as u64);
+        let genomes_buf = storage_buffer(device, "genomes", max_agents * SLOT_WORDS * 4);
+        let bodies_buf = storage_buffer(device, "bodies", max_agents * SLOT_WORDS * 4);
+        let free_slots: Vec<u32> = (0..cfg.max_agents).rev().collect();
+        let free_buf = storage_buffer(device, "free slots", max_agents * 4);
+        gpu.queue.write_buffer(&free_buf, 0, bytemuck::cast_slice(&free_slots));
+        let life_counters_buf = storage_buffer(device, "life counters", 8 * 4);
+        gpu.queue.write_buffer(&life_counters_buf, 0, bytemuck::cast_slice(&[cfg.max_agents, 0, 0, 0, 0, 0, 0, 0u32]));
+        let spawn_buf =
+            storage_buffer(device, "spawn requests", (MAX_SPAWN_REQUESTS * size_of::<SpawnRequest>()) as u64);
 
         // Grupo 0 — frame: params com offset dinâmico (uma cópia por passo).
         let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -211,6 +261,12 @@ impl World {
         let fluid_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fluid layout"),
             entries: &fluid_entries,
+        });
+        // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
+        let life_entries: Vec<_> = (0..6).map(|b| storage_entry(b, b == 4)).collect();
+        let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("life layout"),
+            entries: &life_entries,
         });
 
         let frame_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -250,9 +306,15 @@ impl World {
             &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &fumarole_buf],
         );
 
+        let life_bg = bind_all(
+            "life bg",
+            &life_layout,
+            &[&agents_buf, &genomes_buf, &free_buf, &life_counters_buf, &spawn_buf, &bodies_buf],
+        );
+
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("world pipeline layout"),
-            bind_group_layouts: &[Some(&frame_layout), Some(&world_layout), Some(&fluid_layout)],
+            bind_group_layouts: &[Some(&frame_layout), Some(&world_layout), Some(&fluid_layout), Some(&life_layout)],
             immediate_size: 0,
         });
         let module = shaders::create(device, &shaders::WORLD, &cfg);
@@ -289,6 +351,9 @@ impl World {
             slope: compute("compute_gamma_slope"),
             relax_a: compute("relax_gamma_a"),
             relax_b: compute("relax_gamma_b"),
+            spawn: compute("spawn_seeds"),
+            agents_step: compute("agents_step"),
+            agents_ledger: compute("agents_ledger"),
         };
 
         Self {
@@ -312,8 +377,32 @@ impl World {
             world_bg,
             fluid_ab,
             fluid_ba,
+            life_bg,
+            agents_buf,
+            genomes_buf,
+            life_counters_buf,
+            free_buf,
+            spawn_buf,
+            pending_spawns: Vec::new(),
             pipelines,
         }
+    }
+
+    /// Pede sementes (geração 0); são processadas no início do próximo `encode_steps`.
+    pub fn request_seeds(&mut self, reqs: &[SpawnRequest]) {
+        let room = MAX_SPAWN_REQUESTS - self.pending_spawns.len();
+        self.pending_spawns.extend_from_slice(&reqs[..reqs.len().min(room)]);
+    }
+
+    /// Lê os contadores do ciclo de vida de forma síncrona (testes, depuração).
+    pub fn life_counters_blocking(&self, gpu: &Gpu) -> LifeCounters {
+        let w: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&self.life_counters_buf)).to_vec();
+        LifeCounters { free_top: w[0], next_id: w[1], spawned: w[2], spawn_failed: w[3], deaths: w[4], births: w[5] }
+    }
+
+    /// Lê os agentes (todos os slots) de forma síncrona (testes).
+    pub fn read_agents_blocking(&self, gpu: &Gpu) -> Vec<Agent> {
+        bytemuck::cast_slice(&gpu.read_buffer_blocking(&self.agents_buf)).to_vec()
     }
 
     /// Gera o terreno e a matéria inicial (determinista para a semente).
@@ -329,6 +418,13 @@ impl World {
         }
         gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
         gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
+        // Mundo novo: não há agentes (a matéria deles pertencia ao mundo antigo).
+        let max = self.cfg.max_agents;
+        gpu.queue.write_buffer(&self.agents_buf, 0, &vec![0u8; max as usize * size_of::<Agent>()]);
+        let free_slots: Vec<u32> = (0..max).rev().collect();
+        gpu.queue.write_buffer(&self.free_buf, 0, bytemuck::cast_slice(&free_slots));
+        gpu.queue.write_buffer(&self.life_counters_buf, 0, bytemuck::cast_slice(&[max, 0, 0, 0, 0, 0, 0, 0u32]));
+        self.pending_spawns.clear();
         self.light_dirty = true;
         Ledger::from_cells(&cells)
     }
@@ -359,10 +455,17 @@ impl World {
         self.params.fumarole_count = nfum as u32;
         self.params.fluid_dt = self.params.dt * substep as f32;
         self.params.fluid_enabled = st.fluid_enabled as u32;
+        self.params.max_agents = self.cfg.max_agents;
+        let spawns = std::mem::take(&mut self.pending_spawns);
+        if !spawns.is_empty() {
+            queue.write_buffer(&self.spawn_buf, 0, bytemuck::cast_slice(&spawns));
+        }
 
         let mut bytes = vec![0u8; (PARAMS_STRIDE * steps as u64) as usize];
         for i in 0..steps {
-            let p = SimParams { epoch: self.params.epoch.wrapping_add(i), ..self.params };
+            // As sementes só entram no primeiro passo do lote.
+            let spawn_count = if i == 0 { spawns.len() as u32 } else { 0 };
+            let p = SimParams { epoch: self.params.epoch.wrapping_add(i), spawn_count, ..self.params };
             let at = (PARAMS_STRIDE * i as u64) as usize;
             bytes[at..at + size_of::<SimParams>()].copy_from_slice(bytemuck::bytes_of(&p));
         }
@@ -380,6 +483,8 @@ impl World {
         let mut pass =
             enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("world"), timestamp_writes: None });
         pass.set_bind_group(1, &self.world_bg, &[]);
+        pass.set_bind_group(3, &self.life_bg, &[]);
+        let ag = groups(self.cfg.max_agents, 64);
         let run = |pass: &mut wgpu::ComputePass, p: &wgpu::ComputePipeline, bg: &wgpu::BindGroup, n: [u32; 2]| {
             pass.set_bind_group(2, bg, &[]);
             pass.set_pipeline(p);
@@ -388,6 +493,11 @@ impl World {
         for i in 0..steps {
             let epoch = self.params.epoch.wrapping_add(i);
             pass.set_bind_group(0, &self.frame_bg, &[(PARAMS_STRIDE * i as u64) as u32]);
+
+            // SEMENTES (só no primeiro passo, e nunca entre scatter e commit).
+            if i == 0 && !spawns.is_empty() {
+                run(&mut pass, &pl.spawn, ab, [groups(spawns.len() as u32, 64), 1]);
+            }
 
             // TERRENO: duas passagens de relaxação dos grãos e o declive.
             if st.terrain_enabled {
@@ -428,6 +538,9 @@ impl World {
             // a partir do estado antes do passo, depois copiar de volta.
             run(&mut pass, &pl.transport, ab, [g, g]);
             run(&mut pass, &pl.commit, ab, commit_groups);
+
+            // ORGANISMOS: depois do commit (os depósitos da morte vão para chem_grid).
+            run(&mut pass, &pl.agents_step, ab, [ag, 1]);
         }
         drop(pass);
         self.params.epoch = self.params.epoch.wrapping_add(steps);
@@ -442,8 +555,11 @@ impl World {
         pass.set_bind_group(0, &self.frame_bg, &[0]);
         pass.set_bind_group(1, &self.world_bg, &[]);
         pass.set_bind_group(2, &self.fluid_ab, &[]);
+        pass.set_bind_group(3, &self.life_bg, &[]);
         pass.set_pipeline(&self.pipelines.ledger);
         pass.dispatch_workgroups(g, g, 1);
+        pass.set_pipeline(&self.pipelines.agents_ledger);
+        pass.dispatch_workgroups(groups(self.cfg.max_agents, 64), 1, 1);
     }
 
     /// Livro-razão assíncrono: se não houver leitura em curso, grava a redução
@@ -453,7 +569,7 @@ impl World {
             return;
         }
         self.encode_ledger(enc);
-        enc.copy_buffer_to_buffer(&self.ledger_buf, 0, &self.ledger_staging, 0, 8 * 4);
+        enc.copy_buffer_to_buffer(&self.ledger_buf, 0, &self.ledger_staging, 0, LEDGER_WORDS * 4);
         self.readback = Readback::Encoded;
     }
 

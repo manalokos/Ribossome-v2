@@ -21,6 +21,12 @@ fn main() {
     if env("FLAT", 0) == 1 {
         gpu.queue.write_buffer(&world.gamma_buf, 0, &vec![0u8; (cfg.cells() * 4) as usize]);
     }
+    let seeds: u32 = env("SEEDS", 0);
+    if seeds > 0 {
+        let mut rng = ribossome::life::SplitMix(7);
+        let reqs = ribossome::life::seed_requests(seeds, [12, 120], true, cfg.sim_size(), &mut rng);
+        world.request_seeds(&reqs);
+    }
     let out = std::path::PathBuf::from(env("OUT", String::from("target/snapshots")));
     std::fs::create_dir_all(&out).unwrap();
     let size = 1024;

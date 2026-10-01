@@ -127,3 +127,46 @@ fn simulation_is_deterministic() {
     assert_eq!(a, go(64), "duas corridas iguais deram resultados diferentes");
     assert_eq!(a, go(1), "o resultado depende do agrupamento dos passos por frame");
 }
+
+/// Ciclo de vida da fase 3a: sementes montadas da sopa, deriva e morte.
+/// A matéria total (livre + presa nos agentes) mantém-se ao quantum, por
+/// canal, enquanto nascem e morrem agentes.
+#[test]
+fn life_cycle_conserves_matter() {
+    use ribossome::params::SpawnRequest;
+    let gpu = Gpu::new_headless().expect("este teste precisa de uma GPU");
+    let cfg = WorldConfig::TEST;
+    let mut world = World::new(&gpu, cfg, 11);
+    let seeded = world.seed_matter(&gpu, 11);
+    let s = cfg.sim_size();
+    let reqs: Vec<SpawnRequest> = (0..300)
+        .map(|i| {
+            let f = i as f32 / 300.0;
+            SpawnRequest {
+                pos_x: s * (0.05 + 0.9 * ((f * 37.0).fract())),
+                pos_y: s * (0.3 + 0.65 * ((f * 13.0).fract())),
+                gene_len: 6 + (i % 120),
+                flags: i % 2,
+            }
+        })
+        .collect();
+    world.request_seeds(&reqs);
+    run(&gpu, &mut world, 1);
+    let after_spawn = world.ledger_blocking(&gpu);
+    let lc = world.life_counters_blocking(&gpu);
+    eprintln!("sementes: {} nasceram, {} falharam; presos {}", lc.spawned, lc.spawn_failed, after_spawn.held_total());
+    assert!(lc.spawned > 100, "quase nenhuma semente nasceu");
+    assert_eq!(lc.spawned + lc.spawn_failed, reqs.len() as u32);
+    assert_eq!(after_spawn.total(), seeded.total(), "as sementes criaram ou destruíram matéria");
+
+    run(&gpu, &mut world, 2000);
+    let end = world.ledger_blocking(&gpu);
+    let lc = world.life_counters_blocking(&gpu);
+    let alive = world.read_agents_blocking(&gpu).iter().filter(|a| a.alive != 0).count() as u32;
+    eprintln!("2000 passos: {} mortes, {alive} vivos, presos {}", lc.deaths, end.held_total());
+    assert!(lc.deaths > 50, "quase ninguém morreu: a morte não está a ser testada");
+    assert_eq!(alive, lc.spawned - lc.deaths);
+    assert_eq!(lc.free_top, cfg.max_agents - alive, "a pilha de slots livres não bate certo");
+    assert_eq!(end.total(), seeded.total(), "matéria total não conservada com vida");
+    assert_eq!(channels(&end), channels(&seeded), "matéria não conservada por canal com vida");
+}

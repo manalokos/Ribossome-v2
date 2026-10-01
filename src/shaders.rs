@@ -5,7 +5,7 @@
 //! também os entry points que o Rust usa: o teste `tests/shaders.rs` valida
 //! cada módulo com o naga do próprio wgpu e confirma que todos existem.
 
-use crate::params::{Fumarole, SimParams, ViewParams, WorldConfig};
+use crate::params::{Agent, Fumarole, SimParams, SpawnRequest, ViewParams, WorldConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -39,6 +39,8 @@ pub const WORLD: ModuleDef = ModuleDef {
         "world/transport.wgsl",
         "world/terrain.wgsl",
         "world/ledger.wgsl",
+        "life/bindings.wgsl",
+        "life/lifecycle.wgsl",
     ],
     entries: &[
         ("transport_scatter", Stage::Compute),
@@ -63,6 +65,9 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("compute_gamma_slope", Stage::Compute),
         ("relax_gamma_a", Stage::Compute),
         ("relax_gamma_b", Stage::Compute),
+        ("spawn_seeds", Stage::Compute),
+        ("agents_step", Stage::Compute),
+        ("agents_ledger", Stage::Compute),
     ],
 };
 
@@ -72,7 +77,13 @@ pub const WORLD_VIEW: ModuleDef = ModuleDef {
     entries: &[("vs_fullscreen", Stage::Vertex), ("fs_world", Stage::Fragment)],
 };
 
-pub const MODULES: &[&ModuleDef] = &[&WORLD, &WORLD_VIEW];
+pub const AGENTS_VIEW: ModuleDef = ModuleDef {
+    name: "agents_view",
+    files: wgsl_files!["render/agents_view.wgsl"],
+    entries: &[("vs_agent", Stage::Vertex), ("fs_agent", Stage::Fragment)],
+};
+
+pub const MODULES: &[&ModuleDef] = &[&WORLD, &WORLD_VIEW, &AGENTS_VIEW];
 
 /// Constantes do mundo e da química partilhadas por todos os módulos.
 pub const CHEM_CELL_CAP: u32 = 48;
@@ -88,6 +99,8 @@ pub fn preamble(cfg: &WorldConfig) -> String {
     s += &SimParams::wgsl();
     s += &ViewParams::wgsl();
     s += &Fumarole::wgsl();
+    s += &Agent::wgsl();
+    s += &SpawnRequest::wgsl();
     s
 }
 
