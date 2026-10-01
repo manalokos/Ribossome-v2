@@ -82,6 +82,11 @@ fn main() {
         "AUG GCU GCU {spacer} {muscle} {spacer} {muscle} {spacer} {muscle} {spacer} {muscle} {spacer} {muscle} GCU GCU GCU GCU UAA"
     );
     trial(&gpu, "relógio + 5 músculos", &swimmer);
+    // Com todas as juntas a responder: relógio + 15 glicinas (sens. α 0,7).
+    let gly = format!("AUG {clock} {} UAA", "GGU ".repeat(15));
+    trial(&gpu, "relógio + 15 glicinas", &gly);
+    let gly_noclock = format!("AUG GCU GCU {} UAA", "GGU ".repeat(15));
+    trial(&gpu, "15 glicinas, sem relógio", &gly_noclock);
     // relógio rápido (parâmetro 0 -> período 20): m = 5 = AUU.
     let fast = swimmer.replacen("UGU UUU", "UGU AUU", 1);
     trial(&gpu, "relógio rápido + 5 músculos", &fast);

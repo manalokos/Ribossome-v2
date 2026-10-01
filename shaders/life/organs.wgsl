@@ -10,10 +10,12 @@
 
 const SIGNAL_DECAY: f32 = 0.95;
 const SIGNAL_MAX: f32 = 4.0;
-// Deflexão máxima de um músculo (rad) para o parâmetro máximo.
-const MUSCLE_MAX: f32 = 0.6;
-// Energia gasta por passo por unidade de atividade muscular |tanh(α)|.
-const MUSCLE_COST: f32 = 0.002;
+// Resposta das juntas aos sinais (v3, jan. 2026): desvio = SIGNAL_GAIN ×
+// (α·sens_α + β·sens_β), limitado a ±MAX_SIGNAL_ANGLE.
+const SIGNAL_GAIN: f32 = 4.0;
+const MAX_SIGNAL_ANGLE: f32 = 2.4;
+// Energia gasta por passo por radiano de desvio mantido (todas as juntas).
+const BEND_COST: f32 = 0.0005;
 // Período do relógio: CLOCK_PERIOD_BASE × (parâmetro + 1) passos.
 const CLOCK_PERIOD_BASE: f32 = 20.0;
 // Capacidade de energia acrescentada pelo armazenamento, por (parâmetro + 1).
@@ -58,26 +60,30 @@ fn organ_catalysis_mult(slot: u32, k: u32) -> f32 {
     return select(1.0, 2.0 + f32(organ_param(o)), organ_type(o) == ORGAN_MOUTH);
 }
 
-// Deflexão de um músculo (rad) para o sinal α atual; 0 se não for músculo.
-// Parâmetro 0–3: dobra para um lado; 4–7: para o outro; força (p % 4 + 1)/4.
-fn muscle_deflection(slot: u32, k: u32) -> f32 {
+// Desvio da junta k pelos sinais (rad). TODAS as juntas respondem, cada
+// aminoácido com a sua sensibilidade a α e a β; o órgão "músculo" amplifica
+// a resposta local ×(2 + parâmetro/2).
+fn signal_deflection(slot: u32, k: u32) -> f32 {
+    var sa = AA_ALPHA_SENS;
+    var sb = AA_BETA_SENS;
+    let aa = body_get(slot, k);
+    let s = signals[slot * MAX_BODY + k];
     let o = organ_get(slot, k);
-    if (organ_type(o) != ORGAN_MUSCLE) { return 0.0; }
-    let p = organ_param(o);
-    let dir = select(1.0, -1.0, p >= 4u);
-    return dir * MUSCLE_MAX * f32(p % 4u + 1u) / 4.0 * tanh(signals[slot * MAX_BODY + k].x);
+    let amp = select(1.0, 2.0 + 0.5 * f32(organ_param(o)), organ_type(o) == ORGAN_MUSCLE);
+    return clamp(SIGNAL_GAIN * amp * (s.x * sa[aa] + s.y * sb[aa]), -MAX_SIGNAL_ANGLE, MAX_SIGNAL_ANGLE);
 }
 
-// Um passo dos sinais: emissões dos sensores/relógio/relé e difusão ao longo
-// da cadeia. Devolve a energia gasta pelos músculos neste passo.
+// Um passo dos sinais: emissões dos sensores/relógio/relé e condução ao longo
+// da cadeia. Devolve a energia gasta pelas juntas a manter os desvios.
 fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
     let n = a.body_len;
     if (n == 0u) { return 0.0; }
     let base = slot * MAX_BODY;
     // Emissões (a partir dos sinais do passo anterior, para o relé).
     var emit: array<vec2<f32>, 64>;
-    var muscle_activity = 0.0;
+    var bend = 0.0;
     for (var k = 0u; k < n; k++) {
+        bend += abs(signal_deflection(slot, k));
         emit[k] = vec2<f32>(0.0);
         let o = organ_get(slot, k);
         let t = organ_type(o);
@@ -114,9 +120,6 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 else if (m == 1u) { emit[k].x = s.y; }
                 else { emit[k].x = -2.0 * s.x; }
             }
-            case ORGAN_MUSCLE: {
-                muscle_activity += abs(tanh(s.x));
-            }
             default: {}
         }
     }
@@ -129,5 +132,5 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         signals[base + k] = clamp(s, vec2<f32>(-SIGNAL_MAX), vec2<f32>(SIGNAL_MAX));
         prev = here;
     }
-    return muscle_activity * MUSCLE_COST;
+    return bend * BEND_COST;
 }

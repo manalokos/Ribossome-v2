@@ -12,7 +12,11 @@
 //!   (scripts/catalytic_propensity.py, M-CSA sobre Swiss-Prot 2026_03);
 //! - energias de contacto: data/mj1996.csv (Miyazawa & Jernigan 1996);
 //! - flexibilidade: data/flexibility_vihinen1994.csv (Vihinen et al. 1994)
-//!   (scripts/aaindex_extract.py, a partir da AAindex).
+//!   (scripts/aaindex_extract.py, a partir da AAindex);
+//! - sensibilidades aos sinais internos α e β (rad por unidade de sinal):
+//!   NÃO são química medida. São os valores de desenho afinados no v3
+//!   (shaders/shared.wgsl, commit 7199600, jan. 2026), antes de os sinais
+//!   terem sido desligados lá. Todas as juntas respondem aos dois sinais.
 
 /// Ordem alfabética do código de uma letra (como no v3).
 pub const AA_LETTERS: [char; 20] =
@@ -215,6 +219,30 @@ pub fn flexibility() -> [f32; 20] {
     f
 }
 
+/// Sensibilidade de cada junta ao sinal α e ao sinal β (valores do v3, ordem de `AMINO`).
+pub const SIGNAL_SENSITIVITY: [(f32, f32); 20] = [
+    (-0.2, 0.2),      // A
+    (0.0, 0.349066),  // C
+    (-0.2, 0.3),      // D
+    (0.1, 0.12),      // E
+    (0.2, -0.33),     // F
+    (0.7, 0.1),       // G
+    (0.2, -0.61),     // H
+    (-0.3, 0.69),     // I
+    (0.6, -0.16),     // K
+    (-0.3332, 0.1),   // L
+    (0.14, -0.64),    // M
+    (0.2, 0.3),       // N
+    (0.5, -0.1),      // P
+    (0.24, -0.4),     // Q
+    (0.5, -0.15),     // R
+    (-0.349066, 0.0), // S
+    (0.1, -0.5),      // T
+    (-0.3, 0.73),     // V
+    (0.31, -0.1),     // W
+    (-0.2, 0.52),     // Y
+];
+
 /// Tabelas WGSL geradas (código genético e propriedades por aminoácido).
 pub fn wgsl() -> String {
     let mut s = String::from("// ---- aminoácidos (gerado de src/life/amino.rs) ----\n");
@@ -237,6 +265,10 @@ pub fn wgsl() -> String {
     s += &col("AA_HYDROPATHY", &|a| a.hydropathy);
     s += &col("AA_CHARGE_PH7", &|a| a.charge_at(7.0));
     s += &col("AA_CATALYTIC", &|a| a.catalytic);
+    let sa: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.0)).collect();
+    let sb: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.1)).collect();
+    s += &format!("const AA_ALPHA_SENS = array<f32, 20>({});\n", sa.join(", "));
+    s += &format!("const AA_BETA_SENS = array<f32, 20>({});\n", sb.join(", "));
     let flex = flexibility();
     let fv: Vec<String> = flex.iter().map(|v| format!("{v:.4}")).collect();
     s += &format!("const AA_FLEX = array<f32, 20>({});\n", fv.join(", "));

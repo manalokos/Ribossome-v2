@@ -29,8 +29,18 @@ pub enum Organ {
     Storage = 7,
 }
 
-pub const ORGAN_NAMES: [&str; ORGAN_TYPES] =
-    ["boca", "músculo", "sensor de comida", "sensor de luz", "sensor de energia", "relógio", "relé", "armazenamento"];
+/// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
+/// aminoácido); o "músculo" é um amplificador dessa resposta local.
+pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
+    "boca",
+    "músculo (amplificador)",
+    "sensor de comida",
+    "sensor de luz",
+    "sensor de energia",
+    "relógio",
+    "relé",
+    "armazenamento",
+];
 
 /// Letras curtas para o inspetor.
 pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's'];

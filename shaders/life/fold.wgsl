@@ -177,7 +177,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> vec3<f32> {
         // (ligado +A, produto −A) mais a atividade da junta anterior no passo
         // anterior (propagação N->C com atraso: uma onda de atividade).
         let goal = select(joint_base[base + k], residue_bend(aa), folding) + joint_active[base + k]
-            + muscle_deflection(slot, k);
+            + signal_deflection(slot, k);
         let theta = joint_angle[base + k];
         let tau = tau_contacts - joint_stiffness(aa) * (theta - goal);
         // Ruído térmico (Langevin sobreamortecido): σ = √(2·μ·kT).
