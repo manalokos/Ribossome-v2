@@ -11,9 +11,9 @@
 const SIGNAL_DECAY: f32 = 0.95;
 const SIGNAL_MAX: f32 = 4.0;
 // Resposta das juntas aos sinais (v3, jan. 2026): desvio = SIGNAL_GAIN ×
-// (α·sens_α + β·sens_β), limitado a ±MAX_SIGNAL_ANGLE.
+// (α·sens_α + β·sens_β), saturado suavemente no máximo do aminoácido
+// (AA_MAX_BEND, Ramachandran): máx·tanh(x/máx).
 const SIGNAL_GAIN: f32 = 4.0;
-const MAX_SIGNAL_ANGLE: f32 = 2.4;
 // Energia gasta por passo por radiano de desvio mantido (todas as juntas).
 const BEND_COST: f32 = 0.0005;
 // Período do relógio: CLOCK_PERIOD_BASE × 2^(bits 1–2 do parâmetro) passos.
@@ -77,7 +77,9 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     let s = signals[slot * MAX_BODY + k];
     let o = organ_get(slot, k);
     let amp = select(1.0, (2.0 + 0.5 * f32(organ_param(o))) * organ_gain(o), organ_type(o) == ORGAN_MUSCLE);
-    return clamp(SIGNAL_GAIN * amp * (s.x * sa[aa] + s.y * sb[aa]), -MAX_SIGNAL_ANGLE, MAX_SIGNAL_ANGLE);
+    var mb = AA_MAX_BEND;
+    let lim = mb[aa];
+    return lim * tanh(SIGNAL_GAIN * amp * (s.x * sa[aa] + s.y * sb[aa]) / lim);
 }
 
 // Um passo dos sinais: emissões dos sensores/relógio/relé e condução ao longo

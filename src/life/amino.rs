@@ -245,6 +245,35 @@ pub const REST_ANGLE: [f32; 20] = [
     -std::f32::consts::FRAC_PI_6, // Y (−0,523599 no v3)
 ];
 
+/// Desvio MÁXIMO que os sinais conseguem impor a cada junta (rad, ordem de
+/// `AMINO`). Escala qualitativa do mapa de Ramachandran (área permitida do
+/// esqueleto): a glicina (sem cadeia lateral) é a mais livre; a prolina tem o
+/// φ preso pelo anel; os β-ramificados (V, I, T) e os aromáticos volumosos
+/// (F, W, Y) são restritos; os restantes ficam no meio. Os valores absolutos
+/// são de desenho (afinados para ondular sem enrolar o corpo num anel).
+pub const MAX_BEND: [f32; 20] = [
+    0.60, // A
+    0.60, // C
+    0.60, // D
+    0.60, // E
+    0.50, // F
+    1.20, // G
+    0.60, // H
+    0.40, // I
+    0.60, // K
+    0.60, // L
+    0.60, // M
+    0.60, // N
+    0.25, // P
+    0.60, // Q
+    0.60, // R
+    0.60, // S
+    0.40, // T
+    0.40, // V
+    0.50, // W
+    0.50, // Y
+];
+
 /// Sensibilidade de cada junta ao sinal α e ao sinal β (valores do v3, ordem de `AMINO`).
 pub const SIGNAL_SENSITIVITY: [(f32, f32); 20] = [
     (-0.2, 0.2),      // A
@@ -294,6 +323,8 @@ pub fn wgsl() -> String {
     let sa: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.0)).collect();
     let sb: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.1)).collect();
     s += &format!("const AA_ALPHA_SENS = array<f32, 20>({});\n", sa.join(", "));
+    let mb: Vec<String> = MAX_BEND.iter().map(|v| format!("{v:.3}")).collect();
+    s += &format!("const AA_MAX_BEND = array<f32, 20>({});\n", mb.join(", "));
     let ra: Vec<String> = REST_ANGLE.iter().map(|v| format!("{v:.5}")).collect();
     s += &format!("const AA_REST_ANGLE = array<f32, 20>({});\n", ra.join(", "));
     s += &format!("const AA_BETA_SENS = array<f32, 20>({});\n", sb.join(", "));
