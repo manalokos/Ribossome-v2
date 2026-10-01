@@ -145,12 +145,14 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         var bins = array<u32, 16>(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
         var stay = 0u;
         let n = act_n + spent_n;
-        for (var k = 0u; k < n; k++) {
+        // Acima de MAX_MOVERS_PER_CH os restantes ficam: conta-os de uma vez
+        // (percorrê-los um a um custava O(n) e uma célula entupida com dezenas
+        // de milhares de monómeros prendia o passo inteiro).
+        let movers = min(n, MAX_MOVERS_PER_CH);
+        let act_stay = act_n - min(act_n, movers);
+        stay += act_stay + (n - movers - act_stay) * CHEM_SPENT_ONE;
+        for (var k = 0u; k < movers; k++) {
             let unit = select(CHEM_SPENT_ONE, 1u, k < act_n);
-            if (k >= MAX_MOVERS_PER_CH) {
-                stay += unit;
-                continue;
-            }
             // 4 números: ponto de partida (x, y), evento, direção do salto.
             let rf = rng_f4(slot, params.epoch, S_MOVE + k);
             var p = rf.xy + disp;
@@ -191,6 +193,13 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if (g_tgt > 0u) {
                     let gperm = 1.0 / (1.0 + GAMMA_POROSITY_K * f32(g_tgt));
                     blocked = g_src == 0u || rng_f4(slot, params.epoch, S_BLOCK + b).x >= gperm;
+                } else if (chem_cell_total(t_idx) > CHEM_CELL_CAP) {
+                    // Volume excluído: uma célula de água CHEIA não aceita
+                    // mais (o monómero fica, como contra a rocha). Sem isto,
+                    // um beco de uma célula no terreno, mais fino que a grelha
+                    // do fluido, onde a corrente aponta para dentro, enchia
+                    // sem limite (150 mil monómeros em 10 mil passos).
+                    blocked = true;
                 }
             }
             if (blocked) {
