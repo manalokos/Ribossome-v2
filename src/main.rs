@@ -46,6 +46,8 @@ fn world_config_from_env() -> WorldConfig {
     if let Some(g) = std::env::var("RIBO_GRID").ok().and_then(|v| v.parse::<u32>().ok()) {
         cfg.grid_size = g;
         cfg.fluid_size = (g / 2).max(16);
+        // A capacidade de agentes escala com a área (60 000 a 2048²).
+        cfg.max_agents = ((60_000u64 * g as u64 * g as u64) / (2048 * 2048)).max(1024) as u32;
     }
     if let Some(f) = std::env::var("RIBO_FLUID").ok().and_then(|v| v.parse::<u32>().ok()) {
         cfg.fluid_size = f;

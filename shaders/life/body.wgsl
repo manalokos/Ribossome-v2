@@ -57,6 +57,7 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
         let b = residue_bend(body_get(slot, k));
         joint_angle[slot * MAX_BODY + k] = b;
         joint_base[slot * MAX_BODY + k] = b;
+        joint_state[slot * MAX_BODY + k] = 0u;
     }
     rebuild_body(slot, n);
     return n;

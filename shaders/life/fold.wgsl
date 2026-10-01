@@ -24,7 +24,7 @@ const R_CONTACT_OUT: f32 = 19.0;
 const R_EXCL: f32 = 10.0;
 const K_REP: f32 = 0.5;
 // Mobilidade das juntas (rad por passo por RT de binário) e limite por passo.
-const JOINT_MOBILITY: f32 = 0.0005;
+const JOINT_MOBILITY: f32 = 0.01;
 const JOINT_MAX_STEP: f32 = 0.05;
 const S_JOINT: u32 = 5u << 16u;     // + índice da junta
 
@@ -58,12 +58,71 @@ fn rebuild_body(slot: u32, n: u32) {
     }
 }
 
+// NATAÇÃO POR FORÇAS RESISTIVAS (RFT), baixo Reynolds.
+// Cada resíduo que se move sente arrasto anisotrópico: ξ⊥ = 2·ξ∥ em
+// relação à tangente da cadeia (corpo esbelto). O corpo move-se como um
+// todo (V, Ω) de modo a que a força e o binário totais sejam ZERO (sem
+// inércia). A velocidade de cada resíduo no mundo é V + Ω×r + u, onde u é a
+// mudança de forma. É um sistema linear 3×3 em (Vx, Vy, Ω). Um movimento
+// recíproco não desloca nada (teorema da vieira).
+const RFT_PERP_RATIO: f32 = 2.0;
+
+fn rft_tangent(slot: u32, n: u32, k: u32) -> vec2<f32> {
+    let base = slot * MAX_BODY;
+    let a = body_pos[base + select(k - 1u, k, k == 0u)];
+    let b = body_pos[base + select(k + 1u, k, k + 1u >= n)];
+    let t = b - a;
+    let l = length(t);
+    return select(vec2<f32>(1.0, 0.0), t / l, l > 1e-5);
+}
+
+// Devolve (Vx, Vy, Ω) no referencial do corpo, por passo.
+fn rft_solve(slot: u32, n: u32, old: ptr<function, array<vec2<f32>, 64>>) -> vec3<f32> {
+    // M·[Vx,Vy,Ω] = −c, com M = Σ Dᵀ·R·D e c = Σ Dᵀ·R·u, onde R é o tensor de
+    // arrasto do resíduo e D mapeia (Vx,Vy,Ω) para a velocidade do resíduo.
+    var m = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+    var c = vec3<f32>(0.0);
+    let base = slot * MAX_BODY;
+    for (var k = 0u; k < n; k++) {
+        let r = body_pos[base + k];
+        let u = r - (*old)[k];
+        let t = rft_tangent(slot, n, k);
+        // R = ξ∥·t·tᵀ + ξ⊥·(I − t·tᵀ), com ξ∥ = 1.
+        let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
+        let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
+        let rr = tt + RFT_PERP_RATIO * (id - tt);
+        // Colunas de D: ∂v/∂Vx = (1,0), ∂v/∂Vy = (0,1), ∂v/∂Ω = (−r.y, r.x).
+        let d0 = vec2<f32>(1.0, 0.0);
+        let d1 = vec2<f32>(0.0, 1.0);
+        let d2 = vec2<f32>(-r.y, r.x);
+        let rd0 = rr * d0;
+        let rd1 = rr * d1;
+        let rd2 = rr * d2;
+        m[0] += vec3<f32>(dot(d0, rd0), dot(d1, rd0), dot(d2, rd0));
+        m[1] += vec3<f32>(dot(d0, rd1), dot(d1, rd1), dot(d2, rd1));
+        m[2] += vec3<f32>(dot(d0, rd2), dot(d1, rd2), dot(d2, rd2));
+        let ru = rr * u;
+        c += vec3<f32>(dot(d0, ru), dot(d1, ru), dot(d2, ru));
+    }
+    let det = determinant(m);
+    if (abs(det) < 1e-6) { return vec3<f32>(0.0); }
+    // Regra de Cramer.
+    let b = -c;
+    let mx = mat3x3<f32>(b, m[1], m[2]);
+    let my = mat3x3<f32>(m[0], b, m[2]);
+    let mz = mat3x3<f32>(m[0], m[1], b);
+    return vec3<f32>(determinant(mx), determinant(my), determinant(mz)) / det;
+}
+
 // Um passo da dinâmica das juntas do agente `slot`. kT = agitação térmica local.
-fn joints_step(slot: u32, a: Agent, kt: f32) {
+// Devolve o movimento rígido de natação (Vx, Vy, Ω) no referencial do corpo.
+fn joints_step(slot: u32, a: Agent, kt: f32) -> vec3<f32> {
     let n = a.body_len;
-    if (n < 2u) { return; }
+    if (n < 2u) { return vec3<f32>(0.0); }
     let base = slot * MAX_BODY;
     let folding = a.age < FOLD_STEPS;
+    var old: array<vec2<f32>, 64>;
+    for (var k = 0u; k < n; k++) { old[k] = body_pos[base + k]; }
 
     // Forças sobre cada resíduo (só durante a dobragem: O(n²)).
     var force: array<vec2<f32>, 64>;
@@ -106,7 +165,11 @@ fn joints_step(slot: u32, a: Agent, kt: f32) {
         if (k == 0u) { continue; } // θ_0 é a orientação global (o corpo roda livre)
 
         let aa = body_get(slot, k);
-        let goal = select(joint_base[base + k], residue_bend(aa), folding);
+        // Alvo: forma base (ou tendência local durante a dobragem) + o desvio
+        // do estado do ciclo catalítico (ligado +A, produto −A).
+        let st = joint_state[base + k];
+        let motor = select(select(0.0, -params.motor_amplitude, st == 2u), params.motor_amplitude, st == 1u);
+        let goal = select(joint_base[base + k], residue_bend(aa), folding) + motor;
         let theta = joint_angle[base + k];
         let tau = tau_contacts - joint_stiffness(aa) * (theta - goal);
         // Ruído térmico (Langevin sobreamortecido): σ = √(2·μ·kT).
@@ -121,4 +184,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) {
         for (var k = 0u; k < n; k++) { joint_base[base + k] = joint_angle[base + k]; }
     }
     rebuild_body(slot, n);
+    // Durante a dobragem não se nada (a cadeia está a assentar).
+    if (folding || params.rft_enabled == 0u) { return vec3<f32>(0.0); }
+    return rft_solve(slot, n, &old);
 }

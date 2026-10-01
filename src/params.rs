@@ -118,8 +118,11 @@ gpu_struct! {
         pub chain_stiffness: f32,
         /// Agitação térmica das juntas (kT em RT à temperatura ambiente).
         pub thermal_kt: f32,
-        pub _pad0: u32,
-        pub _pad1: u32,
+        /// Desvio de ângulo (rad) de uma junta catalítica com o ligando
+        /// ligado (+) e com o produto (−): o curso do motor.
+        pub motor_amplitude: f32,
+        /// 1 = natação por forças resistivas (RFT) a partir da mudança de forma.
+        pub rft_enabled: u32,
     }
 }
 
@@ -158,8 +161,8 @@ impl Default for SimParams {
             phoretic_gain: 100.0,
             chain_stiffness: 20.0,
             thermal_kt: 1.0,
-            _pad0: 0,
-            _pad1: 0,
+            motor_amplitude: 0.3,
+            rft_enabled: 1,
         }
     }
 }

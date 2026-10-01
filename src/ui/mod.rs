@@ -176,6 +176,10 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         ui.checkbox(&mut world.settings.contact_enabled, "repulsão entre agentes");
         ui.add(egui::Slider::new(&mut world.params.chain_stiffness, 1.0..=100.0).text("rigidez das juntas"));
         ui.add(egui::Slider::new(&mut world.params.thermal_kt, 0.0..=5.0).text("agitação térmica (kT)"));
+        ui.add(egui::Slider::new(&mut world.params.motor_amplitude, 0.0..=1.0).text("curso do motor (rad)"));
+        let mut rft = world.params.rft_enabled != 0;
+        ui.checkbox(&mut rft, "natação (RFT)");
+        world.params.rft_enabled = rft as u32;
         ui.add(egui::Slider::new(&mut world.params.phoretic_gain, 0.0..=500.0).text("difusioforese"));
     });
 }

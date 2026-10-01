@@ -25,6 +25,10 @@ const HOT_DEATH_MULT: f32 = 10.0;
 const UV_HAZARD_SCALE: f32 = 0.001;
 const MIN_GENE_LEN: u32 = 6u;
 const S_BROWN: u32 = 9u;
+// Ciclo catalítico: probabilidade por passo de hidrolisar o ligando ligado e
+// de soltar o produto (taxas globais, iguais para todos).
+const MOTOR_P_HYDROLYSIS: f32 = 0.2;
+const MOTOR_P_RELEASE: f32 = 0.1;
 // Difusioforese (v3): limite de velocidade por passo, em unidades do mundo.
 const PHORETIC_MAX_STEP: f32 = 3.0;
 
@@ -231,7 +235,17 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // ---- JUNTAS: dobragem ao nascer, depois agitação térmica ----
     let kt_here = params.thermal_kt * (1.0 + temp_in[fluid_index_at_world(vec2<f32>(a.pos_x, a.pos_y))] / 12.0);
-    joints_step(slot, a, kt_here);
+    let swim = joints_step(slot, a, kt_here);
+    // Natação: o movimento rígido vem no referencial do corpo; roda-o para o mundo.
+    if (any(swim != vec3<f32>(0.0))) {
+        let sv = rotate(swim.xy, a.rot);
+        let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
+        if (gamma_count(world_to_cell(np0)) < GAMMA_SOLID_THRESHOLD) {
+            a.pos_x = np0.x;
+            a.pos_y = np0.y;
+        }
+        a.rot += swim.z;
+    }
     if (a.age + 1u == FOLD_STEPS) {
         a.radius = contact_radius(slot, a.body_len);
     }
@@ -250,36 +264,52 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     a.pos_y = p.y;
     let cap = energy_capacity(a);
 
-    // ---- COMER = hidrólise catalisada pelos resíduos ----
-    // Cada resíduo catalisa a hidrólise de monómeros ativados na sua célula
-    // com uma taxa proporcional à sua PROPENSÃO CATALÍTICA medida (M-CSA).
-    // O monómero fica no lugar, gasto; a ativação vira energia do agente.
+    // ---- COMER = CICLO CATALÍTICO de cada resíduo ----
+    // livre --liga um ativado--> ligado --hidrolisa--> produto --solta--> livre
+    // A ligação tem probabilidade proporcional à PROPENSÃO CATALÍTICA medida
+    // (M-CSA), à comida na célula e à fome. Na hidrólise o monómero fica no
+    // lugar, gasto, e a ativação vira energia do agente. Cada estado desvia
+    // o ângulo da junta (fold.wgsl): o ciclo irreversível é um motor.
     var cat = AA_CATALYTIC;
     // Fluxo de consumo por direção (difusioforese): soma de taxa × direção
     // do resíduo a partir do centro de massa. Consumo simétrico cancela.
     var phoretic = vec2<f32>(0.0);
     for (var k = 0u; k < a.body_len; k++) {
-        if (a.energy + params.food_power > cap) { break; }
         let rw = residue_world(slot, a, k);
         let cell = world_to_cell(rw);
         var avail = vec4<u32>(0u);
         for (var ch = 0u; ch < 4u; ch++) { avail[ch] = chem_act_count(cell, ch); }
         let tot = avail.x + avail.y + avail.z + avail.w;
-        if (tot == 0u) { continue; }
         let hunger = clamp(1.0 - a.energy / cap, 0.0, 1.0);
         let pe = clamp(params.uptake_rate * cat[body_get(slot, k)] * f32(tot) * hunger, 0.0, 1.0);
-        let rc = rw - p;
-        let rl = length(rc);
-        if (rl > 1e-4) { phoretic += rc / rl * pe; }
+        let si = slot * MAX_BODY + k;
+        let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
-        if (r.x < pe) {
-            var u = u32(r.y * f32(tot));
-            var b = 3u;
-            for (var ch = 0u; ch < 4u; ch++) {
-                if (u < avail[ch]) { b = ch; break; }
-                u -= avail[ch];
+        if (st == 0u) {
+            // Barriga cheia: não liga mais (mas os ciclos em curso acabam).
+            if (r.x < pe && a.energy + params.food_power <= cap) {
+                joint_state[si] = 1u;
+                let rc = rw - p;
+                let rl = length(rc);
+                if (rl > 1e-4) { phoretic += rc / rl * pe; }
             }
-            if (chem_spend_one(cell * 4u + b)) { a.energy += params.food_power; }
+        } else if (st == 1u) {
+            if (r.x < MOTOR_P_HYDROLYSIS) {
+                var u = u32(r.y * f32(tot));
+                var b = 3u;
+                for (var ch = 0u; ch < 4u; ch++) {
+                    if (u < avail[ch]) { b = ch; break; }
+                    u -= avail[ch];
+                }
+                if (tot > 0u && chem_spend_one(cell * 4u + b)) {
+                    a.energy += params.food_power;
+                    joint_state[si] = 2u;
+                } else {
+                    joint_state[si] = 0u;
+                }
+            }
+        } else if (r.x < MOTOR_P_RELEASE) {
+            joint_state[si] = 0u;
         }
     }
     a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * f32(a.body_len);

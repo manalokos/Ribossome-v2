@@ -25,6 +25,8 @@
 // Ângulos das juntas (atual e base), MAX_BODY por slot.
 @group(3) @binding(12) var<storage, read_write> joint_angle: array<f32>;
 @group(3) @binding(13) var<storage, read_write> joint_base: array<f32>;
+// Estado do ciclo catalítico de cada resíduo: 0 livre, 1 ligado, 2 produto.
+@group(3) @binding(14) var<storage, read_write> joint_state: array<u32>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;
