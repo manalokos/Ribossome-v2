@@ -170,6 +170,7 @@ impl Running {
             self.ui.ledger = Some(l);
             self.ui.ledger_epoch = self.world.params.epoch;
         }
+        self.ui.stats.update(self.world.params.epoch, self.world.last_counters, self.world.cfg.max_agents);
         if self.ui.seed_now {
             self.ui.seed_now = false;
             let reqs = ribossome::life::seed_requests(

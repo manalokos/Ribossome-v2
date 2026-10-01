@@ -25,6 +25,42 @@ pub struct UiState {
     pub seed_len: [u32; 2],
     pub seed_aug: bool,
     pub seed_now: bool,
+    /// Velocidade e população (atualizadas ~2×/s em `update_stats`).
+    pub stats: Stats,
+}
+
+#[derive(Default)]
+pub struct Stats {
+    pub epochs_per_sec: f32,
+    pub alive: Option<u32>,
+    pub births_per_sec: f32,
+    pub deaths_per_sec: f32,
+    /// Amostra anterior: (instante, epoch, nascimentos, mortes, epoch da leitura).
+    last: Option<(std::time::Instant, u32, u32, u32)>,
+}
+
+impl Stats {
+    /// Atualiza com o epoch atual e os contadores lidos da GPU (assíncronos).
+    pub fn update(&mut self, epoch: u32, counters: Option<crate::world::LifeCounters>, max_agents: u32) {
+        let now = std::time::Instant::now();
+        if let Some(c) = counters {
+            self.alive = Some(c.alive(max_agents));
+        }
+        let (births, deaths) = counters.map_or((0, 0), |c| (c.births, c.deaths));
+        match self.last {
+            Some((t0, e0, b0, d0)) => {
+                let dt = now.duration_since(t0).as_secs_f32();
+                if dt >= 0.5 {
+                    self.epochs_per_sec = epoch.saturating_sub(e0) as f32 / dt;
+                    // Os contadores voltam a zero numa nova semente: nada de taxas negativas.
+                    self.births_per_sec = births.saturating_sub(b0) as f32 / dt;
+                    self.deaths_per_sec = deaths.saturating_sub(d0) as f32 / dt;
+                    self.last = Some((now, epoch, births, deaths));
+                }
+            }
+            None => self.last = Some((now, epoch, births, deaths)),
+        }
+    }
 }
 
 impl UiState {
@@ -40,6 +76,7 @@ impl UiState {
             vsync: true,
             monomer_brightness: 0.5,
             signal_view: 0,
+            stats: Stats::default(),
             seed_count: 500,
             seed_len: [12, 120],
             seed_aug: true,
@@ -80,7 +117,14 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
                 st.reseed = true;
             }
         });
-        ui.label(format!("epoch {}", world.params.epoch));
+        ui.label(format!("epoch {}   ({:.0} epochs/s)", world.params.epoch, st.stats.epochs_per_sec));
+        ui.label(match st.stats.alive {
+            Some(n) => format!(
+                "agentes vivos {n}   (+{:.0}/s nascimentos, −{:.0}/s mortes)",
+                st.stats.births_per_sec, st.stats.deaths_per_sec
+            ),
+            None => "agentes vivos …".into(),
+        });
         ui.add(egui::Slider::new(&mut st.steps_per_frame, 1..=MAX_STEPS_PER_FRAME).text("passos/frame"));
         ui.checkbox(&mut st.vsync, "vsync");
 

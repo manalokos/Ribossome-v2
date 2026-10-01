@@ -201,6 +201,8 @@ pub struct World {
     /// Pedidos de sementes à espera do próximo `encode_steps`.
     pending_spawns: Vec<SpawnRequest>,
     pipelines: Pipelines,
+    /// Contadores do ciclo de vida da última leitura assíncrona (com atraso).
+    pub last_counters: Option<LifeCounters>,
 }
 
 /// Contadores do ciclo de vida (life_counters na GPU).
@@ -214,6 +216,25 @@ pub struct LifeCounters {
     pub births: u32,
     /// Mortes com energia < 1.
     pub starved: u32,
+}
+
+impl LifeCounters {
+    fn from_words(w: &[u32]) -> Self {
+        Self {
+            free_top: w[0],
+            next_id: w[1],
+            spawned: w[2],
+            spawn_failed: w[3],
+            deaths: w[4],
+            births: w[5],
+            starved: w[6],
+        }
+    }
+
+    /// Agentes vivos (slots ocupados).
+    pub fn alive(&self, max_agents: u32) -> u32 {
+        max_agents.saturating_sub(self.free_top)
+    }
 }
 
 fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
@@ -259,7 +280,8 @@ impl World {
         let slope_buf = storage_buffer(device, "gamma slope", cells * 8);
         let ledger_staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ledger staging"),
-            size: LEDGER_WORDS * 4,
+            // Livro-razão + contadores do ciclo de vida (8 palavras).
+            size: (LEDGER_WORDS + 8) * 4,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -590,6 +612,7 @@ impl World {
             spawn_buf,
             pending_spawns: Vec::new(),
             pipelines,
+            last_counters: None,
         }
     }
 
@@ -602,15 +625,7 @@ impl World {
     /// Lê os contadores do ciclo de vida de forma síncrona (testes, depuração).
     pub fn life_counters_blocking(&self, gpu: &Gpu) -> LifeCounters {
         let w: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&self.life_counters_buf)).to_vec();
-        LifeCounters {
-            free_top: w[0],
-            next_id: w[1],
-            spawned: w[2],
-            spawn_failed: w[3],
-            deaths: w[4],
-            births: w[5],
-            starved: w[6],
-        }
+        LifeCounters::from_words(&w)
     }
 
     /// Lê os agentes (todos os slots) de forma síncrona (testes).
@@ -877,6 +892,7 @@ impl World {
         }
         self.encode_ledger(enc);
         enc.copy_buffer_to_buffer(&self.ledger_buf, 0, &self.ledger_staging, 0, LEDGER_WORDS * 4);
+        enc.copy_buffer_to_buffer(&self.life_counters_buf, 0, &self.ledger_staging, LEDGER_WORDS * 4, 8 * 4);
         self.readback = Readback::Encoded;
     }
 
@@ -902,7 +918,9 @@ impl World {
         }
         let ledger = {
             let view = self.ledger_staging.get_mapped_range(..).ok()?;
-            Ledger::from_gpu(bytemuck::cast_slice(&view))
+            let words: &[u32] = bytemuck::cast_slice(&view);
+            self.last_counters = Some(LifeCounters::from_words(&words[LEDGER_WORDS as usize..]));
+            Ledger::from_gpu(&words[..LEDGER_WORDS as usize])
         };
         self.ledger_staging.unmap();
         self.readback = Readback::Idle;
