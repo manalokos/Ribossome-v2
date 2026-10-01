@@ -500,8 +500,10 @@ fn subtract_gradient(@builtin(global_invocation_id) gid: vec3<u32>) {
     velocity_out[idx] = clamp_vec2_len(sanitize_vec2(v), MAX_VEL);
 }
 
-// Paredes do aquário: como no v3, a componente normal é refletida
-// (o v3 pediu "sem perda de energia nos obstáculos").
+// Paredes do aquário: impermeáveis e com deslizamento livre. A componente
+// normal é ZERO na parede; a tangencial mantém-se. (O v3 invertia a normal
+// a cada resolução, um "ressalto" que uma parede real não faz, e a borda
+// oscilava. Mudado com o Filipe na fase 2.)
 @compute @workgroup_size(16, 16)
 fn enforce_boundaries(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = gid.x;
@@ -510,8 +512,8 @@ fn enforce_boundaries(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = fgrid(x, y);
     if (is_effectively_solid(x, y)) { velocity_out[idx] = vec2<f32>(0.0); return; }
     var v = sanitize_vec2(velocity_in[idx]);
-    if (x == 0u || x == FLUID_SIZE - 1u) { v.x = -v.x; }
-    if (y == 0u || y == FLUID_SIZE - 1u) { v.y = -v.y; }
+    if (x == 0u || x == FLUID_SIZE - 1u) { v.x = 0.0; }
+    if (y == 0u || y == FLUID_SIZE - 1u) { v.y = 0.0; }
     v = reflect_if_into_solid(x, y, v);
     velocity_out[idx] = clamp_vec2_len(sanitize_vec2(v), MAX_VEL);
 }

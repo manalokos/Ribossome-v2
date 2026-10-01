@@ -7,7 +7,7 @@ fn main() {
     let gpu = Gpu::new_headless().unwrap();
     let cfg = if std::env::var("BIG").is_ok() { WorldConfig::DEFAULT } else { WorldConfig::TEST };
     let mut world = World::new(&gpu, cfg, 3);
-    world.settings.jacobi_iters = std::env::var("J").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
+    world.settings.jacobi_iters = std::env::var("J").ok().and_then(|v| v.parse().ok()).unwrap_or(128);
     world.seed_matter(&gpu, 3);
     let steps: u32 = std::env::var("STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(640);
     let t0 = std::time::Instant::now();

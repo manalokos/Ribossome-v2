@@ -85,6 +85,15 @@ fn fluid_and_light_are_sane() {
     assert!(max_t > 2.0, "a fumarola não aqueceu a água");
     assert!(max_speed > 0.1, "a flutuação não pôs o fluido em movimento");
 
+    // Incompressibilidade num aquário fechado: o fluxo líquido através de
+    // qualquer linha horizontal tem de ser ~0 (com Jacobi 10 era ~50%).
+    for y in [n / 4, n / 2, 3 * n / 4] {
+        let net: f32 = (0..n).map(|x| vel[(y * n + x) * 2 + 1]).sum::<f32>();
+        let gross: f32 = (0..n).map(|x| vel[(y * n + x) * 2 + 1].abs()).sum::<f32>();
+        eprintln!("linha {y}: fluxo líquido {net:.2}, total {gross:.2}");
+        assert!(net.abs() < 0.1 * gross.max(1.0), "o fluido cria/destrói água na linha {y}");
+    }
+
     let light = world.read_f32_blocking(&gpu, &world.light_buf);
     let g = cfg.grid_size as usize;
     let top = light[(g - 1) * g + g / 2];

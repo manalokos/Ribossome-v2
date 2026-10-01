@@ -68,7 +68,9 @@ pub struct WorldSettings {
 
 impl Default for WorldSettings {
     fn default() -> Self {
-        Self { fluid_enabled: true, fluid_substep: 2, jacobi_iters: 10, light_interval: 100 }
+        // Jacobi 128 (o v3 usava 10): com 10 a pressão não convergia e o fluido
+        // criava e destruía água (~50% de fluxo líquido através de uma linha).
+        Self { fluid_enabled: true, fluid_substep: 2, jacobi_iters: 128, light_interval: 100 }
     }
 }
 
