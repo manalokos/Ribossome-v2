@@ -157,7 +157,13 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
             egui::Grid::new("prof").striped(true).show(ui, |ui| {
                 for s in prof.stats() {
                     ui.label(s.name);
-                    ui.label(format!("{:.3} ms", s.avg_ms));
+                    if s.name == "world" && !st.paused {
+                        // O "world" inclui todos os passos do frame.
+                        let n = st.steps_per_frame.max(1);
+                        ui.label(format!("{:.3} ms  ({n} passos, {:.3} ms/passo)", s.avg_ms, s.avg_ms / n as f64));
+                    } else {
+                        ui.label(format!("{:.3} ms", s.avg_ms));
+                    }
                     ui.end_row();
                 }
             });

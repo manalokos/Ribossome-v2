@@ -5,6 +5,7 @@ pub mod gpu;
 pub mod life;
 pub mod params;
 pub mod render;
+pub mod runlog;
 pub mod shaders;
 pub mod ui;
 pub mod world;

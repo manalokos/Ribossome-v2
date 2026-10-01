@@ -34,6 +34,7 @@ struct Running {
     inspector: ui::inspector::Inspector,
     seed: u64,
     seed_rng: ribossome::life::SplitMix,
+    runlog: ribossome::runlog::RunLog,
 }
 
 #[derive(Default)]
@@ -124,6 +125,16 @@ impl Running {
             Some(gpu.device.limits().max_texture_dimension_2d as usize),
         );
         let mut egui_renderer = egui_wgpu::Renderer::new(&gpu.device, format, egui_wgpu::RendererOptions::default());
+        let info = gpu.adapter.get_info();
+        let runlog = ribossome::runlog::RunLog::from_env(format!(
+            "modo {}  {:?}  GPU {} ({:?}, driver {})  build {}",
+            if lab_mode() { "laboratório" } else { "mundo completo" },
+            world.cfg,
+            info.name,
+            info.backend,
+            info.driver_info,
+            if cfg!(debug_assertions) { "debug" } else { "release" }
+        ));
         let mut inspector = ui::inspector::Inspector::new(&gpu, &world);
         inspector.register(&gpu.device, &mut egui_renderer);
 
@@ -146,6 +157,7 @@ impl Running {
             inspector,
             seed,
             seed_rng: ribossome::life::SplitMix(seed ^ 0x5EED),
+            runlog,
         }
     }
 
@@ -160,6 +172,7 @@ impl Running {
     }
 
     fn redraw(&mut self) {
+        self.runlog.before_frame(&mut self.profiler);
         self.inspector.poll(&self.gpu.device);
         if self.inspector.follow
             && let Some(d) = &self.inspector.data
@@ -282,6 +295,7 @@ impl Running {
         world.ledger_after_submit();
         inspector.after_submit();
 
+        self.runlog.after_frame(&self.world, &self.ui, &mut self.profiler);
         self.window.pre_present_notify();
         self.gpu.queue.present(tex);
         for id in out.textures_delta.free.drain() {
