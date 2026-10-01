@@ -41,6 +41,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         "world/ledger.wgsl",
         "life/bindings.wgsl",
         "life/lifecycle.wgsl",
+        "life/body.wgsl",
     ],
     entries: &[
         ("transport_scatter", Stage::Compute),
@@ -68,6 +69,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("spawn_seeds", Stage::Compute),
         ("agents_step", Stage::Compute),
         ("agents_ledger", Stage::Compute),
+        ("agents_birth", Stage::Compute),
     ],
 };
 
@@ -101,6 +103,7 @@ pub fn preamble(cfg: &WorldConfig) -> String {
     s += &Fumarole::wgsl();
     s += &Agent::wgsl();
     s += &SpawnRequest::wgsl();
+    s += &crate::life::amino::wgsl();
     s
 }
 

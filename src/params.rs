@@ -94,6 +94,21 @@ gpu_struct! {
         pub death_probability: f32,
         /// Energia inicial de uma semente.
         pub spawn_energy: f32,
+        /// Energia por monómero hidrolisado ("food_power" do v3).
+        pub food_power: f32,
+        /// Custo de manutenção por resíduo e por passo ("amino_maintenance_cost").
+        pub maintenance_cost: f32,
+        /// Bases emparelhadas por passo, em média ("spawn_probability" do v3).
+        pub pairing_rate: f32,
+        /// Taxa de mutação por base na cópia.
+        pub mutation_rate: f32,
+        /// Multiplicador do dano UV à superfície ("uv_damage").
+        pub uv_damage: f32,
+        /// Probabilidade de hidrólise por monómero ativado, por unidade de
+        /// propensão catalítica e por passo (v3: 0,01 × massa mínima 0,1).
+        pub uptake_rate: f32,
+        pub _pad0: u32,
+        pub _pad1: u32,
     }
 }
 
@@ -122,6 +137,14 @@ impl Default for SimParams {
             max_agents: 0,
             death_probability: 0.02,
             spawn_energy: 5.0,
+            food_power: 6.0,
+            maintenance_cost: 0.0001,
+            pairing_rate: 3.0,
+            mutation_rate: 0.003,
+            uv_damage: 10.0,
+            uptake_rate: 0.001,
+            _pad0: 0,
+            _pad1: 0,
         }
     }
 }

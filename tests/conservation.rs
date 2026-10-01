@@ -163,9 +163,14 @@ fn life_cycle_conserves_matter() {
     let end = world.ledger_blocking(&gpu);
     let lc = world.life_counters_blocking(&gpu);
     let alive = world.read_agents_blocking(&gpu).iter().filter(|a| a.alive != 0).count() as u32;
-    eprintln!("2000 passos: {} mortes, {alive} vivos, presos {}", lc.deaths, end.held_total());
+    eprintln!(
+        "2000 passos: {} nascimentos, {} mortes, {alive} vivos, presos {}",
+        lc.births,
+        lc.deaths,
+        end.held_total()
+    );
     assert!(lc.deaths > 50, "quase ninguém morreu: a morte não está a ser testada");
-    assert_eq!(alive, lc.spawned - lc.deaths);
+    assert_eq!(alive, lc.spawned + lc.births - lc.deaths, "vivos ≠ sementes + nascimentos − mortes");
     assert_eq!(lc.free_top, cfg.max_agents - alive, "a pilha de slots livres não bate certo");
     assert_eq!(end.total(), seeded.total(), "matéria total não conservada com vida");
     assert_eq!(channels(&end), channels(&seeded), "matéria não conservada por canal com vida");

@@ -120,6 +120,7 @@ struct Pipelines {
     spawn: wgpu::ComputePipeline,
     agents_step: wgpu::ComputePipeline,
     agents_ledger: wgpu::ComputePipeline,
+    agents_birth: wgpu::ComputePipeline,
 }
 
 pub struct World {
@@ -148,6 +149,8 @@ pub struct World {
     life_bg: wgpu::BindGroup,
     pub agents_buf: wgpu::Buffer,
     pub genomes_buf: wgpu::Buffer,
+    pub bodies_buf: wgpu::Buffer,
+    pub body_pos_buf: wgpu::Buffer,
     pub life_counters_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
     spawn_buf: wgpu::Buffer,
@@ -229,6 +232,7 @@ impl World {
         let agents_buf = storage_buffer(device, "agents", max_agents * size_of::<Agent>() as u64);
         let genomes_buf = storage_buffer(device, "genomes", max_agents * SLOT_WORDS * 4);
         let bodies_buf = storage_buffer(device, "bodies", max_agents * SLOT_WORDS * 4);
+        let body_pos_buf = storage_buffer(device, "body positions", max_agents * 64 * 8);
         let free_slots: Vec<u32> = (0..cfg.max_agents).rev().collect();
         let free_buf = storage_buffer(device, "free slots", max_agents * 4);
         gpu.queue.write_buffer(&free_buf, 0, bytemuck::cast_slice(&free_slots));
@@ -263,7 +267,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..6).map(|b| storage_entry(b, b == 4)).collect();
+        let life_entries: Vec<_> = (0..7).map(|b| storage_entry(b, b == 4)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -309,7 +313,7 @@ impl World {
         let life_bg = bind_all(
             "life bg",
             &life_layout,
-            &[&agents_buf, &genomes_buf, &free_buf, &life_counters_buf, &spawn_buf, &bodies_buf],
+            &[&agents_buf, &genomes_buf, &free_buf, &life_counters_buf, &spawn_buf, &bodies_buf, &body_pos_buf],
         );
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -354,6 +358,7 @@ impl World {
             spawn: compute("spawn_seeds"),
             agents_step: compute("agents_step"),
             agents_ledger: compute("agents_ledger"),
+            agents_birth: compute("agents_birth"),
         };
 
         Self {
@@ -380,6 +385,8 @@ impl World {
             life_bg,
             agents_buf,
             genomes_buf,
+            bodies_buf,
+            body_pos_buf,
             life_counters_buf,
             free_buf,
             spawn_buf,
@@ -541,6 +548,9 @@ impl World {
 
             // ORGANISMOS: depois do commit (os depósitos da morte vão para chem_grid).
             run(&mut pass, &pl.agents_step, ab, [ag, 1]);
+            // Nascimentos num passe à parte: a morte devolve slots (push) e o
+            // nascimento tira-os (pop); nunca no mesmo despacho.
+            run(&mut pass, &pl.agents_birth, ab, [ag, 1]);
         }
         drop(pass);
         self.params.epoch = self.params.epoch.wrapping_add(steps);

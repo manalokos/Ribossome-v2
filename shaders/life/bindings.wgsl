@@ -11,6 +11,8 @@
 @group(3) @binding(4) var<storage, read> spawn_requests: array<SpawnRequest>;
 // Corpo traduzido: 16 u32 por slot, 4 resíduos (índices em AMINO) por u32.
 @group(3) @binding(5) var<storage, read_write> bodies: array<u32>;
+// Posições locais dos resíduos (centradas no centro de massa), MAX_BODY por slot.
+@group(3) @binding(6) var<storage, read_write> body_pos: array<vec2<f32>>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

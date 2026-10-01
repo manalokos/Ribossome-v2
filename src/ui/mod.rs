@@ -152,6 +152,11 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         }
         ui.add(egui::Slider::new(&mut world.params.death_probability, 0.0..=0.2).text("mortalidade base"));
         ui.add(egui::Slider::new(&mut world.params.spawn_energy, 0.1..=50.0).text("energia inicial"));
+        ui.add(egui::Slider::new(&mut world.params.food_power, 0.0..=20.0).text("energia por monómero"));
+        ui.add(egui::Slider::new(&mut world.params.uptake_rate, 0.0..=0.01).text("taxa de hidrólise"));
+        ui.add(egui::Slider::new(&mut world.params.pairing_rate, 0.0..=8.0).text("emparelhamento (bases/passo)"));
+        ui.add(egui::Slider::new(&mut world.params.mutation_rate, 0.0..=0.05).text("taxa de mutação"));
+        ui.add(egui::Slider::new(&mut world.params.uv_damage, 1.0..=50.0).text("dano UV"));
     });
 }
 

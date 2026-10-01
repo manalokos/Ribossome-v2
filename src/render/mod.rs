@@ -163,7 +163,17 @@ impl WorldView {
             multiview_mask: None,
             cache: None,
         });
-        // Agentes: quadrados instanciados (um por slot).
+        // Agentes: quadrados instanciados (um por resíduo).
+        let vertex_storage = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
         let agents_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("agents view layout"),
             entries: &[
@@ -177,16 +187,9 @@ impl WorldView {
                     },
                     count: None,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
+                vertex_storage(1),
+                vertex_storage(2),
+                vertex_storage(3),
             ],
         });
         let agents_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -195,6 +198,8 @@ impl WorldView {
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: view_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: world.agents_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: world.bodies_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: world.body_pos_buf.as_entire_binding() },
             ],
         });
         let agents_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -248,6 +253,6 @@ impl WorldView {
         pass.draw(0..3, 0..1);
         pass.set_pipeline(&self.agents_pipeline);
         pass.set_bind_group(0, &self.agents_bg, &[]);
-        pass.draw(0..6, 0..self.max_agents);
+        pass.draw(0..6, 0..self.max_agents * 64);
     }
 }
