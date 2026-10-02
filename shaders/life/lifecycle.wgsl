@@ -283,33 +283,35 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // escalá-la exagerava o balanço de cada abrir-e-fechar (o corpo rodava
     // muito para um lado e para o outro) e a orientação errada estragava a
     // natação; com a rotação física, um movimento recíproco não desloca nada.
-    let swim_raw = joints_step(slot, a, kt_here);
-    // O ganho de natação amplifica só o AVANÇO MÉDIO, não o vaivém de cada
-    // batida: multiplicar tudo (como antes) tornava o balanço lateral, que
-    // se anula num ciclo, 10× maior (os agentes andavam ~25× mais de lado do
-    // que em frente). Deslocamento = movimento físico + (ganho − 1) × média
-    // da velocidade de natação (~SWIM_AVG_STEPS passos, mais que um ciclo).
-    let swim = vec3<f32>(swim_raw.xy, swim_raw.z);
-    // Natação: o movimento rígido vem no referencial (alinhado) do corpo;
-    // roda-o para o mundo.
+    let js = joints_step(slot, a, kt_here);
+    // O ganho de natação amplifica só o AVANÇO MÉDIO da natação, não o
+    // vaivém de cada batida (que se anula num ciclo; multiplicá-lo fazia os
+    // agentes andar ~25× mais de lado do que em frente). O transporte pela
+    // água (corrente nos resíduos, com rotação) entra sem ganho.
     var swim_v = vec2<f32>(0.0);
     var aux = rna_tail[slot * 2u + 1u];
     if (a.age == 0u) { aux = vec4<f32>(0.0); } // slot reutilizado: sem herança
-    if (any(swim_raw != vec4<f32>(0.0))) {
-        // Orientação a meio do passo (o corpo roda Ω durante o passo).
-        let sv_phys = rotate(swim.xy, a.rot + 0.5 * swim.z);
-        let avg = mix(aux.zw, sv_phys, 1.0 / SWIM_AVG_STEPS);
-        aux = vec4<f32>(aux.xy, avg);
-        // Avanço médio × ganho + vaivém (o resto) × swim_wobble.
-        let sv = max(params.swim_gain, 0.0) * avg + clamp(params.swim_wobble, 0.0, 1.0) * (sv_phys - avg);
-        swim_v = sv;
-        let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
-        if (gamma_count(world_to_cell(np0)) < GAMMA_SOLID_THRESHOLD) {
-            a.pos_x = np0.x;
-            a.pos_y = np0.y;
-        }
-        a.rot += swim.z + swim_raw.w;
+    // Orientação a meio do passo (o corpo roda durante o passo).
+    let rot_mid = a.rot + 0.5 * (js.swim.z + js.flow.z);
+    let sv_phys = rotate(js.swim.xy, rot_mid);
+    let avg = mix(aux.zw, sv_phys, 1.0 / SWIM_AVG_STEPS);
+    aux = vec4<f32>(aux.xy, avg);
+    // Avanço médio × ganho + vaivém (o resto) × swim_wobble.
+    let sv = max(params.swim_gain, 0.0) * avg + clamp(params.swim_wobble, 0.0, 1.0) * (sv_phys - avg);
+    swim_v = sv;
+    var flow_w = rotate(js.flow.xy, rot_mid);
+    if (a.body_len < 2u && params.fluid_enabled != 0u) {
+        // Sem corpo articulado (RNA nu, um resíduo): levado pela água no centro.
+        flow_w = water_at(vec2<f32>(a.pos_x, a.pos_y), true);
     }
+    let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv + flow_w, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
+    if (gamma_count(world_to_cell(np0)) < GAMMA_SOLID_THRESHOLD) {
+        a.pos_x = np0.x;
+        a.pos_y = np0.y;
+    }
+    a.rot += js.swim.z + js.flow.z + js.phi;
+    a.vel_x = flow_w.x / max(params.dt, 1e-6);
+    a.vel_y = flow_w.y / max(params.dt, 1e-6);
     a.age += 1u;
     // (zw = média da velocidade de natação; xy = curvatura dos fios, a seguir)
     rna_tail[slot * 2u + 1u] = aux;
@@ -324,7 +326,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         let q = rng_f4(a.id, params.epoch, S_BIOTURB);
         let k = min(u32(q.x * f32(a.body_len)), a.body_len - 1u);
         let rel = rotate(body_pos[slot * MAX_BODY + k], a.rot);
-        let v_res = swim_v + swim.z * vec2<f32>(-rel.y, rel.x);
+        let v_res = swim_v + js.swim.z * vec2<f32>(-rel.y, rel.x);
         let cells_moved = length(v_res) / f32(WORLD_UNITS_PER_CELL);
         let p_push = clamp(params.bioturbation * cells_moved * f32(a.body_len), 0.0, 1.0);
         if (q.y < p_push && a.energy > params.bioturbation_cost) {
@@ -346,12 +348,11 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
 
-    // ---- Deriva passiva: levado à velocidade da água (baixo Reynolds). ----
-    // Os resíduos dentro de terreno (entulho) estão ancorados: a corrente só
-    // puxa a fração do corpo que está em água livre.
+    // (A deriva pela água entra no RFT, resíduo a resíduo: ver joints_step.)
+    // Fração do corpo em água livre (para a sedimentação).
     var p = vec2<f32>(a.pos_x, a.pos_y);
     var free_frac = 1.0;
-    if (params.fluid_enabled != 0u || params.sedimentation > 0.0) {
+    if (params.sedimentation > 0.0) {
         var in_water = 0u;
         let nres = max(a.body_len, 1u);
         for (var k = 0u; k < nres; k++) {
@@ -366,29 +367,6 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         let fall = params.sedimentation * sqrt(f32(max(a.body_len, 1u))) * free_frac;
         let ns = vec2<f32>(p.x, max(p.y - fall, 0.0));
         if (gamma_count(world_to_cell(ns)) < GAMMA_SOLID_THRESHOLD) { p = ns; }
-    }
-    if (params.fluid_enabled != 0u) {
-        // Velocidade da água MÉDIA num disco à volta do agente (centro + 8
-        // pontos a ~1,5× o seu raio): o dipolo que o próprio agente faz na
-        // água (agent_fluid_push) anula-se na média e não o leva a ele;
-        // correntes maiores (e as dos vizinhos) levam-no na mesma.
-        let rr = max(a.radius * 1.5, 2.0 * SIM_SIZE / f32(FLUID_SIZE));
-        var vsum = fluid_velocity_at_world(p);
-        var nsamp = 1.0;
-        // Na experiência "só pelo fluido" a água mexida pelo próprio agente
-        // É a propulsão: lê-se só no centro.
-        if (params.fluid_swim_only == 0u) {
-            for (var q = 0u; q < 8u; q++) {
-                let ang = f32(q) * 0.7853982;
-                vsum += fluid_velocity_at_world(p + vec2<f32>(cos(ang), sin(ang)) * rr);
-            }
-            nsamp = 9.0;
-        }
-        let v = vsum / nsamp * (SIM_SIZE / f32(FLUID_SIZE)) * free_frac;
-        let np = clamp(p + v * params.dt, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
-        if (gamma_count(world_to_cell(np)) < GAMMA_SOLID_THRESHOLD) { p = np; }
-        a.vel_x = v.x;
-        a.vel_y = v.y;
     }
     a.pos_x = p.x;
     a.pos_y = p.y;
