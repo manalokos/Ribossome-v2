@@ -24,10 +24,19 @@ fn main() {
     world.params.maintenance_cost = 0.0;
     world.params.pairing_rate = 0.0;
     world.params.sedimentation = 0.0;
+    world.params.spawn_energy = env("ENERGY", 5.0f32);
+    world.params.spawn_energy = env("ENERGY", 5.0f32);
     world.settings.fluid_enabled = env("FLUID", 1) != 0;
     world.params.rft_enabled = env("RFT", 1);
     world.params.swim_wobble = env("WOBBLE", 1.0f32);
-    let g = bases(&format!("AUG UGU UCU {} UAA", "GGU ".repeat(15)));
+    world.params.fluid_swim_only = env("FSO", 0u32);
+    let control = env("CONTROL", 0u32) != 0;
+    // Controlo: o mesmo corpo sem relógio (não bate, não deve nadar).
+    let g = if control {
+        bases(&format!("AUG {} UAA", "GGU ".repeat(16)))
+    } else {
+        bases(&format!("AUG UGU UCU {} UAA", "GGU ".repeat(15)))
+    };
     let s = cfg.sim_size();
     let mut rng = ribossome::life::SplitMix(5);
     let reqs: Vec<SpawnRequest> = (0..300)
@@ -43,6 +52,11 @@ fn main() {
     run(&mut world, 200);
     let start = world.read_agents_blocking(&gpu);
     let mut prev = start.clone();
+    // Persistência: cosseno entre deslocamentos de janelas seguidas de 100 passos.
+    let mut win_start = start.clone();
+    let mut last_disp: Vec<Option<(f64, f64)>> = vec![None; start.len()];
+    let (mut cos_sum, mut cos_n) = (0f64, 0f64);
+    let mut tick = 0u32;
     let mut path = vec![0f64; start.len()];
     for _ in 0..env("STEPS", 1000) / 10 {
         run(&mut world, 10);
@@ -51,6 +65,20 @@ fn main() {
             if a.alive != 0 && b.alive != 0 && a.id == b.id {
                 path[i] += ((b.pos_x - a.pos_x) as f64).hypot((b.pos_y - a.pos_y) as f64);
             }
+        }
+        tick += 1;
+        if tick.is_multiple_of(10) {
+            for (i, (a, b)) in win_start.iter().zip(&now).enumerate() {
+                if a.alive == 0 || b.alive == 0 || a.id != b.id { last_disp[i] = None; continue; }
+                let d = ((b.pos_x - a.pos_x) as f64, (b.pos_y - a.pos_y) as f64);
+                let l = d.0.hypot(d.1);
+                if let Some(pd) = last_disp[i] {
+                    let pl = pd.0.hypot(pd.1);
+                    if l > 1e-3 && pl > 1e-3 { cos_sum += (d.0 * pd.0 + d.1 * pd.1) / (l * pl); cos_n += 1.0; }
+                }
+                last_disp[i] = Some(d);
+            }
+            win_start = now.clone();
         }
         prev = now;
     }
@@ -62,6 +90,16 @@ fn main() {
             n += 1.0;
         }
     }
-    print!("fluido {} natação {} vaivém {} ", world.settings.fluid_enabled as u32, world.params.rft_enabled, world.params.swim_wobble);
-    println!("push {}: caminho médio {:.0}, deslocamento líquido {:.0} ({} agentes)", world.params.agent_fluid_push, p / n, net / n, n);
+    print!(
+        "{} fluido {} natação {} só-fluido {} vaivém {} ",
+        if control { "CONTROLO" } else { "nadador" },
+        world.settings.fluid_enabled as u32,
+        world.params.rft_enabled,
+        world.params.fluid_swim_only,
+        world.params.swim_wobble
+    );
+    println!(
+        "push {}: caminho médio {:.0}, deslocamento líquido {:.0}, persistência da direção {:+.2} ({} agentes)",
+        world.params.agent_fluid_push, p / n, net / n, cos_sum / cos_n.max(1.0), n
+    );
 }

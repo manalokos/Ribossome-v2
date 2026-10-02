@@ -168,6 +168,13 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> vec4<f32> {
         let q = body_pos[base + k];
         cur[k] = vec2<f32>(cp * q.x - sp * q.y, sp * q.x + cp * q.y);
     }
+    if (params.fluid_swim_only != 0u) {
+        // EXPERIÊNCIA: a forma muda e empurra a água; nada mais move o corpo
+        // (V = Ω = 0; a deriva com a água no centro faz o resto). O
+        // referencial continua a seguir o corpo (φ).
+        push_fluid(slot, a, n, &old, &cur, vec3<f32>(0.0));
+        return vec4<f32>(0.0, 0.0, 0.0, phi);
+    }
     let s = rft_solve(slot, n, &old, &cur);
     push_fluid(slot, a, n, &old, &cur, s);
     // Mundo = R(rot)·R(Ω)·R(φ)·forma guardada nova  =>  rot avança Ω + φ.
@@ -181,13 +188,15 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> vec4<f32> {
 // passos do fluido. (A deriva do próprio agente usa a água à sua volta, onde
 // o seu dipolo é ~simétrico; não se desconta à parte.)
 fn push_fluid(slot: u32, a: Agent, n: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: ptr<function, array<vec2<f32>, 64>>, s: vec3<f32>) {
-    if (params.fluid_enabled == 0u || params.agent_fluid_push == 0.0) { return; }
+    if (params.fluid_enabled == 0u || (params.agent_fluid_push == 0.0 && params.fluid_swim_only == 0u)) { return; }
     let rot_mid = a.rot + 0.5 * s.z;
     let cr = cos(rot_mid);
     let sr = sin(rot_mid);
     let world_per_fluid = SIM_SIZE / f32(FLUID_SIZE);
     // Velocidade por passo (mundo) -> força do fluido (células do fluido / s²).
-    let scale = params.agent_fluid_push / (world_per_fluid * max(params.dt, 1e-4) * max(params.dt, 1e-4));
+    // (Na experiência "só pelo fluido" o empurrão é sempre 1.)
+    let push = select(params.agent_fluid_push, 1.0, params.fluid_swim_only != 0u);
+    let scale = push / (world_per_fluid * max(params.dt, 1e-4) * max(params.dt, 1e-4));
     let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
     for (var k = 0u; k < n; k++) {
         let r = 0.5 * ((*cur)[k] + (*old)[k]);

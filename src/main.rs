@@ -50,6 +50,41 @@ fn lab_mode() -> bool {
     std::env::var("RIBO_LAB").map(|v| v != "0").unwrap_or(false)
 }
 
+/// CENÁRIO DE TESTE (o mesmo que o exemplo probe_jitter), para ver na janela
+/// o que se mede: RIBO_SWIMMERS=n nadadores construídos (relógio + 15
+/// glicinas; RIBO_CONTROL=1 = sem relógio), sem morte, fome nem
+/// reprodução, energia 60. RIBO_FSO=1 = natação só pelo fluido; RIBO_PUSH
+/// = agentes empurram a água. Com RIBO_TERRAIN=plano fica sem terreno.
+fn test_scenario(world: &mut World) {
+    let env_f = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
+    if let Some(v) = env_f("RIBO_FSO") {
+        world.params.fluid_swim_only = (v != 0.0) as u32;
+    }
+    if let Some(v) = env_f("RIBO_PUSH") {
+        world.params.agent_fluid_push = v;
+    }
+    let Some(n) = env_f("RIBO_SWIMMERS") else { return };
+    world.params.death_probability = 0.0;
+    world.params.maintenance_cost = 0.0;
+    world.params.pairing_rate = 0.0;
+    world.params.sedimentation = 0.0;
+    world.params.spawn_energy = 60.0;
+    let control = env_f("RIBO_CONTROL").unwrap_or(0.0) != 0.0;
+    let text = if control {
+        format!("AUG {} UAA", "GGU ".repeat(16))
+    } else {
+        format!("AUG UGU UCU {} UAA", "GGU ".repeat(15))
+    };
+    let g: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
+    let s = world.cfg.sim_size();
+    let mut rng = ribossome::life::SplitMix(5);
+    let reqs: Vec<ribossome::params::SpawnRequest> = (0..n as u32)
+        .map(|_| ribossome::params::SpawnRequest::with_genome(s * (0.2 + 0.6 * rng.f32()), s * (0.3 + 0.5 * rng.f32()), &g))
+        .collect();
+    world.request_seeds(&reqs);
+    log::info!("cenário de teste: {} nadadores{}", n, if control { " (controlo, sem relógio)" } else { "" });
+}
+
 /// Terreno carregado por omissão no mundo completo (azul = terreno, vermelho = calor).
 const DEFAULT_TERRAIN: &str = "assets/terreno.png";
 
@@ -117,7 +152,11 @@ impl Running {
             .ok()
             .or_else(|| (!lab_mode() && std::path::Path::new(DEFAULT_TERRAIN).exists()).then(|| DEFAULT_TERRAIN.into()))
             .filter(|p| p != "-");
-        if let Some(path) = terrain {
+        if terrain.as_deref() == Some("plano") {
+            // Sem terreno nenhum (testes).
+            let n = (cfg.grid_size * cfg.grid_size) as usize;
+            world.custom_terrain = Some((vec![0; n], vec![0.0; n]));
+        } else if let Some(path) = terrain {
             match world.load_terrain_png(std::path::Path::new(&path)) {
                 Ok(nf) => log::info!("terreno de {path} ({nf} células quentes)"),
                 Err(e) => log::error!("RIBO_TERRAIN: {e}; uso o terreno gerado"),
@@ -129,6 +168,7 @@ impl Running {
         } else {
             world.seed_matter(&gpu, seed)
         };
+        test_scenario(&mut world);
         let view = WorldView::new(&gpu.device, &world, format);
         let cam = Camera::fit(&cfg, [surface_cfg.width as f32, surface_cfg.height as f32]);
 

@@ -167,7 +167,10 @@ gpu_struct! {
         /// Fração do VAIVÉM de cada batida que se aplica (1 = físico, 0 = só
         /// o avanço médio, sem balanço).
         pub swim_wobble: f32,
-        pub _pad7: u32,
+        /// EXPERIÊNCIA: natação só pelo fluido. Sem o movimento do RFT; cada
+        /// resíduo empurra a água com a sua velocidade de mudança de forma e o
+        /// agente é levado pela água no centro (sem média). 0 = desligada.
+        pub fluid_swim_only: u32,
     }
 }
 
@@ -239,7 +242,7 @@ impl Default for SimParams {
             monomer_pressure: 20.0,
             agent_fluid_push: 0.25,
             swim_wobble: 1.0,
-            _pad7: 0,
+            fluid_swim_only: 0,
         }
     }
 }

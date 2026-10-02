@@ -330,6 +330,14 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         );
         ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("custo por grão empurrado"));
         ui.add(egui::Slider::new(&mut world.params.sedimentation, 0.0..=0.5).text("sedimentação (afundar ∝ √n)"));
+        let mut fso = world.params.fluid_swim_only != 0;
+        if ui
+            .checkbox(&mut fso, "experiência: natação só pelo fluido")
+            .on_hover_text("sem RFT: a forma empurra a água e a água leva o agente")
+            .changed()
+        {
+            world.params.fluid_swim_only = fso as u32;
+        }
         ui.add(egui::Slider::new(&mut world.params.swim_wobble, 0.0..=1.0).text("vaivém da natação"))
             .on_hover_text("1 = balanço físico de cada batida; 0 = só o avanço médio");
         ui.add(egui::Slider::new(&mut world.params.agent_fluid_push, -1.0..=1.0).text("agentes empurram a água"))

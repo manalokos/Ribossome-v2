@@ -374,11 +374,17 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // correntes maiores (e as dos vizinhos) levam-no na mesma.
         let rr = max(a.radius * 1.5, 2.0 * SIM_SIZE / f32(FLUID_SIZE));
         var vsum = fluid_velocity_at_world(p);
-        for (var q = 0u; q < 8u; q++) {
-            let ang = f32(q) * 0.7853982;
-            vsum += fluid_velocity_at_world(p + vec2<f32>(cos(ang), sin(ang)) * rr);
+        var nsamp = 1.0;
+        // Na experiência "só pelo fluido" a água mexida pelo próprio agente
+        // É a propulsão: lê-se só no centro.
+        if (params.fluid_swim_only == 0u) {
+            for (var q = 0u; q < 8u; q++) {
+                let ang = f32(q) * 0.7853982;
+                vsum += fluid_velocity_at_world(p + vec2<f32>(cos(ang), sin(ang)) * rr);
+            }
+            nsamp = 9.0;
         }
-        let v = vsum / 9.0 * (SIM_SIZE / f32(FLUID_SIZE)) * free_frac;
+        let v = vsum / nsamp * (SIM_SIZE / f32(FLUID_SIZE)) * free_frac;
         let np = clamp(p + v * params.dt, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(np)) < GAMMA_SOLID_THRESHOLD) { p = np; }
         a.vel_x = v.x;
