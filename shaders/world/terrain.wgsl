@@ -27,22 +27,26 @@ fn gamma_take_one(idx: u32) -> bool {
     return taken;
 }
 
-// Para onde despejar um monómero que deixou de caber em `dst`: a célula de
-// origem do grão (`src`, que ganhou espaço) se tiver espaço; senão uma
-// vizinha de `dst` com espaço; senão `src` na mesma (a infiltração em
-// transport.wgsl deixa-o sair da rocha depois).
+// Para onde despejar um monómero que deixou de caber em `dst`, por ordem:
+// 1) a célula de origem do grão (`src`, que ganhou espaço) se tiver espaço;
+// 2) uma vizinha de `dst` com espaço;
+// 3) uma vizinha (ou `src`) que NÃO seja rocha, mesmo cheia: o excesso sai
+//    depois pelo squeeze do transporte;
+// 4) `src` (a infiltração em transport.wgsl deixa-o sair da rocha depois).
 fn evict_target(src: u32, dst: u32) -> u32 {
     if (chem_cell_total(src) < chem_capacity(src)) { return src; }
     let x = i32(dst % GRID_SIZE);
     let y = i32(dst / GRID_SIZE);
     var nb = array<vec2<i32>, 4>(vec2<i32>(x + 1, y), vec2<i32>(x - 1, y), vec2<i32>(x, y + 1), vec2<i32>(x, y - 1));
+    var not_rock = select(0xFFFFFFFFu, src, gamma_count(src) < GAMMA_SOLID_THRESHOLD);
     for (var i = 0u; i < 4u; i++) {
         let c = nb[i];
         if (any(c < vec2<i32>(0)) || any(c >= vec2<i32>(i32(GRID_SIZE)))) { continue; }
         let n = u32(c.y) * GRID_SIZE + u32(c.x);
         if (chem_cell_total(n) < chem_capacity(n)) { return n; }
+        if (not_rock == 0xFFFFFFFFu && gamma_count(n) < GAMMA_SOLID_THRESHOLD) { not_rock = n; }
     }
-    return src;
+    return select(not_rock, src, not_rock == 0xFFFFFFFFu);
 }
 
 // A ÚNICA forma de o terreno se mover: um quantum vai de `src` para `dst`,

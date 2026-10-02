@@ -688,7 +688,7 @@ impl World {
             None => terrain::generate(&self.cfg, seed as u32, &self.fumaroles),
         };
         let mut cells = seed_cells(&self.cfg, seed, self.seed_density);
-        fit_matter_to_terrain(&mut cells, &gamma);
+        fit_matter_to_terrain(&mut cells, &gamma, seed);
         gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
         gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
         // Mundo novo: não há agentes (a matéria deles pertencia ao mundo antigo).
@@ -712,7 +712,7 @@ impl World {
             Some((g, _)) => g.clone(),
             None => vec![0u32; n],
         };
-        fit_matter_to_terrain(&mut cells, &gamma);
+        fit_matter_to_terrain(&mut cells, &gamma, seed);
         gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
         gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
         self.clear_agents(gpu);
@@ -1088,21 +1088,19 @@ impl SplitMix {
 const GAMMA_SOLID: u32 = 3;
 
 /// Ajusta a matéria semeada ao terreno, com a regra de `chem_capacity`: a
-/// rocha fica vazia; o entulho (poroso) guarda (3 − grãos)/3 do que teria
-/// (cada canal e estado arredondado para baixo).
-fn fit_matter_to_terrain(cells: &mut [u32], gamma: &[u32]) {
+/// rocha fica vazia; o entulho (poroso) fica CHEIO até à capacidade
+/// (CHEM_CELL_CAP·(3 − grãos)/3), seja qual for a densidade da semente:
+/// partes iguais por canal, cada monómero ativado com probabilidade 1/2.
+fn fit_matter_to_terrain(cells: &mut [u32], gamma: &[u32], seed: u64) {
+    let mut rng = SplitMix(seed ^ 0x0E17_0B0D_E5EE_D5ED);
     for (i, &g) in gamma.iter().enumerate() {
         if g == 0 {
             continue;
         }
+        let per_ch = if g >= GAMMA_SOLID { 0 } else { CHEM_CELL_CAP * (GAMMA_SOLID - g) / GAMMA_SOLID / 4 };
         for v in &mut cells[i * 4..i * 4 + 4] {
-            if g >= GAMMA_SOLID {
-                *v = 0;
-            } else {
-                let (act, spent) = (*v & 0xFFFF, *v >> 16);
-                let keep = |n: u32| n * (GAMMA_SOLID - g) / GAMMA_SOLID;
-                *v = keep(act) | (keep(spent) << 16);
-            }
+            let act = (0..per_ch).filter(|_| rng.f32() < 0.5).count() as u32;
+            *v = act | ((per_ch - act) << 16);
         }
     }
 }

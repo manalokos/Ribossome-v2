@@ -21,7 +21,7 @@ fn main() {
     let src = heat.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap().0;
     let (sx, sy) = (src % n, src / n);
     world.params.uv_strength = std::env::var("UV").ok().and_then(|v| v.parse().ok()).unwrap_or(world.params.uv_strength);
-    for round in 0..8 {
+    for round in 0..std::env::var("ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(8) {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         world.encode_steps(&gpu.queue, &mut enc, 64);
         gpu.queue.submit([enc.finish()]);

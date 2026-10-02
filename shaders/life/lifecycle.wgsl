@@ -309,9 +309,19 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     // ---- Deriva passiva: levado à velocidade da água (baixo Reynolds). ----
+    // Os resíduos dentro de terreno (entulho) estão ancorados: a corrente só
+    // puxa a fração do corpo que está em água livre.
     var p = vec2<f32>(a.pos_x, a.pos_y);
     if (params.fluid_enabled != 0u) {
-        let v = fluid_velocity_at_world(p) * (SIM_SIZE / f32(FLUID_SIZE));
+        var in_water = 0u;
+        let nres = max(a.body_len, 1u);
+        for (var k = 0u; k < nres; k++) {
+            var rp = p;
+            if (a.body_len > 0u) { rp = residue_world(slot, a, k); }
+            if (gamma_count(world_to_cell(rp)) == 0u) { in_water += 1u; }
+        }
+        let free_frac = f32(in_water) / f32(nres);
+        let v = fluid_velocity_at_world(p) * (SIM_SIZE / f32(FLUID_SIZE)) * free_frac;
         let np = clamp(p + v * params.dt, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(np)) < GAMMA_SOLID_THRESHOLD) { p = np; }
         a.vel_x = v.x;
