@@ -44,7 +44,8 @@ fn main() {
         gpu.wait_idle();
     };
     run(&mut world, 200);
-    let mut prev = world.read_agents_blocking(&gpu);
+    let start = world.read_agents_blocking(&gpu);
+    let mut prev = start.clone();
     let mut prev_drot = vec![0f32; prev.len()];
     // [entulho, água]: soma |Δrot|, soma |Δpos|, trocas de sinal, amostras
     let mut acc = [[0f64; 4]; 2];
@@ -65,7 +66,18 @@ fn main() {
         }
         prev = now;
     }
+    // Avanço líquido em 200 passos, conforme onde o agente começou.
+    let mut net = [[0f64; 2]; 2];
+    for (a, b) in start.iter().zip(&prev) {
+        if a.alive == 0 || b.alive == 0 || a.id != b.id { continue; }
+        let cx = ((a.pos_x / w) as usize).min(n - 1);
+        let cy = ((a.pos_y / w) as usize).min(n - 1);
+        let k = if g[cy * n + cx] > 0 { 0 } else { 1 };
+        net[k][0] += ((b.pos_x - a.pos_x) as f64).hypot((b.pos_y - a.pos_y) as f64);
+        net[k][1] += 1.0;
+    }
     for (k, name) in ["entulho", "água"].iter().enumerate() {
+        println!("{name}: avanço líquido médio em 200 passos {:.0}", net[k][0] / net[k][1].max(1.0));
         let c = acc[k][3].max(1.0);
         println!("{name}: |Δrot| {:.4} rad/passo, |Δpos| {:.2}/passo, troca de sinal da rotação em {:.0}% dos passos ({} amostras)",
             acc[k][0] / c, acc[k][1] / c, acc[k][2] / c * 100.0, acc[k][3]);

@@ -118,7 +118,7 @@ struct RftOut {
 // à rocha ainda mais). CONTÍNUO: usa os grãos interpolados na posição exata
 // do resíduo (com valores por célula, o arrasto saltava de 1 para 31 ao
 // cruzar uma fronteira e os agentes no entulho vibravam).
-const RUBBLE_ANCHOR_PER_GRAIN: f32 = 3.0;
+const RUBBLE_ANCHOR_PER_GRAIN: f32 = 10.0;
 const ROCK_ANCHOR: f32 = 20.0;
 
 fn grains_at(pw: vec2<f32>) -> f32 {
@@ -159,8 +159,12 @@ fn rft_solve(slot: u32, c: RftCtx, old: ptr<function, array<vec2<f32>, 64>>) -> 
         // R = ξ∥·t·tᵀ + ξ⊥·(I − t·tᵀ), com ξ∥ = 1.
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
         let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
-        // Arrasto ∝ comprimento do segmento (corpo esbelto) × ancoragem.
-        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * env.z);
+        // Arrasto ∝ comprimento do segmento (corpo esbelto): o da água é
+        // anisotrópico (⊥ = 2 × ∥, o que permite nadar); o dos GRÃOS do
+        // entulho é igual em todas as direções (env.z − 1), por isso dilui a
+        // anisotropia e a propulsão perde eficiência no sedimento.
+        let lw = residue_len(slot, k) / SEGMENT_LEN;
+        let rr = (tt + RFT_PERP_RATIO * (id - tt) + (env.z - 1.0) * id) * lw;
         // Colunas de D: ∂v/∂Vx = (1,0), ∂v/∂Vy = (0,1), ∂v/∂Ω = (−r.y, r.x).
         let d0 = vec2<f32>(1.0, 0.0);
         let d1 = vec2<f32>(0.0, 1.0);
@@ -222,8 +226,14 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     var old: array<vec2<f32>, 64>;
     for (var k = 0u; k < n; k++) { old[k] = body_pos[base + k]; }
 
+    let cr0 = cos(a.rot);
+    let sr0 = sin(a.rot);
     for (var k = 1u; k < n; k++) { // θ_0 é a orientação global (o corpo roda livre)
         let aa = body_get(slot, k);
+        // No sedimento a junta dobra mais devagar: tem de empurrar os grãos
+        // (mobilidade ÷ arrasto local).
+        let ok = old[k];
+        let drag_here = anchor_drag(vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr0 * ok.x - sr0 * ok.y, sr0 * ok.x + cr0 * ok.y));
         // Alvo: forma de repouso + a deformação ATIVA da junta (estado
         // catalítico, propagado N->C com atraso) + o desvio pelos sinais.
         let goal = joint_base[base + k] + joint_active[base + k] + signal_deflection(slot, k);
@@ -232,7 +242,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
         // Ruído térmico (Langevin sobreamortecido): σ = √(2·μ·kT).
         let q = rng_f4(a.id, params.epoch, S_JOINT + k);
         let bm = sqrt(-2.0 * log(max(q.x, 1e-7))) * cos(6.2831853 * q.y);
-        let dth = clamp(JOINT_MOBILITY * tau, -JOINT_MAX_STEP, JOINT_MAX_STEP)
+        let dth = clamp(JOINT_MOBILITY * tau / drag_here, -JOINT_MAX_STEP, JOINT_MAX_STEP)
             + bm * sqrt(2.0 * JOINT_MOBILITY * max(kt, 0.0));
         joint_angle[base + k] = theta + dth;
     }
