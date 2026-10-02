@@ -326,10 +326,31 @@ mod tests {
         code_to_gpu(&embedded_code())
     }
 
+    /// Bases de um codão do aminoácido `l` (o primeiro na ordem A U G C).
+    fn codon_of(l: char) -> String {
+        let a = aa_index(l);
+        let i = (0..64u8).find(|&i| codon(i / 16, (i / 4) % 4, i % 4) == a).unwrap();
+        [i / 16, (i / 4) % 4, i % 4].iter().map(|&b| "AUGC".as_bytes()[b as usize] as char).collect()
+    }
+
+    /// Um par (promotor, modificador) da tabela que dá o órgão `t`, variante `v`.
+    fn pair_for(t: Organ, v: u32) -> (char, char) {
+        let c = embedded_code();
+        for (p, row) in &c {
+            for (m, e) in row {
+                if *e == [t as u32, v] {
+                    return (p.chars().next().unwrap(), m.chars().next().unwrap());
+                }
+            }
+        }
+        panic!("a tabela não tem {t:?} variante {v}");
+    }
+
     #[test]
     fn promoter_plus_modifier_makes_an_organ() {
-        // AUG (M) | UGU (C, promotor) + GCA (A: boca, variante 0) + UUU (intensidade) | GGU (G) | UAA
-        let g = bases("AUGUGUGCAUUUGGUUAA");
+        // AUG (M) | promotor + modificador (boca, variante 0) + UUU (intensidade) | GGU (G) | UAA
+        let (p, m) = pair_for(Organ::Mouth, 0);
+        let g = bases(&format!("AUG{}{}UUUGGUUAA", codon_of(p), codon_of(m)));
         let body = translate_organs(&g, true, &code());
         assert_eq!(body.len(), 3);
         assert_eq!(body[0].organ, None);
@@ -337,14 +358,14 @@ mod tests {
         assert_eq!(body[1].organ, Some((Organ::Mouth as u8, 0, 21)));
         assert_eq!(body[2].organ, None);
         // Sem segundo modificador (stop a seguir): intensidade por omissão, 6 bases.
-        let b2 = translate_organs(&bases("AUGUGUGCAUAA"), true, &code());
+        let b2 = translate_organs(&bases(&format!("AUG{}{}UAA", codon_of(p), codon_of(m))), true, &code());
         assert_eq!(b2[1].organ, Some((Organ::Mouth as u8, 0, GAIN_DEFAULT)));
         assert!((organ_gain(GAIN_DEFAULT) - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn synonymous_codons_give_the_same_organ() {
-        // GCA e GCG são ambos alanina: o mesmo órgão.
+        // GCA e GCG são ambos alanina: o mesmo órgão (ou nenhum, nos dois).
         let a = translate_organs(&bases("AUGUGUGCAUAA"), true, &code());
         let b = translate_organs(&bases("AUGUGUGCGUAA"), true, &code());
         assert_eq!(a[1].organ, b[1].organ);
@@ -352,11 +373,11 @@ mod tests {
 
     #[test]
     fn anchor_and_bias_from_the_table() {
-        // Y (UAU) + P (CCU) -> âncora variante 0; H (CAU) + P (CCU) -> bias variante 0.
-        let a = translate_organs(&bases("AUGUAUCCUUAA"), true, &code());
-        assert_eq!(a[1].organ, Some((Organ::Anchor as u8, 0, GAIN_DEFAULT)));
-        let b = translate_organs(&bases("AUGCAUCCUUAA"), true, &code());
-        assert_eq!(b[1].organ, Some((Organ::Bias as u8, 0, GAIN_DEFAULT)));
+        for t in [Organ::Anchor, Organ::Bias] {
+            let (p, m) = pair_for(t, 0);
+            let b = translate_organs(&bases(&format!("AUG{}{}UAA", codon_of(p), codon_of(m))), true, &code());
+            assert_eq!(b[1].organ, Some((t as u8, 0, GAIN_DEFAULT)));
+        }
     }
 
     #[test]

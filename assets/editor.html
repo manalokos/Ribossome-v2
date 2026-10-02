@@ -176,7 +176,7 @@ function codeOptions(cur) {
 }
 
 function renderCode() {
-  let h = `<thead><tr><th>prom. \\ mod.</th>` + AAS.map(a => `<th>${a}</th>`).join("") + `</tr></thead><tbody>`;
+  let h = `<thead><tr><th>promotor ↓ · modificador →</th>` + AAS.map(a => `<th>${a}</th>`).join("") + `</tr></thead><tbody>`;
   for (const p of AAS) {
     h += `<tr><td class="aa">${p}</td>`;
     for (const m of AAS) {
