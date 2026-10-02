@@ -24,7 +24,7 @@ fn run(gpu: &Gpu, world: &mut World, steps: u32) {
 
 fn trial(gpu: &Gpu, name: &str, genome: &str) {
     let g = bases(genome);
-    let body = translate_organs(&g, true);
+    let body = translate_organs(&g, true, &ribossome::life::table::code_to_gpu(&ribossome::life::table::load_code().0));
     let organs: Vec<String> = body
         .iter()
         .filter_map(|r| r.organ.map(|(t, p, _)| format!("{}({p})", ribossome::life::organs::ORGAN_NAMES[t as usize])))

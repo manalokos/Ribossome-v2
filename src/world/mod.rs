@@ -251,6 +251,9 @@ pub struct World {
     pub tail_buf: wgpu::Buffer,
     /// Tabela dos órgãos em uso.
     pub organ_table: Vec<crate::life::table::OrganRow>,
+    /// Código dos órgãos (promotor × modificador) em uso.
+    pub organ_code: crate::life::table::OrganCode,
+    code_buf: wgpu::Buffer,
     organ_buf: wgpu::Buffer,
     /// Variantes dos órgãos (também lidas pelo desenho).
     pub variant_buf: wgpu::Buffer,
@@ -404,6 +407,10 @@ impl World {
         let bonds_buf = storage_buffer(device, "bonds", max_agents * BOND_STRIDE * 16);
         let bond_accept = storage_buffer(device, "bond accept", max_agents * 4);
         let bond_disp = storage_buffer(device, "bond disp", max_agents * 16);
+        let (organ_code, code_source) = crate::life::table::load_code();
+        log::info!("código dos órgãos: {code_source}");
+        let code_buf = storage_buffer(device, "organ code", 400 * 4);
+        gpu.queue.write_buffer(&code_buf, 0, bytemuck::cast_slice(&crate::life::table::code_to_gpu(&organ_code)));
         // Tabela dos aminoácidos (assets/aminoacidos.json).
         let (amino, amino_source) = crate::life::table::load();
         log::info!("tabela dos aminoácidos: {amino_source}");
@@ -473,7 +480,8 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..27).map(|b| storage_entry(b, b == 4 || b == 20 || b == 21 || b == 23)).collect();
+        let life_entries: Vec<_> =
+            (0..28).map(|b| storage_entry(b, b == 4 || b == 20 || b == 21 || b == 23 || b == 27)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -623,6 +631,7 @@ impl World {
                 &bonds_buf,
                 &bond_accept,
                 &bond_disp,
+                &code_buf,
             ],
         );
 
@@ -762,6 +771,8 @@ impl World {
             tail_buf,
             organ_table,
             organ_buf,
+            organ_code,
+            code_buf,
             variant_buf,
             heat_image: None,
             fumarole_gain: 1.0,
@@ -925,6 +936,18 @@ impl World {
         queue.write_buffer(&self.organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&rows)));
         queue.write_buffer(&self.variant_buf, 0, bytemuck::cast_slice(&crate::life::table::variants_to_gpu(&rows)));
         self.organ_table = rows;
+    }
+
+    /// Troca o código dos órgãos (vale para as traduções seguintes:
+    /// nascimentos e sementes; os corpos já feitos não mudam).
+    pub fn set_organ_code(&mut self, queue: &wgpu::Queue, code: crate::life::table::OrganCode) {
+        queue.write_buffer(&self.code_buf, 0, bytemuck::cast_slice(&crate::life::table::code_to_gpu(&code)));
+        self.organ_code = code;
+    }
+
+    /// O código dos órgãos como a GPU o vê (para `organs::translate_organs`).
+    pub fn organ_code_gpu(&self) -> Vec<u32> {
+        crate::life::table::code_to_gpu(&self.organ_code)
     }
 
     /// Carrega um terreno de um PNG (ver `terrain::load_png`); entra na

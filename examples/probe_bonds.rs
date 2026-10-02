@@ -19,8 +19,8 @@ fn main() {
     world.params.pairing_cost = 0.0;
     // Genoma = X + complementar invertido de X: o filho (lido da cadeia
     // complementar) tem o mesmo corpo que o pai.
-    // UAU (Y) + AAA = âncora variante 0 (+, permanente); UAU + AAU = variante 1 (−).
-    let text = format!("AUG UAU AAA {} UAU AAU UAA", "GGU ".repeat(6));
+    // Y (UAU) + P (CCU) = âncora variante 0 (+, permanente); Y + Q (CAA) = variante 1 (−).
+    let text = format!("AUG UAU CCU {} UAU CAA UAA", "GGU ".repeat(6));
     let x: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
     let mut g = x.clone();
     g.extend(x.iter().rev().map(|b| b ^ 1));

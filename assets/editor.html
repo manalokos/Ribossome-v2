@@ -30,6 +30,9 @@
   .organ h3 { margin: 0 0 6px; font-size: 14px; }
   .organ ol { margin: 0; padding-left: 22px; color: var(--dim); }
   .organ li b { color: var(--text); }
+  #code td { padding: 2px 3px; text-align: center; }
+  #code select { background: #0d1014; color: var(--text); border: 1px solid var(--line); border-radius: 4px; font: 12px ui-monospace, monospace; padding: 1px; }
+  #code select.on { border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -42,8 +45,12 @@
 <main>
   <p class="note">Cada alteração é aplicada à simulação no passo seguinte. "Gravar" escreve <code>assets/aminoacidos.json</code> e <code>assets/orgaos.json</code> (as fontes dos valores ao arrancar). Passa o rato pelos cabeçalhos para ver o que cada coluna faz.</p>
   <div class="scroll"><table id="t"></table></div>
+  <h2>Código dos órgãos</h2>
+  <p class="note">Linha = aminoácido <b>promotor</b>, coluna = aminoácido <b>modificador</b> (o seguinte na proteína). Cada célula escolhe o órgão e a variante (0–5) que esse par forma; "—" = sem órgão (ficam os dois aminoácidos normais). Codões sinónimos dão o mesmo órgão. Um terceiro codão (se não for stop) dá a intensidade (×0,06 a ×15). Vale para os nascimentos e sementes seguintes; os corpos já feitos não mudam.</p>
+  <div class="scroll"><table id="code"></table></div>
+  <p class="note" id="codecount"></p>
   <h2>Órgãos</h2>
-  <p class="note">Um órgão = promotor (C, H ou W) + codão modificador: tipo = índice % 12, <b>variante</b> = índice / 12 (0–5). Um segundo codão dá a intensidade (×0,06 a ×15, ×1 por omissão), que multiplica a força. Cada variante tem as suas propriedades; o comprimento e a massa multiplicam os do aminoácido promotor.</p>
+  <p class="note">Cada variante tem as suas propriedades; o comprimento e a massa multiplicam os do aminoácido promotor; os custos da variante multiplicam os do tipo.</p>
   <div id="organs"></div>
 </main>
 <script>
@@ -152,10 +159,69 @@ async function pushOrgans() {
   });
 }
 
+// ---- Código dos órgãos (promotor × modificador) ----
+const AAS = "ACDEFGHIKLMNPQRSTVWY".split("");
+let code = {};
+let ctimer = null;
+
+function codeOptions(cur) {
+  let h = `<option value="">—</option>`;
+  organInfo.forEach((o, t) => {
+    for (let v = 0; v < 6; v++) {
+      const val = `${t},${v}`;
+      h += `<option value="${val}"${cur === val ? " selected" : ""} title="${o.textos[v]}">${o.simbolo}${v} ${o.nome}</option>`;
+    }
+  });
+  return h;
+}
+
+function renderCode() {
+  let h = `<thead><tr><th>prom. \\ mod.</th>` + AAS.map(a => `<th>${a}</th>`).join("") + `</tr></thead><tbody>`;
+  for (const p of AAS) {
+    h += `<tr><td class="aa">${p}</td>`;
+    for (const m of AAS) {
+      const e = code[p] && code[p][m];
+      const cur = e ? `${e[0]},${e[1]}` : "";
+      h += `<td><select data-p="${p}" data-m="${m}" class="${e ? "on" : ""}">${codeOptions(cur)}</select></td>`;
+    }
+    h += `</tr>`;
+  }
+  document.getElementById("code").innerHTML = h + `</tbody>`;
+  document.querySelectorAll("#code select").forEach(sel => sel.addEventListener("change", e => {
+    const { p, m } = e.target.dataset;
+    if (e.target.value === "") {
+      if (code[p]) { delete code[p][m]; if (Object.keys(code[p]).length === 0) delete code[p]; }
+      e.target.classList.remove("on");
+    } else {
+      const [t, v] = e.target.value.split(",").map(Number);
+      (code[p] = code[p] || {})[m] = [t, v];
+      e.target.classList.add("on");
+    }
+    countCode();
+    clearTimeout(ctimer);
+    ctimer = setTimeout(pushCode, 150);
+  }));
+  countCode();
+}
+
+function countCode() {
+  const per = {};
+  for (const p in code) for (const m in code[p]) { const t = code[p][m][0]; per[t] = (per[t] || 0) + 1; }
+  document.getElementById("codecount").textContent = "promotores: " + Object.keys(code).join(", ") + " · pares por órgão: " +
+    organInfo.map((o, t) => `${o.nome} ${per[t] || 0}`).join(", ");
+}
+
+async function pushCode() {
+  const r = await fetch("/api/code", { method: "POST", body: JSON.stringify(code) });
+  status(r.ok ? "código aplicado (não gravado)" : await r.text(), r.ok ? "ok" : "err");
+}
+
 async function loadOrgans() {
   organInfo = await (await fetch("/api/organs")).json();
   organRows = await (await fetch("/api/organ_table")).json();
   renderOrgans();
+  code = await (await fetch("/api/code")).json();
+  renderCode();
 }
 
 document.getElementById("save").onclick = async () => {

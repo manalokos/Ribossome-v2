@@ -235,7 +235,8 @@ impl Running {
             info.driver_info,
             if cfg!(debug_assertions) { "debug" } else { "release" }
         ));
-        let editor = ribossome::editor::Editor::start(world.amino.clone(), world.organ_table.clone());
+        let editor =
+            ribossome::editor::Editor::start(world.amino.clone(), world.organ_table.clone(), world.organ_code.clone());
         let mut inspector = ui::inspector::Inspector::new(&gpu, &world);
         inspector.register(&gpu.device, &mut egui_renderer);
 
@@ -514,6 +515,7 @@ impl Running {
                 match u {
                     ribossome::editor::Update::Amino(rows) => self.world.set_amino(&self.gpu.queue, rows),
                     ribossome::editor::Update::Organs(rows) => self.world.set_organ_table(&self.gpu.queue, rows),
+                    ribossome::editor::Update::Code(code) => self.world.set_organ_code(&self.gpu.queue, code),
                 }
             }
             if std::mem::take(&mut self.ui.open_editor) {

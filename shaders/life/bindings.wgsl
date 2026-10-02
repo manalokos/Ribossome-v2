@@ -55,6 +55,9 @@
 @group(3) @binding(24) var<storage, read_write> bonds: array<vec4<u32>>;
 @group(3) @binding(25) var<storage, read_write> bond_accept: array<atomic<u32>>;
 @group(3) @binding(26) var<storage, read_write> bond_disp: array<vec4<f32>>;
+// Código dos órgãos (assets/codigo_orgaos.json): promotor·20 + modificador
+// (aminoácidos) -> 0 = sem órgão, senão (tipo + 1) | (variante << 4).
+@group(3) @binding(27) var<storage, read> organ_code: array<u32, 400>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

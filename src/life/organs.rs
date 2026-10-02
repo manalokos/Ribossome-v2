@@ -1,13 +1,12 @@
 //! Órgãos: "super-aminoácidos" com uma função simples.
 //!
-//! Codificação: um PROMOTOR (aminoácidos C, H ou W) seguido de um codão
-//! MODIFICADOR que não seja stop forma um órgão, que ocupa UMA posição do
-//! corpo. O modificador (índice do codão 0..63, ordem A U G C) define o tipo
-//! (modificador % 12) e o parâmetro (modificador / 12, 0..5). Um SEGUNDO
-//! modificador (se não for stop) dá a INTENSIDADE: 64 níveis logarítmicos,
-//! ganho = 2^((índice − 32)/8), de ×0,06 a ×15 (9 bases no total); sem ele o
-//! ganho é 1 (6 bases). A intensidade multiplica a emissão dos sensores,
-//! relógios e relés e a amplificação do músculo.
+//! Codificação (`assets/codigo_orgaos.json`, editável na página): um
+//! aminoácido PROMOTOR seguido de um aminoácido MODIFICADOR forma um órgão se
+//! a tabela tiver o par (promotor, modificador) -> (tipo, variante); o órgão
+//! ocupa UMA posição do corpo. Codões sinónimos dão o mesmo órgão (conta a
+//! proteína, como na biologia). Um SEGUNDO codão (se não for stop) dá a
+//! INTENSIDADE: 64 níveis logarítmicos, ganho = 2^((índice − 32)/8), de
+//! ×0,06 a ×15 (9 bases no total); sem ele o ganho é 1 (6 bases).
 //! Fisicamente (massa, ângulo de repouso, catálise) o órgão continua a ser o
 //! aminoácido promotor; o órgão acrescenta-lhe uma função.
 //!
@@ -32,12 +31,9 @@
 //!
 //! Esta é a única fonte de verdade: o shader recebe as constantes geradas.
 
-use super::amino::{AA_LETTERS, STOP, codon};
+use super::amino::{STOP, codon};
 
 pub const ORGAN_TYPES: usize = 14;
-/// Tipos escolhidos pelo modificador dos promotores C, H, W (índice % 12);
-/// a âncora (Y) e o bias (Q) têm promotores próprios.
-pub const CODED_ORGAN_TYPES: usize = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -226,23 +222,6 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
     }
 }
 
-/// Aminoácidos promotores (pouco frequentes num genoma ao acaso).
-pub const PROMOTERS: [char; 3] = ['C', 'H', 'W'];
-/// Promotor da âncora: tirosina (as colas dos mexilhões são proteínas ricas
-/// em DOPA, que vem da tirosina). O modificador escolhe a variante (% 6).
-pub const ANCHOR_PROMOTER: char = 'Y';
-/// Promotor do bias (emissor constante de α ou β): glutamina. O modificador
-/// escolhe a variante (% 6).
-pub const BIAS_PROMOTER: char = 'Q';
-
-fn aa_index(l: char) -> u8 {
-    AA_LETTERS.iter().position(|&x| x == l).unwrap() as u8
-}
-
-pub fn is_promoter(aa: u8) -> bool {
-    PROMOTERS.iter().any(|&l| aa_index(l) == aa) || aa == aa_index(ANCHOR_PROMOTER) || aa == aa_index(BIAS_PROMOTER)
-}
-
 /// Índice de intensidade por omissão (ganho 1).
 pub const GAIN_DEFAULT: u8 = 32;
 
@@ -266,7 +245,8 @@ pub fn organ_code(r: &Residue) -> u16 {
 
 /// Tradução com órgãos (espelho exato do shader): a partir do primeiro AUG
 /// (`require_start`) ou da base 0, até ao primeiro stop ou 64 resíduos.
-pub fn translate_organs(genome: &[u8], require_start: bool) -> Vec<Residue> {
+/// `code` = `table::code_to_gpu` (promotor·20 + modificador).
+pub fn translate_organs(genome: &[u8], require_start: bool, code: &[u32]) -> Vec<Residue> {
     let mut i = if require_start {
         let Some(s) = genome.windows(3).position(|w| w == [0, 1, 2]) else { return Vec::new() };
         s
@@ -279,11 +259,11 @@ pub fn translate_organs(genome: &[u8], require_start: bool) -> Vec<Residue> {
         if aa == STOP {
             break;
         }
-        // Promotor seguido de um modificador que não é stop: órgão.
-        if is_promoter(aa) && i + 6 <= genome.len() {
-            let m = (genome[i + 3], genome[i + 4], genome[i + 5]);
-            if codon(m.0, m.1, m.2) != STOP {
-                let idx = m.0 * 16 + m.1 * 4 + m.2;
+        // Promotor + modificador com entrada na tabela: órgão.
+        if i + 6 <= genome.len() {
+            let m = codon(genome[i + 3], genome[i + 4], genome[i + 5]);
+            let c = if m == STOP { 0 } else { code[aa as usize * 20 + m as usize] };
+            if c != 0 {
                 // Segundo modificador (intensidade), se existir e não for stop.
                 let (gain, used) =
                     if i + 9 <= genome.len() && codon(genome[i + 6], genome[i + 7], genome[i + 8]) != STOP {
@@ -291,14 +271,7 @@ pub fn translate_organs(genome: &[u8], require_start: bool) -> Vec<Residue> {
                     } else {
                         (GAIN_DEFAULT, 6)
                     };
-                let organ = if aa == aa_index(ANCHOR_PROMOTER) {
-                    (Organ::Anchor as u8, idx % VARIANTS as u8, gain)
-                } else if aa == aa_index(BIAS_PROMOTER) {
-                    (Organ::Bias as u8, idx % VARIANTS as u8, gain)
-                } else {
-                    (idx % CODED_ORGAN_TYPES as u8, idx / CODED_ORGAN_TYPES as u8, gain)
-                };
-                body.push(Residue { aa, organ: Some(organ) });
+                body.push(Residue { aa, organ: Some(((c & 0xF) as u8 - 1, (c >> 4) as u8, gain)) });
                 i += used;
                 continue;
             }
@@ -331,72 +304,73 @@ pub fn wgsl() -> String {
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");
     }
-    s += &format!(
-        "const ORGAN_TYPES: u32 = {ORGAN_TYPES}u;\nconst CODED_ORGAN_TYPES: u32 = {CODED_ORGAN_TYPES}u;\nconst ORGAN_VARIANTS: u32 = {VARIANTS}u;\n"
-    );
-    // 1 = promotor dos órgãos codificados (C, H, W), 2 = da âncora (Y), 3 = do bias (Q).
-    let promo: Vec<String> = (0..20u8)
-        .map(|a| {
-            let v = if a == aa_index(ANCHOR_PROMOTER) {
-                2
-            } else if a == aa_index(BIAS_PROMOTER) {
-                3
-            } else {
-                is_promoter(a) as u32
-            };
-            format!("{v}u")
-        })
-        .collect();
-    s += &format!("const AA_IS_PROMOTER = array<u32, 20>({});\n", promo.join(", "));
+    s += &format!("const ORGAN_TYPES: u32 = {ORGAN_TYPES}u;\nconst ORGAN_VARIANTS: u32 = {VARIANTS}u;\n");
     s
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::life::amino::AA_LETTERS;
+    use crate::life::table::{code_to_gpu, embedded_code};
 
     fn bases(s: &str) -> Vec<u8> {
         s.chars().map(|c| "AUGC".find(c).unwrap() as u8).collect()
     }
 
+    fn aa_index(l: char) -> u8 {
+        AA_LETTERS.iter().position(|&x| x == l).unwrap() as u8
+    }
+
+    fn code() -> Vec<u32> {
+        code_to_gpu(&embedded_code())
+    }
+
     #[test]
     fn promoter_plus_modifier_makes_an_organ() {
-        // AUG (M) | UGU (C, promotor) + GCA (modificador) + UUU (intensidade) | GGU (G) | UAA
+        // AUG (M) | UGU (C, promotor) + GCA (A: boca, variante 0) + UUU (intensidade) | GGU (G) | UAA
         let g = bases("AUGUGUGCAUUUGGUUAA");
-        let body = translate_organs(&g, true);
+        let body = translate_organs(&g, true, &code());
         assert_eq!(body.len(), 3);
         assert_eq!(body[0].organ, None);
-        // GCA: 2*16 + 3*4 + 0 = 44 -> tipo 44 % 12 = 8, param 3; UUU: 1*16 + 1*4 + 1 = 21 -> intensidade 21.
-        assert_eq!(body[1], Residue { aa: aa_index('C'), organ: Some((8, 3, 21)) });
+        // UUU: 1*16 + 1*4 + 1 = 21 -> intensidade 21.
+        assert_eq!(body[1].organ, Some((Organ::Mouth as u8, 0, 21)));
         assert_eq!(body[2].organ, None);
         // Sem segundo modificador (stop a seguir): intensidade por omissão, 6 bases.
-        let g2 = bases("AUGUGUGCAUAA");
-        let b2 = translate_organs(&g2, true);
-        assert_eq!(b2[1].organ, Some((8, 3, GAIN_DEFAULT)));
+        let b2 = translate_organs(&bases("AUGUGUGCAUAA"), true, &code());
+        assert_eq!(b2[1].organ, Some((Organ::Mouth as u8, 0, GAIN_DEFAULT)));
         assert!((organ_gain(GAIN_DEFAULT) - 1.0).abs() < 1e-6);
     }
 
     #[test]
-    fn tyrosine_makes_an_anchor() {
-        // AUG | UAU (Y) + AAU (modificador 1 -> variante 1) | UAA
-        let g = bases("AUGUAUAAUUAA");
-        let body = translate_organs(&g, true);
-        assert_eq!(body[1].organ, Some((Organ::Anchor as u8, 1, GAIN_DEFAULT)));
+    fn synonymous_codons_give_the_same_organ() {
+        // GCA e GCG são ambos alanina: o mesmo órgão.
+        let a = translate_organs(&bases("AUGUGUGCAUAA"), true, &code());
+        let b = translate_organs(&bases("AUGUGUGCGUAA"), true, &code());
+        assert_eq!(a[1].organ, b[1].organ);
     }
 
     #[test]
-    fn glutamine_makes_a_bias() {
-        // AUG | CAA (Q) + AAG (modificador 2 -> variante 2) | UAA
-        let g = bases("AUGCAAAAGUAA");
-        let body = translate_organs(&g, true);
-        assert_eq!(body[1].organ, Some((Organ::Bias as u8, 2, GAIN_DEFAULT)));
+    fn anchor_and_bias_from_the_table() {
+        // Y (UAU) + P (CCU) -> âncora variante 0; H (CAU) + P (CCU) -> bias variante 0.
+        let a = translate_organs(&bases("AUGUAUCCUUAA"), true, &code());
+        assert_eq!(a[1].organ, Some((Organ::Anchor as u8, 0, GAIN_DEFAULT)));
+        let b = translate_organs(&bases("AUGCAUCCUUAA"), true, &code());
+        assert_eq!(b[1].organ, Some((Organ::Bias as u8, 0, GAIN_DEFAULT)));
+    }
+
+    #[test]
+    fn unmapped_pair_is_a_plain_residue() {
+        // G (GGU) não é promotor: GGU GCA = dois resíduos normais.
+        let body = translate_organs(&bases("AUGGGUGCAUAA"), true, &code());
+        assert_eq!(body.iter().filter(|r| r.organ.is_some()).count(), 0);
+        assert_eq!(body.len(), 3);
     }
 
     #[test]
     fn promoter_before_stop_is_a_plain_residue() {
-        // AUG | CAU (H, promotor) | UAA (stop): sem órgão; o stop termina a cadeia.
-        let g = bases("AUGCAUUAA");
-        let body = translate_organs(&g, true);
-        assert_eq!(body, vec![Residue { aa: aa_index('M'), organ: None }, Residue { aa: aa_index('H'), organ: None }]);
+        // AUG | UGU (C, promotor) | UAA (stop): sem órgão; o stop termina a cadeia.
+        let body = translate_organs(&bases("AUGUGUUAA"), true, &code());
+        assert_eq!(body, vec![Residue { aa: aa_index('M'), organ: None }, Residue { aa: aa_index('C'), organ: None }]);
     }
 }

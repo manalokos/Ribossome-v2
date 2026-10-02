@@ -71,11 +71,15 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
             break;
         }
         bodies[slot * 16u + n / 4u] |= aa << ((n % 4u) * 8u);
-        // ÓRGÃO: promotor seguido de um modificador que não é stop (6 bases).
+        // ÓRGÃO: promotor + modificador (aminoácidos) com entrada no código
+        // dos órgãos (assets/codigo_orgaos.json): 6 bases, ou 9 com a intensidade.
         var step = 3u;
-        if (AA_IS_PROMOTER[aa] != 0u && i + 5u < gene_len) {
+        if (i + 5u < gene_len) {
             let m = genome_get(slot, i + 3u) * 16u + genome_get(slot, i + 4u) * 4u + genome_get(slot, i + 5u);
-            if (CODON_TABLE[m] != AA_STOP) {
+            let maa = CODON_TABLE[m];
+            var c = 0u;
+            if (maa != AA_STOP) { c = organ_code[aa * 20u + maa]; }
+            if (c != 0u) {
                 // Segundo modificador: intensidade (senão 32 = ganho 1, 6 bases).
                 var gain = 32u;
                 step = 6u;
@@ -86,15 +90,7 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
                         step = 9u;
                     }
                 }
-                // Promotores da âncora (Y) e do bias (Q): o modificador escolhe a variante;
-                // nos outros (C, H, W) escolhe o tipo e a variante.
-                var ob = ((m % CODED_ORGAN_TYPES) + 1u) | ((m / CODED_ORGAN_TYPES) << 4u) | (gain << 8u);
-                if (AA_IS_PROMOTER[aa] == 2u) {
-                    ob = (ORGAN_ANCHOR + 1u) | ((m % ORGAN_VARIANTS) << 4u) | (gain << 8u);
-                } else if (AA_IS_PROMOTER[aa] == 3u) {
-                    ob = (ORGAN_BIAS + 1u) | ((m % ORGAN_VARIANTS) << 4u) | (gain << 8u);
-                }
-                organs[slot * 32u + n / 2u] |= ob << ((n % 2u) * 16u);
+                organs[slot * 32u + n / 2u] |= (c | (gain << 8u)) << ((n % 2u) * 16u);
             }
         }
         n += 1u;

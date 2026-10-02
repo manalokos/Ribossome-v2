@@ -8,12 +8,13 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
 use crate::life::organs::{GAIN_DEFAULT, ORGAN_NAMES, ORGAN_PROPS, ORGAN_SYMBOLS, ORGAN_TYPES, VARIANTS, describe};
-use crate::life::table::{self, AminoRow, OrganRow};
+use crate::life::table::{self, AminoRow, OrganCode, OrganRow};
 
 /// O que a página mudou.
 pub enum Update {
     Amino(Vec<AminoRow>),
     Organs(Vec<OrganRow>),
+    Code(OrganCode),
 }
 
 pub const PORT: u16 = 8787;
@@ -44,7 +45,7 @@ fn organs_json(table: &[OrganRow]) -> String {
 
 impl Editor {
     /// Arranca o servidor numa thread. None se a porta estiver ocupada.
-    pub fn start(initial: Vec<AminoRow>, initial_organs: Vec<OrganRow>) -> Option<Self> {
+    pub fn start(initial: Vec<AminoRow>, initial_organs: Vec<OrganRow>, initial_code: OrganCode) -> Option<Self> {
         let server = match tiny_http::Server::http(("127.0.0.1", PORT)) {
             Ok(s) => s,
             Err(e) => {
@@ -55,6 +56,7 @@ impl Editor {
         let (tx, rx) = channel();
         let shared = Arc::new(Mutex::new(initial));
         let shared_org = Arc::new(Mutex::new(initial_organs));
+        let shared_code = Arc::new(Mutex::new(initial_code));
         std::thread::spawn(move || {
             let header = |ct: &str| tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap();
             for mut req in server.incoming_requests() {
@@ -86,6 +88,23 @@ impl Editor {
                             Err(e) => tiny_http::Response::from_string(format!("erro: {e}")).with_status_code(400),
                         }
                     }
+                    (tiny_http::Method::Get, "/api/code") => {
+                        let code = shared_code.lock().unwrap().clone();
+                        tiny_http::Response::from_string(serde_json::to_string(&code).unwrap())
+                            .with_header(header("application/json"))
+                    }
+                    (tiny_http::Method::Post, "/api/code") => {
+                        let mut body = String::new();
+                        let _ = req.as_reader().read_to_string(&mut body);
+                        match table::parse_code(&body) {
+                            Ok(code) => {
+                                *shared_code.lock().unwrap() = code.clone();
+                                let _ = tx.send(Update::Code(code));
+                                tiny_http::Response::from_string("aplicado")
+                            }
+                            Err(e) => tiny_http::Response::from_string(format!("erro: {e}")).with_status_code(400),
+                        }
+                    }
                     (tiny_http::Method::Get, "/api/organs") => {
                         let rows = shared_org.lock().unwrap().clone();
                         tiny_http::Response::from_string(organs_json(&rows)).with_header(header("application/json"))
@@ -105,11 +124,13 @@ impl Editor {
                     (tiny_http::Method::Post, "/api/save") => {
                         let rows = shared.lock().unwrap().clone();
                         let orgs = shared_org.lock().unwrap().clone();
-                        match table::save(&rows).and_then(|_| table::save_organs(&orgs)) {
+                        let code = shared_code.lock().unwrap().clone();
+                        match table::save(&rows).and_then(|_| table::save_organs(&orgs)).and_then(|_| table::save_code(&code)) {
                             Ok(()) => tiny_http::Response::from_string(format!(
-                                "gravado em {} e {}",
+                                "gravado em {}, {} e {}",
                                 table::TABLE_PATH,
-                                table::ORGANS_PATH
+                                table::ORGANS_PATH,
+                                table::CODE_PATH
                             )),
                             Err(e) => tiny_http::Response::from_string(format!("erro: {e}")).with_status_code(500),
                         }
@@ -117,11 +138,14 @@ impl Editor {
                     (tiny_http::Method::Post, "/api/reload") => {
                         let (rows, src) = table::load();
                         let (orgs, src_o) = table::load_organs();
+                        let (code, src_c) = table::load_code();
                         *shared.lock().unwrap() = rows.clone();
                         *shared_org.lock().unwrap() = orgs.clone();
+                        *shared_code.lock().unwrap() = code.clone();
                         let _ = tx.send(Update::Amino(rows));
                         let _ = tx.send(Update::Organs(orgs));
-                        tiny_http::Response::from_string(format!("recarregado de {src} e {src_o}"))
+                        let _ = tx.send(Update::Code(code));
+                        tiny_http::Response::from_string(format!("recarregado de {src}, {src_o} e {src_c}"))
                     }
                     _ => tiny_http::Response::from_string("não encontrado").with_status_code(404),
                 };
