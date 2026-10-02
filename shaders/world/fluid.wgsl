@@ -23,7 +23,6 @@ const TEMP_HEAT_RATE: f32 = 0.01;   // T por unidade de força da fumarola por s
 const TEMP_COOL_RATE: f32 = 0.12;   // relaxação para o ambiente local (1/s)
 const TEMP_MAX: f32 = 12.0;
 const SUN_HEAT_RATE: f32 = 0.15;
-const SUN_WATER_ABSORB: f32 = 0.05;
 const TEMP_BUOYANCY: f32 = 12.0;    // força por unidade de desvio ao ambiente
 const TEMP_AMBIENT_SURFACE: f32 = 0.0;
 const TEMP_AMBIENT_ATTEN: f32 = 4.0;
@@ -248,12 +247,13 @@ fn update_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Fumarolas: mapa de calor por célula (CPU: pontuais + píxeis vermelhos).
     t += heat_src[idx] * TEMP_HEAT_RATE * dt;
 
-    // SOL: a água absorve pouco; a rocha iluminada absorve muito e aquece,
-    // semeando convecção.
+    // SOL: o calor que entra é a luz ABSORVIDA nesta célula (energia
+    // conservada): a que chega de cima × (1 − transmissão), com terreno,
+    // monómeros e agentes, mais um pouco pela água. Aquecer por igual de cima
+    // estratifica (estável); a CONVECÇÃO nasce onde a absorção é desigual na
+    // horizontal: rocha iluminada, manchas densas de monómeros, colónias.
     let env = env_cell_for_fluid(x, y);
-    let g = f32(gamma_count(env));
-    let absorb = SUN_WATER_ABSORB + (1.0 - exp(-0.6 * g));
-    t += SUN_HEAT_RATE * max(uv_light_at_idx(env), 0.0) * absorb * dt;
+    t += SUN_HEAT_RATE * light_absorbed_at(env) * dt;
 
     let amb = temp_ambient_at(y);
     t = amb + (t - amb) * exp(-TEMP_COOL_RATE * dt);

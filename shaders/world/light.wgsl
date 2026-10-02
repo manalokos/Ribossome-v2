@@ -127,3 +127,16 @@ fn light_commit(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (i >= LIGHT_SIZE * LIGHT_SIZE) { return; }
     light_grid[i] = light_next[i];
 }
+
+// Luz ABSORVIDA na célula da luz que contém a célula da grelha `env` (por
+// célula da luz): a que chega de cima × (1 − transmissão) + a fração que a
+// água absorve. Fonte de calor solar do fluido.
+const SUN_WATER_ABSORB: f32 = 0.05;
+fn light_absorbed_at(env: u32) -> f32 {
+    let lx = (env % GRID_SIZE) / LIGHT_DIV;
+    let ly = (env / GRID_SIZE) / LIGHT_DIV;
+    var incoming = 1.0;
+    if (ly + 1u < LIGHT_SIZE) { incoming = light_above(lx, ly + 1u); }
+    incoming = max(incoming, 0.0);
+    return incoming * ((1.0 - light_transmit(lx, ly)) + SUN_WATER_ABSORB);
+}
