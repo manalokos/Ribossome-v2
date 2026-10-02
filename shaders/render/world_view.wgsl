@@ -124,18 +124,20 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         return vec4<f32>(mix(water, vec3<f32>(0.75), t), 1.0);
     }
 
-    // Terreno: rocha (>= 3) e entulho (1–2), com textura da contagem.
+    // Terreno: rocha (>= 3) opaca; o entulho (1–2) é poroso e é o FUNDO por
+    // trás dos monómeros que lá estão (desenhados por cima, mais abaixo).
     let g = gamma_view[idx];
-    if (g > 0u) {
+    if (g >= 3u) {
         let rock = vec3<f32>(0.32, 0.29, 0.26) + 0.04 * f32(g % 3u);
-        let rubble = vec3<f32>(0.22, 0.20, 0.18);
         // A rocha soma a luz que lhe CHEGA (a da célula de cima): a
         // superfície fica dourada, o interior não.
         let ly_up = min(ly + 1u, LIGHT_SIZE - 1u);
         let light_up = light_view[ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV];
         let rock_glow = LIGHT_GOLD * sqrt(clamp(light_up, 0.0, 1.0));
-        return vec4<f32>(clamp(select(rubble, rock, g >= 3u) + rock_glow, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+        return vec4<f32>(clamp(rock + rock_glow, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     }
+    let rubble = vec3<f32>(0.22, 0.20, 0.18) * (0.6 + 0.2 * f32(g));
+    let back = select(water, rubble, g > 0u);
 
     // Normal: os ATIVADOS têm a média das cores dos seus canais (A vermelho,
     // U amarelo, G verde, C azul, pesada pelas contagens); os GASTOS são
@@ -152,6 +154,6 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     let act_frac = act_amt / max(total_amt, 1e-5);
     let hue = mix(MONOMER_SPENT_COLOR, act_col, act_frac);
     let inten = pow(clamp(total_amt, 0.0, 1.0), MONOMER_GAMMA);
-    let c = mix(water, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
+    let c = mix(back, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }

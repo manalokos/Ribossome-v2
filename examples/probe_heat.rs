@@ -44,6 +44,14 @@ fn main() {
         };
         let near = frac(sx.saturating_sub(40), sx + 40, sy, sy + 200);
         let far = frac(sx + 300, sx + 380, sy, sy + 200);
+        let gam = world.read_gamma_blocking(&gpu);
+        let (mut in_rubble, mut rubble_cells, mut in_rock) = (0u64, 0u64, 0u64);
+        for i in 0..n * n {
+            let tot: u64 = (0..4).map(|ch| { let v = cells[i * 4 + ch]; ((v & 0xFFFF) + (v >> 16)) as u64 }).sum();
+            if gam[i] > 0 && gam[i] < 3 { in_rubble += tot; rubble_cells += 1; }
+            if gam[i] >= 3 { in_rock += tot; }
+        }
+        print!("[no entulho {in_rubble} em {rubble_cells} células; na rocha {in_rock}] ");
         let top = frac(0, n, n - 200, n);
         let l = world.read_f32_blocking(&gpu, &world.light_buf);
         let ls = n / ribossome::shaders::LIGHT_DIV as usize;

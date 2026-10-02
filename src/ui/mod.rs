@@ -220,7 +220,8 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
         ui.add(egui::Slider::new(&mut p.settle, 0.0..=10.0).text("assentamento ×"));
         ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));
         ui.add(egui::Slider::new(&mut p.uv_strength, 0.0..=10.0).text("força UV"));
-        light_changed = ui.add(egui::Slider::new(&mut p.uv_depth, 0.5..=30.0).text("atenuação UV")).changed();
+        light_changed = ui.add(egui::Slider::new(&mut p.uv_depth, 0.5..=30.0).text("atenuação UV pela água")).changed();
+        ui.add(egui::Slider::new(&mut p.monomer_uv_absorb, 0.0..=5.0).text("absorção UV pelos monómeros"));
         ui.add(egui::Slider::new(&mut st.light_rows_per_step, 0..=16).text("velocidade da luz (linhas/passo; 0 = varredura)"))
             .on_hover_text("a luz e as sombras descem N linhas por passo; 0 = varredura inteira de N em N passos");
         // Reativação uniforme (modo laboratório): probabilidade por passo de

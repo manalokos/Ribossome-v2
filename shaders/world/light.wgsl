@@ -1,8 +1,9 @@
 // LUZ UV COM SOMBRAS DO TERRENO E DOS AGENTES (v3 compute_uv_light).
 // Regra do Filipe: do topo (y alto) para baixo, cada célula recebe a média
 // das células vizinhas de cima, × atenuação da água × absorção pelo terreno
-// (exp(-0,6·g) por grão) e pelos agentes (o RNA e as proteínas absorvem UV:
-// exp(-AGENT_UV_ABSORB) por resíduo). As sombras alargam e suavizam com a
+// (exp(-0,6·g) por grão), pelos MONÓMEROS (os nucleótidos absorvem UV,
+// ativados ou gastos: zonas densas fazem sombra às de baixo) e pelos agentes
+// (o RNA e as proteínas também: exp(-AGENT_UV_ABSORB) por resíduo). As sombras alargam e suavizam com a
 // profundidade, como luz difusa.
 // Calculada a 1/LIGHT_DIV da resolução (a varredura é sequencial nas
 // linhas: a 2048² custava ~7 ms). Cada linha da luz cobre 2 linhas da
@@ -32,15 +33,22 @@ fn uv_light_at_idx(idx: u32) -> f32 {
 // cobre) e agentes.
 fn light_transmit(lx: u32, ly: u32) -> f32 {
     var g = 0.0;
+    var m = 0u;
     for (var dy = 0u; dy < LIGHT_DIV; dy++) {
         for (var dx = 0u; dx < LIGHT_DIV; dx++) {
-            g += f32(gamma_count((ly * LIGHT_DIV + dy) * GRID_SIZE + lx * LIGHT_DIV + dx));
+            let c = (ly * LIGHT_DIV + dy) * GRID_SIZE + lx * LIGHT_DIV + dx;
+            g += f32(gamma_count(c));
+            m += chem_cell_total(c);
         }
     }
     // Soma das LIGHT_DIV linhas atravessadas, média das LIGHT_DIV colunas.
     g /= f32(LIGHT_DIV);
+    // Monómeros: densidade média por célula × fração da altura atravessada
+    // (somada do topo ao fundo dá monomer_uv_absorb × densidade média).
+    let dens = f32(m) / f32(LIGHT_DIV * LIGHT_DIV);
+    let tau_m = max(params.monomer_uv_absorb, 0.0) * dens * f32(LIGHT_DIV) / f32(GRID_SIZE);
     let shade = f32(atomicLoad(&shade_grid[ly * LIGHT_SIZE + lx]));
-    return exp(-UV_SHADOW_ABSORB * g - AGENT_UV_ABSORB * shade);
+    return exp(-UV_SHADOW_ABSORB * g - AGENT_UV_ABSORB * shade - tau_m);
 }
 
 // Média SIMPLES dos LIGHT_TAPS vizinhos da linha `row` (x−3..x+3), com as

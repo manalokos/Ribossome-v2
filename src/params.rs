@@ -145,6 +145,13 @@ gpu_struct! {
         pub bioturbation: f32,
         /// Energia gasta por grão empurrado (o trabalho não é de graça).
         pub bioturbation_cost: f32,
+        /// Absorção da UV pelos MONÓMEROS (ativados e gastos: os nucleótidos
+        /// absorvem UV). Profundidade ótica do topo ao fundo por monómero
+        /// médio por célula (independente da resolução).
+        pub monomer_uv_absorb: f32,
+        pub _pad2: u32,
+        pub _pad3: u32,
+        pub _pad4: u32,
     }
 }
 
@@ -162,7 +169,8 @@ impl Default for SimParams {
             fluid_viscosity: 3.7,
             fumarole_count: 0,
             uv_strength: 3.0,
-            uv_depth: 11.0,
+            // 2 (era 11 do v3): o resto da atenuação vem dos monómeros.
+            uv_depth: 2.0,
             fluid_enabled: 1,
             fluid_obstacle_strength: 1000.0,
             slope_steer_rate: 210.0,
@@ -202,6 +210,12 @@ impl Default for SimParams {
             swim_gain: 10.0,
             bioturbation: 0.05,
             bioturbation_cost: 0.05,
+            // 1,1: calibrado para a luz a meio do mundo ficar como antes só
+            // com a água (uv_depth 11 do v3): ~0,4% da luz do topo.
+            monomer_uv_absorb: 1.1,
+            _pad2: 0,
+            _pad3: 0,
+            _pad4: 0,
         }
     }
 }

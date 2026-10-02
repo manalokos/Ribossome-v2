@@ -23,11 +23,13 @@ fn chem_cell_total(cell: u32) -> u32 {
     return t;
 }
 
-// Capacidade de uma célula (todos os canais e estados): QUALQUER gamma
-// (rocha ou entulho) não guarda monómeros. O terreno é matéria sólida.
+// Capacidade de uma célula (todos os canais e estados). A ROCHA (>=
+// GAMMA_SOLID_THRESHOLD grãos) não guarda monómeros; o ENTULHO é poroso:
+// cada grão tira 1/GAMMA_SOLID_THRESHOLD do espaço (1 grão: 2/3, 2: 1/3).
 fn chem_capacity(cell: u32) -> u32 {
-    if (gamma_count(cell) > 0u) { return 0u; }
-    return CHEM_CELL_CAP;
+    let g = gamma_count(cell);
+    if (g >= GAMMA_SOLID_THRESHOLD) { return 0u; }
+    return CHEM_CELL_CAP * (GAMMA_SOLID_THRESHOLD - g) / GAMMA_SOLID_THRESHOLD;
 }
 
 // Troca atómica genérica: se `old` permitir, substitui por `old + delta`

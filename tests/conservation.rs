@@ -100,7 +100,9 @@ fn fluid_and_light_are_sane() {
     let top = light[(g - 1) * g + g / 2];
     let bottom = light[g / 2];
     eprintln!("luz: topo {top:.3}, fundo {bottom:.5}");
-    assert!(top > 0.9 && bottom < top * 0.01, "a luz não cai com a profundidade como esperado");
+    // Os monómeros da primeira linha já absorvem (no mundo de teste cada linha
+    // da luz é 1/128 da altura).
+    assert!(top > 0.7 && bottom < top * 0.01, "a luz não cai com a profundidade como esperado");
 }
 
 /// O resultado é reprodutível bit a bit e não depende de como os passos são

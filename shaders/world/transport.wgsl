@@ -185,21 +185,29 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
             let tx = clamp(i32(x) + base.x + i32(b & 3u), 0, i32(GRID_SIZE) - 1);
             let ty = clamp(i32(y) + base.y + i32(b >> 2u), 0, i32(GRID_SIZE) - 1);
             let t_idx = u32(ty) * GRID_SIZE + u32(tx);
-            // Rocha: a água não entra, o monómero também não. Dentro do
-            // terreno só se passa por difusão lenta, com a porosidade.
+            // Rocha: a água não entra, o monómero também não. O entulho é
+            // poroso (capacidade reduzida, entrada com a permeabilidade);
+            // dentro dele não há corrente, só difusão lenta.
             var blocked = false;
             if (t_idx != idx) {
                 let g_tgt = gamma_count(t_idx);
-                if (g_tgt > 0u) {
-                    let gperm = 1.0 / (1.0 + GAMMA_POROSITY_K * f32(g_tgt));
-                    blocked = g_src == 0u || rng_f4(slot, params.epoch, S_BLOCK + b).x >= gperm;
-                } else if (chem_cell_total(t_idx) > CHEM_CELL_CAP) {
-                    // Volume excluído: uma célula de água CHEIA não aceita
-                    // mais (o monómero fica, como contra a rocha). Sem isto,
-                    // um beco de uma célula no terreno, mais fino que a grelha
-                    // do fluido, onde a corrente aponta para dentro, enchia
-                    // sem limite (150 mil monómeros em 10 mil passos).
+                if (g_tgt >= GAMMA_SOLID_THRESHOLD) {
+                    // Rocha: nunca se entra (só se sai, se lá houver algum).
                     blocked = true;
+                } else {
+                    if (g_tgt > 0u) {
+                        // Entulho poroso: entra-se com a permeabilidade.
+                        let gperm = 1.0 / (1.0 + GAMMA_POROSITY_K * f32(g_tgt));
+                        blocked = rng_f4(slot, params.epoch, S_BLOCK + b).x >= gperm;
+                    }
+                    if (!blocked && chem_cell_total(t_idx) > chem_capacity(t_idx)) {
+                        // Volume excluído: uma célula CHEIA não aceita mais
+                        // (o monómero fica, como contra a rocha). Sem isto,
+                        // um beco de uma célula no terreno, mais fino que a
+                        // grelha do fluido, onde a corrente aponta para
+                        // dentro, enchia sem limite (150 mil em 10 mil passos).
+                        blocked = true;
+                    }
                 }
             }
             if (blocked) {
