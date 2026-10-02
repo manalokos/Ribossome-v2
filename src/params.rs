@@ -161,7 +161,9 @@ gpu_struct! {
         /// PRESSÃO dos monómeros (osmótica): os saltos de difusão preferem a
         /// vizinha menos cheia, ∝ à diferença de enchimento. 0 = desligada.
         pub monomer_pressure: f32,
-        pub _pad5: u32,
+        /// Os agentes EMPURRAM a água: cada resíduo devolve ao fluido o seu
+        /// arrasto (soma zero para um nadador: um dipolo). 0 = desligado.
+        pub agent_fluid_push: f32,
         pub _pad6: u32,
         pub _pad7: u32,
     }
@@ -233,7 +235,7 @@ impl Default for SimParams {
             // 0 (pedido do Filipe; o valor antigo fixo era 0,0002).
             activation_decay: 0.0,
             monomer_pressure: 20.0,
-            _pad5: 0,
+            agent_fluid_push: 0.5,
             _pad6: 0,
             _pad7: 0,
         }

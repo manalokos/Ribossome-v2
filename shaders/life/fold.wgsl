@@ -169,6 +169,38 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> vec4<f32> {
         cur[k] = vec2<f32>(cp * q.x - sp * q.y, sp * q.x + cp * q.y);
     }
     let s = rft_solve(slot, n, &old, &cur);
+    push_fluid(slot, a, n, &old, &cur, s);
     // Mundo = R(rot)·R(Ω)·R(φ)·forma guardada nova  =>  rot avança Ω + φ.
     return vec4<f32>(s, phi);
+}
+
+// OS AGENTES EMPURRAM A ÁGUA: cada resíduo devolve ao fluido a reação do seu
+// arrasto, f = R·v (v = velocidade do resíduo na água: V + Ω×r + u). Para
+// um nadador a soma é zero (força total nula, baixo Reynolds): a água recebe
+// um DIPOLO, não impulso líquido. Acumula-se em force_vectors entre dois
+// passos do fluido. (A deriva do próprio agente usa a água à sua volta, onde
+// o seu dipolo é ~simétrico; não se desconta à parte.)
+fn push_fluid(slot: u32, a: Agent, n: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: ptr<function, array<vec2<f32>, 64>>, s: vec3<f32>) {
+    if (params.fluid_enabled == 0u || params.agent_fluid_push <= 0.0) { return; }
+    let rot_mid = a.rot + 0.5 * s.z;
+    let cr = cos(rot_mid);
+    let sr = sin(rot_mid);
+    let world_per_fluid = SIM_SIZE / f32(FLUID_SIZE);
+    // Velocidade por passo (mundo) -> força do fluido (células do fluido / s²).
+    let scale = params.agent_fluid_push / (world_per_fluid * max(params.dt, 1e-4) * max(params.dt, 1e-4));
+    let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
+    for (var k = 0u; k < n; k++) {
+        let r = 0.5 * ((*cur)[k] + (*old)[k]);
+        let u = (*cur)[k] - (*old)[k];
+        let t = rft_tangent(n, k, old, cur);
+        let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
+        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN);
+        let v = s.xy + s.z * vec2<f32>(-r.y, r.x) + u;
+        let f_body = rr * v;
+        let f = vec2<f32>(cr * f_body.x - sr * f_body.y, sr * f_body.x + cr * f_body.y) * scale;
+        let rw = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * r.x - sr * r.y, sr * r.x + cr * r.y);
+        let fi = fluid_index_at_world(rw);
+        atomic_add_force(fi * 2u, f.x);
+        atomic_add_force(fi * 2u + 1u, f.y);
+    }
 }

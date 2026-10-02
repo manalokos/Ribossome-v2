@@ -970,11 +970,13 @@ impl World {
 
             if st.fluid_enabled && epoch % substep == 0 {
                 let f = [fg, fg];
-                run(&mut pass, &pl.clear_force_vectors, ab, f);
                 run(&mut pass, &pl.update_temperature, ab, f);
                 run(&mut pass, &pl.copy_temperature, ab, f);
                 run(&mut pass, &pl.buoyancy, ab, f);
                 run(&mut pass, &pl.gather_forces, ab, f);
+                // Limpa DEPOIS de recolher: entre dois passos do fluido os
+                // agentes acumulam lá as forças com que empurram a água.
+                run(&mut pass, &pl.clear_force_vectors, ab, f);
                 run(&mut pass, &pl.add_forces, ab, f); // a -> b
                 run(&mut pass, &pl.clear_forces, ba, f);
                 run(&mut pass, &pl.diffuse_velocity, ba, f); // b -> a
