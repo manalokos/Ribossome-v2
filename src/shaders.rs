@@ -67,6 +67,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("buoyancy", Stage::Compute),
         ("gather_forces", Stage::Compute),
         ("smooth_velocity", Stage::Compute),
+        ("build_solid_mask", Stage::Compute),
         ("add_forces", Stage::Compute),
         ("clear_forces", Stage::Compute),
         ("diffuse_velocity", Stage::Compute),

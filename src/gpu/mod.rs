@@ -26,10 +26,13 @@ impl Gpu {
         log::info!("GPU: {} ({:?}, {:?})", info.name, info.backend, info.device_type);
 
         // Pedimos os limites do adaptador: a grelha de 2048² ocupa 64 MB.
+        // Timestamps dentro dos passes (medição por kernel), se houver.
+        let ts = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
+        let features = adapter.features() & ts;
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("ribossome"),
-                required_features: wgpu::Features::empty(),
+                required_features: features,
                 required_limits: adapter.limits(),
                 ..Default::default()
             })

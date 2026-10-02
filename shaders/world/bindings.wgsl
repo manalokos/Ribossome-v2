@@ -34,6 +34,10 @@
 // Velocidade final SUAVIZADA (média de 5 células), calculada uma vez por passo
 // do fluido; os resíduos dos agentes leem-na (uma leitura em vez de 5).
 @group(2) @binding(10) var<storage, read_write> velocity_smooth: array<vec2<f32>>;
+// Máscara das paredes do fluido (1 = sólido), refeita no início de cada passo
+// do fluido: a pergunta "é parede?" passa a ser UMA leitura (antes eram 4 do
+// terreno, e o realce de vorticidade fazia ~700 por célula).
+@group(2) @binding(11) var<storage, read_write> solid_mask: array<u32>;
 
 // Sombra dos agentes: resíduos por célula da luz (LIGHT_SIZE²), refeita antes
 // de cada cálculo da luz.

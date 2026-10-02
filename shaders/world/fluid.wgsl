@@ -132,7 +132,14 @@ fn slope_steer_velocity(x: u32, y: u32, v_in: vec2<f32>, dt: f32) -> vec2<f32> {
 }
 
 fn is_effectively_solid(x: u32, y: u32) -> bool {
-    return permeability(x, y) < SOLID_PERM_THRESHOLD;
+    return solid_mask[fgrid(x, y)] != 0u;
+}
+
+// Refaz a máscara das paredes (no início de cada passo do fluido).
+@compute @workgroup_size(16, 16)
+fn build_solid_mask(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= FLUID_SIZE || gid.y >= FLUID_SIZE) { return; }
+    solid_mask[fgrid(gid.x, gid.y)] = select(0u, 1u, permeability(gid.x, gid.y) < SOLID_PERM_THRESHOLD);
 }
 
 fn raw_velocity_cell(x: u32, y: u32) -> vec2<f32> {

@@ -133,6 +133,7 @@ struct Pipelines {
     buoyancy: wgpu::ComputePipeline,
     gather_forces: wgpu::ComputePipeline,
     smooth_velocity: wgpu::ComputePipeline,
+    solid_mask: wgpu::ComputePipeline,
     add_forces: wgpu::ComputePipeline,
     clear_forces: wgpu::ComputePipeline,
     diffuse_velocity: wgpu::ComputePipeline,
@@ -223,6 +224,8 @@ pub struct World {
     /// Densidade da matéria semeada no mundo completo (fração do máximo
     /// histórico de ~20 por célula). Só conta na próxima sementeira.
     pub seed_density: f32,
+    /// Medição por kernel (None = desligada; ver `enable_kernel_timing`).
+    pub kernel_timing: Option<KernelTiming>,
     /// Terreno carregado de uma imagem (grãos por célula, fumarolas): usado
     /// nas próximas sementeiras em vez do gerado. None = gerado.
     /// (grãos por célula, calor por célula em fração de
@@ -243,6 +246,16 @@ pub struct World {
     pub heat_image: Option<Vec<f32>>,
     /// Multiplicador de todo o calor das fumarolas.
     pub fumarole_gain: f32,
+}
+
+/// Timestamps por encode_steps (pares antes/depois de cada kernel).
+pub const KERNEL_TIMING_QUERIES: u32 = 4096;
+
+/// Medição do tempo de GPU de cada kernel (timestamps dentro do passe).
+pub struct KernelTiming {
+    queries: wgpu::QuerySet,
+    resolve: wgpu::Buffer,
+    last_labels: std::cell::RefCell<Vec<&'static str>>,
 }
 
 /// Contadores do ciclo de vida (life_counters na GPU).
@@ -333,6 +346,7 @@ impl World {
         });
         let vel_a = storage_buffer(device, "velocity a", fcells * 8);
         let vel_smooth = storage_buffer(device, "velocity smooth", fcells * 8);
+        let solid_mask = storage_buffer(device, "fluid solid mask", fcells * 4);
         let vel_b = storage_buffer(device, "velocity b", fcells * 8);
         let p_a = storage_buffer(device, "pressure a", fcells * 4);
         let p_b = storage_buffer(device, "pressure b", fcells * 4);
@@ -422,7 +436,7 @@ impl World {
             entries: &(0..8).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
         });
         // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
-        let fluid_entries: Vec<_> = (0..11).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
+        let fluid_entries: Vec<_> = (0..12).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
         let fluid_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fluid layout"),
             entries: &fluid_entries,
@@ -463,12 +477,12 @@ impl World {
         let fluid_ab = bind_all(
             "fluid ab",
             &fluid_layout,
-            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth],
+            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask],
         );
         let fluid_ba = bind_all(
             "fluid ba",
             &fluid_layout,
-            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth],
+            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask],
         );
 
         // Grupo 4 — multigrid da pressão: um uniforme por nível (offset
@@ -632,6 +646,7 @@ impl World {
             buoyancy: compute("buoyancy"),
             gather_forces: compute("gather_forces"),
             smooth_velocity: compute("smooth_velocity"),
+            solid_mask: compute("build_solid_mask"),
             add_forces: compute("add_forces"),
             clear_forces: compute("clear_forces"),
             diffuse_velocity: compute("diffuse_velocity"),
@@ -701,6 +716,7 @@ impl World {
             pipelines,
             last_counters: None,
             seed_density: SEED_DENSITY_DEFAULT,
+            kernel_timing: None,
             custom_terrain: None,
             amino,
             amino_source,
@@ -801,6 +817,50 @@ impl World {
         gpu.queue.write_buffer(&self.free_buf, 0, bytemuck::cast_slice(&free_slots));
         gpu.queue.write_buffer(&self.life_counters_buf, 0, bytemuck::cast_slice(&[max, 0, 0, 0, 0, 0, 0, 0u32]));
         self.pending_spawns.clear();
+    }
+
+    /// Liga a medição por kernel (precisa de TIMESTAMP_QUERY_INSIDE_PASSES).
+    pub fn enable_kernel_timing(&mut self, gpu: &Gpu) -> bool {
+        if !gpu.device.features().contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES) {
+            return false;
+        }
+        let size = KERNEL_TIMING_QUERIES as u64 * 8;
+        self.kernel_timing = Some(KernelTiming {
+            queries: gpu.device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("kernel timing"),
+                ty: wgpu::QueryType::Timestamp,
+                count: KERNEL_TIMING_QUERIES,
+            }),
+            resolve: gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("kernel timing resolve"),
+                size,
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            last_labels: std::cell::RefCell::new(Vec::new()),
+        });
+        true
+    }
+
+    /// Tempo (ms) de cada kernel no último encode_steps (já submetido), por nome.
+    pub fn read_kernel_timing(&self, gpu: &Gpu) -> Vec<(&'static str, f64)> {
+        let Some(t) = &self.kernel_timing else { return Vec::new() };
+        let labels = t.last_labels.borrow().clone();
+        if labels.is_empty() {
+            return Vec::new();
+        }
+        let raw: Vec<u64> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&t.resolve)).to_vec();
+        let period_ms = gpu.queue.get_timestamp_period() as f64 * 1e-6;
+        let mut out: Vec<(&'static str, f64)> = Vec::new();
+        for (i, l) in labels.iter().enumerate() {
+            let (a, b) = (raw[2 * i], raw[2 * i + 1]);
+            let ms = b.saturating_sub(a) as f64 * period_ms;
+            match out.iter_mut().find(|(n, _)| n == l) {
+                Some(e) => e.1 += ms,
+                None => out.push((l, ms)),
+            }
+        }
+        out
     }
 
     /// Troca a tabela dos aminoácidos (efeito no passo seguinte).
@@ -929,10 +989,28 @@ impl World {
         pass.set_bind_group(1, &self.world_bg, &[]);
         pass.set_bind_group(3, &self.life_bg, &[]);
         let ag = groups(self.cfg.max_agents, 64);
-        let run = |pass: &mut wgpu::ComputePass, p: &wgpu::ComputePipeline, bg: &wgpu::BindGroup, n: [u32; 2]| {
+        // Medição por kernel (timestamps antes e depois de cada despacho).
+        let timing = self.kernel_timing.as_ref();
+        let tick = std::cell::Cell::new(0u32);
+        let labels = std::cell::RefCell::new(Vec::<&'static str>::new());
+        let stamp = |pass: &mut wgpu::ComputePass, label: &'static str, begin: bool| {
+            if let Some(t) = timing {
+                let i = tick.get();
+                if i + 1 < KERNEL_TIMING_QUERIES {
+                    pass.write_timestamp(&t.queries, i);
+                    tick.set(i + 1);
+                    if begin {
+                        labels.borrow_mut().push(label);
+                    }
+                }
+            }
+        };
+        let run = |pass: &mut wgpu::ComputePass, label: &'static str, p: &wgpu::ComputePipeline, bg: &wgpu::BindGroup, n: [u32; 2]| {
             pass.set_bind_group(2, bg, &[]);
             pass.set_pipeline(p);
+            stamp(pass, label, true);
             pass.dispatch_workgroups(n[0], n[1], 1);
+            stamp(pass, label, false);
         };
         for i in 0..steps {
             let epoch = self.params.epoch.wrapping_add(i);
@@ -940,115 +1018,125 @@ impl World {
 
             // SEMENTES (só no primeiro passo, e nunca entre scatter e commit).
             if i == 0 && !spawns.is_empty() {
-                run(&mut pass, &pl.spawn, ab, [groups(spawns.len() as u32, 64), 1]);
+                run(&mut pass, "spawn", &pl.spawn, ab, [groups(spawns.len() as u32, 64), 1]);
             }
 
             // TERRENO: duas passagens de relaxação dos grãos e o declive.
             if st.terrain_enabled {
-                run(&mut pass, &pl.relax_a, ab, [g, g]);
-                run(&mut pass, &pl.relax_b, ab, [g, g]);
+                run(&mut pass, "relax_a", &pl.relax_a, ab, [g, g]);
+                run(&mut pass, "relax_b", &pl.relax_b, ab, [g, g]);
             }
-            run(&mut pass, &pl.slope, ab, [g, g]);
+            run(&mut pass, "slope", &pl.slope, ab, [g, g]);
 
             let lcells = (self.cfg.grid_size / shaders::LIGHT_DIV).pow(2);
             let sweep = self.light_dirty || (st.light_rows_per_step == 0 && epoch % st.light_interval.max(1) == 0);
             if sweep || st.light_rows_per_step > 0 {
                 // Sombra dos agentes: limpa e marca os resíduos.
-                run(&mut pass, &pl.clear_shade, ab, [groups(lcells, 256), 1]);
-                run(&mut pass, &pl.agents_shade, ab, [groups(self.cfg.max_agents, 64), 1]);
+                run(&mut pass, "clear_shade", &pl.clear_shade, ab, [groups(lcells, 256), 1]);
+                run(&mut pass, "agents_shade", &pl.agents_shade, ab, [groups(self.cfg.max_agents, 64), 1]);
             }
             if sweep {
                 // Varredura inteira (exata): na sementeira, quando o terreno
                 // muda de vez, ou no modo antigo.
                 self.light_dirty = false;
-                run(&mut pass, &pl.light_transmit, ab, [groups(lcells, 256), 1]);
-                run(&mut pass, &pl.uv_light, ab, [1, 1]);
+                run(&mut pass, "light_transmit", &pl.light_transmit, ab, [groups(lcells, 256), 1]);
+                run(&mut pass, "uv_light", &pl.uv_light, ab, [1, 1]);
             } else {
                 // Propagação: N linhas por passo, todas as células em paralelo.
                 for _ in 0..st.light_rows_per_step.min(16) {
-                    run(&mut pass, &pl.light_propagate, ab, [groups(lcells, 256), 1]);
-                    run(&mut pass, &pl.light_commit, ab, [groups(lcells, 256), 1]);
+                    run(&mut pass, "light_propagate", &pl.light_propagate, ab, [groups(lcells, 256), 1]);
+                    run(&mut pass, "light_commit", &pl.light_commit, ab, [groups(lcells, 256), 1]);
                 }
             }
 
             if st.fluid_enabled && epoch % substep == 0 {
                 let f = [fg, fg];
-                run(&mut pass, &pl.update_temperature, ab, f);
-                run(&mut pass, &pl.copy_temperature, ab, f);
-                run(&mut pass, &pl.buoyancy, ab, f);
-                run(&mut pass, &pl.gather_forces, ab, f);
+                run(&mut pass, "build_solid_mask", &pl.solid_mask, ab, f);
+                run(&mut pass, "update_temperature", &pl.update_temperature, ab, f);
+                run(&mut pass, "copy_temperature", &pl.copy_temperature, ab, f);
+                run(&mut pass, "buoyancy", &pl.buoyancy, ab, f);
+                run(&mut pass, "gather_forces", &pl.gather_forces, ab, f);
                 // Limpa DEPOIS de recolher: entre dois passos do fluido os
                 // agentes acumulam lá as forças com que empurram a água.
-                run(&mut pass, &pl.clear_force_vectors, ab, f);
-                run(&mut pass, &pl.add_forces, ab, f); // a -> b
-                run(&mut pass, &pl.clear_forces, ba, f);
-                run(&mut pass, &pl.diffuse_velocity, ba, f); // b -> a
-                run(&mut pass, &pl.advect_velocity, ab, f); // a -> b
-                run(&mut pass, &pl.vorticity, ba, f); // b -> a
-                run(&mut pass, &pl.divergence, ab, f); // lê a
+                run(&mut pass, "clear_force_vectors", &pl.clear_force_vectors, ab, f);
+                run(&mut pass, "add_forces", &pl.add_forces, ab, f); // a -> b
+                run(&mut pass, "clear_forces", &pl.clear_forces, ba, f);
+                run(&mut pass, "diffuse_velocity", &pl.diffuse_velocity, ba, f); // b -> a
+                run(&mut pass, "advect_velocity", &pl.advect_velocity, ab, f); // a -> b
+                run(&mut pass, "vorticity", &pl.vorticity, ba, f); // b -> a
+                run(&mut pass, "divergence", &pl.divergence, ab, f); // lê a
                 // Pressão em ARRANQUE QUENTE (nunca é limpa); o resultado fica
                 // sempre em pressure_a.
                 if st.multigrid {
-                    let mg = |pass: &mut wgpu::ComputePass, p: &wgpu::ComputePipeline, bg, l: usize, n: u32| {
+                    let mg = |pass: &mut wgpu::ComputePass, label: &'static str, p: &wgpu::ComputePipeline, bg, l: usize, n: u32| {
                         pass.set_bind_group(2, bg, &[]);
                         pass.set_bind_group(4, &self.mg_bg, &[(l as u64 * PARAMS_STRIDE) as u32]);
                         pass.set_pipeline(p);
                         let w = groups(n, 16);
+                        stamp(pass, label, true);
                         pass.dispatch_workgroups(w, w, 1);
+                        stamp(pass, label, false);
                     };
                     let levels = self.mg_sizes.len();
-                    mg(&mut pass, &pl.mg_init, ab, 0, self.mg_sizes[0]);
+                    mg(&mut pass, "mg_init", &pl.mg_init, ab, 0, self.mg_sizes[0]);
                     for _ in 0..st.mg_cycles.max(1) {
                         for l in 0..levels - 1 {
                             for _ in 0..MG_PRE {
-                                mg(&mut pass, &pl.mg_red, ab, l, self.mg_sizes[l]);
-                                mg(&mut pass, &pl.mg_black, ab, l, self.mg_sizes[l]);
+                                mg(&mut pass, "mg_red", &pl.mg_red, ab, l, self.mg_sizes[l]);
+                                mg(&mut pass, "mg_black", &pl.mg_black, ab, l, self.mg_sizes[l]);
                             }
-                            mg(&mut pass, &pl.mg_restrict, ab, l, self.mg_sizes[l + 1]);
+                            mg(&mut pass, "mg_restrict", &pl.mg_restrict, ab, l, self.mg_sizes[l + 1]);
                         }
                         for _ in 0..MG_COARSE {
-                            mg(&mut pass, &pl.mg_red, ab, levels - 1, self.mg_sizes[levels - 1]);
-                            mg(&mut pass, &pl.mg_black, ab, levels - 1, self.mg_sizes[levels - 1]);
+                            mg(&mut pass, "mg_red", &pl.mg_red, ab, levels - 1, self.mg_sizes[levels - 1]);
+                            mg(&mut pass, "mg_black", &pl.mg_black, ab, levels - 1, self.mg_sizes[levels - 1]);
                         }
                         for l in (0..levels - 1).rev() {
-                            mg(&mut pass, &pl.mg_prolong, ab, l, self.mg_sizes[l]);
+                            mg(&mut pass, "mg_prolong", &pl.mg_prolong, ab, l, self.mg_sizes[l]);
                             for _ in 0..MG_POST {
-                                mg(&mut pass, &pl.mg_red, ab, l, self.mg_sizes[l]);
-                                mg(&mut pass, &pl.mg_black, ab, l, self.mg_sizes[l]);
+                                mg(&mut pass, "mg_red", &pl.mg_red, ab, l, self.mg_sizes[l]);
+                                mg(&mut pass, "mg_black", &pl.mg_black, ab, l, self.mg_sizes[l]);
                             }
                         }
                     }
-                    mg(&mut pass, &pl.mg_finish, ba, 0, self.mg_sizes[0]);
+                    mg(&mut pass, "mg_finish", &pl.mg_finish, ba, 0, self.mg_sizes[0]);
                 } else {
                     for k in 0..jacobi_iters {
-                        run(&mut pass, &pl.jacobi, if k % 2 == 0 { ab } else { ba }, f);
+                        run(&mut pass, "jacobi", &pl.jacobi, if k % 2 == 0 { ab } else { ba }, f);
                     }
                 }
-                run(&mut pass, &pl.subtract_gradient, ab, f); // a -> b
-                run(&mut pass, &pl.boundaries, ba, f); // b -> a (final em a)
-                run(&mut pass, &pl.smooth_velocity, ab, f); // a -> suavizada (agentes)
-                run(&mut pass, &pl.thermal_activation, ab, [g, g]);
+                run(&mut pass, "subtract_gradient", &pl.subtract_gradient, ab, f); // a -> b
+                run(&mut pass, "boundaries", &pl.boundaries, ba, f); // b -> a (final em a)
+                run(&mut pass, "smooth_velocity", &pl.smooth_velocity, ab, f); // a -> suavizada (agentes)
+                run(&mut pass, "thermal_activation", &pl.thermal_activation, ab, [g, g]);
             }
 
             // TRANSPORTE em duas fases (reprodutível): espalhar para chem_next
             // a partir do estado antes do passo, depois copiar de volta.
-            run(&mut pass, &pl.transport, ab, [g, g]);
-            run(&mut pass, &pl.commit, ab, commit_groups);
+            run(&mut pass, "transport", &pl.transport, ab, [g, g]);
+            run(&mut pass, "commit", &pl.commit, ab, commit_groups);
 
             // ORGANISMOS: depois do commit (os depósitos da morte vão para chem_grid).
-            run(&mut pass, &pl.agents_step, ab, [ag, 1]);
+            run(&mut pass, "agents_step", &pl.agents_step, ab, [ag, 1]);
             // CONTACTO: grelha de agentes, empurrões, aplicação.
             if st.contact_enabled {
-                run(&mut pass, &pl.contact_clear, ab, [contact_cells.div_ceil(256), 1]);
-                run(&mut pass, &pl.contact_insert, ab, [ag, 1]);
-                run(&mut pass, &pl.contact_resolve, ab, [ag, 1]);
-                run(&mut pass, &pl.contact_apply, ab, [ag, 1]);
+                run(&mut pass, "contact_clear", &pl.contact_clear, ab, [contact_cells.div_ceil(256), 1]);
+                run(&mut pass, "contact_insert", &pl.contact_insert, ab, [ag, 1]);
+                run(&mut pass, "contact_resolve", &pl.contact_resolve, ab, [ag, 1]);
+                run(&mut pass, "contact_apply", &pl.contact_apply, ab, [ag, 1]);
             }
             // Nascimentos num passe à parte: a morte devolve slots (push) e o
             // nascimento tira-os (pop); nunca no mesmo despacho.
-            run(&mut pass, &pl.agents_birth, ab, [ag, 1]);
+            run(&mut pass, "agents_birth", &pl.agents_birth, ab, [ag, 1]);
         }
         drop(pass);
+        if let Some(t) = &self.kernel_timing {
+            let n = tick.get();
+            if n > 0 {
+                enc.resolve_query_set(&t.queries, 0..n, &t.resolve, 0);
+            }
+            *t.last_labels.borrow_mut() = labels.into_inner();
+        }
         self.params.epoch = self.params.epoch.wrapping_add(steps);
     }
 
