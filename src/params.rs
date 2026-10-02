@@ -155,7 +155,9 @@ gpu_struct! {
         /// Fotoativação DIRETA dos gastos pela luz (multiplica a força UV).
         /// 0 por omissão: a luz só vira comida pelos FOTOSSISTEMAS dos agentes.
         pub direct_photoactivation: f32,
-        pub _pad4: u32,
+        /// Decaimento espontâneo da ativação (hidrólise), por monómero
+        /// ativado e por passo. 0 = os ativados não decaem sozinhos.
+        pub activation_decay: f32,
     }
 }
 
@@ -221,7 +223,8 @@ impl Default for SimParams {
             // para cima vence-o.
             sedimentation: 0.02,
             direct_photoactivation: 0.0,
-            _pad4: 0,
+            // 0 (pedido do Filipe; o valor antigo fixo era 0,0002).
+            activation_decay: 0.0,
         }
     }
 }

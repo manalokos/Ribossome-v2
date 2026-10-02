@@ -217,6 +217,11 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
     egui::CollapsingHeader::new("Monómeros").default_open(true).show(ui, |ui| {
         ui.add(egui::Slider::new(seed_density, 0.05..=1.0).text("densidade inicial (na próxima semente)"));
         ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("difusão ×"));
+        ui.add(
+            egui::Slider::new(&mut p.activation_decay, 0.0..=0.002)
+                .logarithmic(true)
+                .text("decaimento da ativação (por passo)"),
+        );
         ui.add(egui::Slider::new(&mut p.settle, 0.0..=10.0).text("assentamento ×"));
         ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));
         ui.add(egui::Slider::new(&mut p.uv_strength, 0.0..=10.0).text("força UV (sol)"));

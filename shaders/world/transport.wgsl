@@ -40,7 +40,7 @@ const GRAIN_ADV_CAP: f32 = 0.9;
 
 // ---- Reações ----
 const LIGHT_ACT_P: f32 = 0.006;        // fotoativação por monómero gasto, luz plena
-const CHEM_DECAY_P: f32 = 0.0002;      // hidrólise da ativação
+// Hidrólise espontânea da ativação: params.activation_decay (era 0,0002 fixo).
 const CHEM_SENSITIZE: f32 = 0.5;       // ativados na célula ajudam a ativar os gastos
 const CHEM_SHIELD: f32 = 0.5;          // ativados juntos decaem menos
 // Ativação térmica: água acima deste T reativa monómeros gastos.
@@ -145,7 +145,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         // DECAIMENTO com blindagem.
         if (act_n > 0u) {
             let shield = 1.0 / (1.0 + CHEM_SHIELD * f32(min(act_n, 8u) - 1u));
-            let exp_dec = f32(min(act_n, 8u)) * CHEM_DECAY_P * shield;
+            let exp_dec = f32(min(act_n, 8u)) * max(params.activation_decay, 0.0) * shield;
             if (rng_f4(slot, params.epoch, S_DECAY).x < exp_dec) {
                 act_n -= 1u;
                 spent_n += 1u;

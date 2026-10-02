@@ -117,10 +117,24 @@ fn agents_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
     let a = agents[slot];
     if (a.alive == 0u) { return; }
     let lw = f32(WORLD_UNITS_PER_CELL * LIGHT_DIV);
-    for (var k = 0u; k < max(a.body_len, 1u); k++) {
-        var p = vec2<f32>(a.pos_x, a.pos_y);
-        if (a.body_len > 0u) { p = residue_world(slot, a, k); }
+    for (var k = 0u; k < a.body_len; k++) {
+        // Só absorvem UV os aromáticos (absortividade a 280 nm relativa ao
+        // triptofano: W 1, Y 0,27, F 0,04) e os fotossistemas (captam luz).
+        var w = 0u;
+        let aa = body_get(slot, k);
+        if (aa == AA_TRP) { w = SHADE_ONE; }
+        else if (aa == AA_TYR) { w = SHADE_ONE * 27u / 100u; }
+        else if (aa == AA_PHE) { w = SHADE_ONE * 4u / 100u; }
+        if (organ_type(organ_get(slot, k)) == ORGAN_PHOTOSYSTEM) { w = SHADE_ONE; }
+        if (w == 0u) { continue; }
+        let p = residue_world(slot, a, k);
         let c = clamp(vec2<i32>(floor(p / lw)), vec2<i32>(0), vec2<i32>(i32(LIGHT_SIZE) - 1));
-        atomicAdd(&shade_grid[u32(c.y) * LIGHT_SIZE + u32(c.x)], 1u);
+        atomicAdd(&shade_grid[u32(c.y) * LIGHT_SIZE + u32(c.x)], w);
     }
 }
+
+// Ponto fixo da sombra dos agentes (um "triptofano equivalente").
+const SHADE_ONE: u32 = 100u;
+const AA_PHE: u32 = 4u;
+const AA_TRP: u32 = 18u;
+const AA_TYR: u32 = 19u;

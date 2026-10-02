@@ -3,7 +3,8 @@
 // das células vizinhas de cima, × atenuação da água × absorção pelo terreno
 // (exp(-0,6·g) por grão), pelos MONÓMEROS (os nucleótidos absorvem UV,
 // ativados ou gastos: zonas densas fazem sombra às de baixo) e pelos agentes
-// (o RNA e as proteínas também: exp(-AGENT_UV_ABSORB) por resíduo). As sombras alargam e suavizam com a
+// (só os aromáticos W > Y > F e os fotossistemas: exp(-AGENT_UV_ABSORB) por
+// triptofano equivalente). As sombras alargam e suavizam com a
 // profundidade, como luz difusa.
 // Calculada a 1/LIGHT_DIV da resolução (a varredura é sequencial nas
 // linhas: a 2048² custava ~7 ms). Cada linha da luz cobre 2 linhas da
@@ -15,7 +16,7 @@
 // (compute_uv_light) só corre na sementeira e quando o terreno muda de vez.
 
 const UV_SHADOW_ABSORB: f32 = 0.6;
-// Profundidade ótica de um resíduo de agente.
+// Profundidade ótica de um triptofano (ou fotossistema) de agente.
 const AGENT_UV_ABSORB: f32 = 0.15;
 const UV_SWEEP_THREADS: u32 = 256u;
 
@@ -47,7 +48,8 @@ fn light_transmit(lx: u32, ly: u32) -> f32 {
     // (somada do topo ao fundo dá monomer_uv_absorb × densidade média).
     let dens = f32(m) / f32(LIGHT_DIV * LIGHT_DIV);
     let tau_m = max(params.monomer_uv_absorb, 0.0) * dens * f32(LIGHT_DIV) / f32(GRID_SIZE);
-    let shade = f32(atomicLoad(&shade_grid[ly * LIGHT_SIZE + lx]));
+    // Sombra dos agentes em "triptofanos equivalentes" (ponto fixo SHADE_ONE).
+    let shade = f32(atomicLoad(&shade_grid[ly * LIGHT_SIZE + lx])) / f32(SHADE_ONE);
     return exp(-UV_SHADOW_ABSORB * g - AGENT_UV_ABSORB * shade - tau_m);
 }
 
