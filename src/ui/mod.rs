@@ -239,7 +239,7 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
         ui.add(egui::Slider::new(&mut p.uv_strength, 0.0..=10.0).text("força UV (sol)"));
         ui.add(egui::Slider::new(&mut p.direct_photoactivation, 0.0..=1.0).text("fotoativação direta dos gastos"))
             .on_hover_text("0 = a luz só vira comida pelos fotossistemas dos agentes");
-        light_changed = ui.add(egui::Slider::new(&mut p.uv_depth, 0.5..=30.0).text("atenuação UV pela água")).changed();
+        light_changed = ui.add(egui::Slider::new(&mut p.uv_depth, 0.0..=30.0).text("atenuação UV pela água")).changed();
         ui.add(egui::Slider::new(&mut p.monomer_uv_absorb, 0.0..=5.0).text("absorção UV pelos monómeros"));
         ui.add(egui::Slider::new(&mut st.light_rows_per_step, 0..=16).text("velocidade da luz (linhas/passo; 0 = varredura)"))
             .on_hover_text("a luz e as sombras descem N linhas por passo; 0 = varredura inteira de N em N passos");
@@ -293,7 +293,7 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
 
 fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     egui::CollapsingHeader::new("Vida").default_open(true).show(ui, |ui| {
-        ui.add(egui::Slider::new(&mut st.seed_count, 1..=4000).text("sementes"));
+        ui.add(egui::Slider::new(&mut st.seed_count, 1..=20000).text("sementes"));
         ui.horizontal(|ui| {
             ui.label("bases");
             ui.add(egui::DragValue::new(&mut st.seed_len[0]).range(3..=256));

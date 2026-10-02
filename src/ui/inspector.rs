@@ -227,7 +227,18 @@ pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life
             );
             row("geração", a.generation.to_string());
             row("idade", format!("{} passos", a.age));
-            row("energia", format!("{:.2} / {}", a.energy, a.body_len.max(1)));
+            // Capacidade real: 1 por resíduo + o armazenamento (variante × ganho).
+            let storage: f32 = d
+                .organs
+                .iter()
+                .filter(|&&o| o != 0 && (o & 0xF) as usize - 1 == 7)
+                .map(|&o| {
+                    let p = (((o >> 4) & 0xF) as usize).min(5);
+                    let cap = organ_table.get(7).and_then(|r| r.variantes.get(p)).and_then(|m| m.get("capacidade")).copied();
+                    cap.unwrap_or(0.0) * crate::life::organs::organ_gain((o >> 8) as u8)
+                })
+                .sum();
+            row("energia", format!("{:.2} / {:.1}", a.energy, a.body_len.max(1) as f32 + storage));
             row("cópia", format!("{} / {} bases", a.pair_count, a.gene_len));
             row(
                 "corpo",

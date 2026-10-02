@@ -16,7 +16,7 @@ const PARAMS_STRIDE: u64 = 256;
 pub const MAX_FUMAROLES: usize = 64;
 const LEDGER_WORDS: u64 = 12;
 /// Máximo de pedidos de sementes por frame.
-pub const MAX_SPAWN_REQUESTS: usize = 4096;
+pub const MAX_SPAWN_REQUESTS: usize = 32768;
 /// Palavras por slot nos buffers de genoma e de corpo.
 const SLOT_WORDS: u64 = 16;
 

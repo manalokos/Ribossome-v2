@@ -86,7 +86,7 @@ fn compute_uv_light(@builtin(local_invocation_id) lid_v: vec3<u32>) {
     let lid = lid_v.x;
     let cols = (LIGHT_SIZE + UV_SWEEP_THREADS - 1u) / UV_SWEEP_THREADS;
     // Ao longo da altura toda a luz cai exp(-uv_depth): independente da resolução.
-    let row_water = exp(-max(params.uv_depth, 0.5) * f32(LIGHT_DIV) / f32(GRID_SIZE));
+    let row_water = exp(-max(params.uv_depth, 0.0) * f32(LIGHT_DIV) / f32(GRID_SIZE));
     let top = LIGHT_SIZE - 1u;
     for (var c = 0u; c < cols; c++) {
         let x = lid * cols + c;
@@ -117,7 +117,7 @@ fn light_propagate(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (i >= LIGHT_SIZE * LIGHT_SIZE) { return; }
     let x = i % LIGHT_SIZE;
     let y = i / LIGHT_SIZE;
-    let row_water = exp(-max(params.uv_depth, 0.5) * f32(LIGHT_DIV) / f32(GRID_SIZE));
+    let row_water = exp(-max(params.uv_depth, 0.0) * f32(LIGHT_DIV) / f32(GRID_SIZE));
     var above = 1.0;
     if (y + 1u < LIGHT_SIZE) { above = light_above(x, y + 1u); }
     light_next[i] = above * row_water * light_transmit(x, y);

@@ -215,7 +215,8 @@ impl Default for SimParams {
             rft_enabled: 1,
             require_start: 1,
             joint_coupling: 0.9,
-            hunger_regulation: 0,
+            // 1: inibição pela carga energética (um agente cheio não come).
+            hunger_regulation: 1,
             pairing_cost: 0.3,
             reactivation_rate: 0.0,
             // 10: com 1 a natação era lenta demais para dar vantagem visível.
