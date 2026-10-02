@@ -152,7 +152,7 @@ impl Running {
             info.driver_info,
             if cfg!(debug_assertions) { "debug" } else { "release" }
         ));
-        let editor = ribossome::editor::Editor::start(world.amino.clone());
+        let editor = ribossome::editor::Editor::start(world.amino.clone(), world.organ_table.clone());
         let mut inspector = ui::inspector::Inspector::new(&gpu, &world);
         inspector.register(&gpu.device, &mut egui_renderer);
 
@@ -247,8 +247,11 @@ impl Running {
     fn redraw(&mut self) {
         self.runlog.before_frame(&mut self.profiler);
         if let Some(ed) = &self.editor {
-            if let Some(rows) = ed.poll() {
-                self.world.set_amino(&self.gpu.queue, rows);
+            for u in ed.poll() {
+                match u {
+                    ribossome::editor::Update::Amino(rows) => self.world.set_amino(&self.gpu.queue, rows),
+                    ribossome::editor::Update::Organs(rows) => self.world.set_organ_table(&self.gpu.queue, rows),
+                }
             }
             if std::mem::take(&mut self.ui.open_editor) {
                 ed.open_browser();

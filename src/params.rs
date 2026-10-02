@@ -391,9 +391,20 @@ gpu_struct! {
         pub sub_g: f32,
         pub sub_c: f32,
         pub uv_absorb: f32,
-        pub _pad0: u32,
+        /// Comprimento do segmento (unidades do mundo).
+        pub seg_len: f32,
         pub _pad1: u32,
         pub _pad2: u32,
+    }
+}
+
+gpu_struct! {
+    /// Multiplicadores físicos de um tipo de órgão (assets/orgaos.json).
+    pub struct OrganProps {
+        pub len_mult: f32,
+        pub mass_mult: f32,
+        pub _pad0: u32,
+        pub _pad1: u32,
     }
 }
 

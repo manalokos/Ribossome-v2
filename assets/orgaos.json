@@ -1,0 +1,14 @@
+[
+  {"tipo": 0, "nome": "boca", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 1, "nome": "músculo (amplificador)", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 2, "nome": "sensor de comida", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 3, "nome": "sensor de luz", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 4, "nome": "sensor de energia", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 5, "nome": "relógio", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 6, "nome": "relé", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 7, "nome": "armazenamento", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 8, "nome": "sensor de comida direcional", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 9, "nome": "sensor de luz direcional", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 10, "nome": "fotossistema", "comprimento_mult": 1.5, "massa_mult": 2.0},
+  {"tipo": 11, "nome": "protease", "comprimento_mult": 1.5, "massa_mult": 2.0}
+]

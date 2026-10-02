@@ -5,7 +5,7 @@
 //! também os entry points que o Rust usa: o teste `tests/shaders.rs` valida
 //! cada módulo com o naga do próprio wgpu e confirma que todos existem.
 
-use crate::params::{AaProps, Agent, Fumarole, MgLevel, SimParams, SpawnRequest, ViewParams, WorldConfig};
+use crate::params::{AaProps, Agent, Fumarole, MgLevel, OrganProps, SimParams, SpawnRequest, ViewParams, WorldConfig};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
@@ -130,6 +130,7 @@ pub fn preamble(cfg: &WorldConfig) -> String {
     s += &SpawnRequest::wgsl();
     s += &MgLevel::wgsl();
     s += &AaProps::wgsl();
+    s += &OrganProps::wgsl();
     s += &crate::life::amino::wgsl();
     s += &crate::life::organs::wgsl();
     s

@@ -231,6 +231,9 @@ pub struct World {
     pub amino: Vec<crate::life::table::AminoRow>,
     pub amino_source: String,
     pub aa_buf: wgpu::Buffer,
+    /// Tabela dos órgãos em uso.
+    pub organ_table: Vec<crate::life::table::OrganRow>,
+    organ_buf: wgpu::Buffer,
     /// Calor por píxel do terreno carregado (grelha; None = só as pontuais).
     pub heat_image: Option<Vec<f32>>,
     /// Multiplicador de todo o calor das fumarolas.
@@ -361,6 +364,15 @@ impl World {
             mapped_at_creation: false,
         });
         gpu.queue.write_buffer(&aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&amino)));
+        let (organ_table, organ_source) = crate::life::table::load_organs();
+        log::info!("tabela dos órgãos: {organ_source}");
+        let organ_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("organ table"),
+            size: (crate::life::organs::ORGAN_TYPES * size_of::<crate::params::OrganProps>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue.write_buffer(&organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&organ_table)));
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
             size: 16,
@@ -401,7 +413,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..21).map(|b| storage_entry(b, b == 4 || b == 20)).collect();
+        let life_entries: Vec<_> = (0..22).map(|b| storage_entry(b, b == 4 || b >= 20)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -545,6 +557,7 @@ impl World {
                 &sensor_mem,
                 &bitten,
                 &aa_buf,
+                &organ_buf,
             ],
         );
 
@@ -674,6 +687,8 @@ impl World {
             amino,
             amino_source,
             aa_buf,
+            organ_table,
+            organ_buf,
             heat_image: None,
             fumarole_gain: 1.0,
             heat_key: Vec::new(),
@@ -772,6 +787,12 @@ impl World {
     pub fn set_amino(&mut self, queue: &wgpu::Queue, rows: Vec<crate::life::table::AminoRow>) {
         queue.write_buffer(&self.aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&rows)));
         self.amino = rows;
+    }
+
+    /// Troca a tabela dos órgãos (efeito no passo seguinte).
+    pub fn set_organ_table(&mut self, queue: &wgpu::Queue, rows: Vec<crate::life::table::OrganRow>) {
+        queue.write_buffer(&self.organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&rows)));
+        self.organ_table = rows;
     }
 
     /// Carrega um terreno de um PNG (ver `terrain::load_png`); entra na

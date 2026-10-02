@@ -11,15 +11,29 @@
 // As posições locais (centradas no centro de massa) ficam em body_pos.
 
 const MAX_BODY: u32 = 64u;
-const SEGMENT_LEN: f32 = 11.0;      // unidades do mundo (v3)
+// Comprimento de referência de um segmento (o do v3, unidades do mundo); cada
+// resíduo tem o seu (residue_len).
+const SEGMENT_LEN: f32 = 11.0;
 
 fn body_get(slot: u32, i: u32) -> u32 {
     return (bodies[slot * 16u + i / 4u] >> ((i % 4u) * 8u)) & 0xFFu;
 }
 
 // Massa de um resíduo nas unidades do v3 (0,02 por 118 Da).
-fn residue_mass(aa: u32) -> f32 {
-    return 0.02 * aa_props[aa].mass / 118.0;
+// Massa e comprimento do resíduo k: os do aminoácido (tabela) × os do órgão,
+// se o resíduo for um órgão.
+fn residue_mass(slot: u32, k: u32) -> f32 {
+    var m = 0.02 * aa_props[body_get(slot, k)].mass / 118.0;
+    let t = organ_type(organ_get(slot, k));
+    if (t != 0xFFu) { m *= organ_props[t].mass_mult; }
+    return m;
+}
+
+fn residue_len(slot: u32, k: u32) -> f32 {
+    var l = aa_props[body_get(slot, k)].seg_len;
+    let t = organ_type(organ_get(slot, k));
+    if (t != 0xFFu) { l *= organ_props[t].len_mult; }
+    return max(l, 1.0);
 }
 
 // Ângulo de repouso da junta (com sinal; tabela do v3 em src/life/amino.rs).

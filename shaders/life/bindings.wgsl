@@ -41,6 +41,8 @@
 @group(3) @binding(19) var<storage, read_write> bitten: array<atomic<u32>>;
 // Propriedades dos aminoácidos (assets/aminoacidos.json; editáveis ao vivo).
 @group(3) @binding(20) var<storage, read> aa_props: array<AaProps, 20>;
+// Multiplicadores físicos por tipo de órgão (assets/orgaos.json).
+@group(3) @binding(21) var<storage, read> organ_props: array<OrganProps, ORGAN_TYPES>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

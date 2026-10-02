@@ -43,6 +43,62 @@ pub struct AminoRow {
     #[serde(rename = "substrato_C")]
     pub substrato_c: f32,
     pub absorcao_uv: f32,
+    /// Comprimento do segmento (unidades do mundo; o v3 usava 11 para todos).
+    pub comprimento: f32,
+}
+
+/// Uma linha da tabela dos órgãos (assets/orgaos.json).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OrganRow {
+    pub tipo: u32,
+    pub nome: String,
+    /// Comprimento do segmento = o do aminoácido promotor × isto.
+    pub comprimento_mult: f32,
+    /// Massa = a do aminoácido promotor × isto.
+    pub massa_mult: f32,
+}
+
+pub const ORGANS_PATH: &str = "assets/orgaos.json";
+const EMBEDDED_ORGANS: &str = include_str!("../../assets/orgaos.json");
+
+/// Lê e valida a tabela dos órgãos: uma linha por tipo, ordenada.
+pub fn parse_organs(text: &str) -> Result<Vec<OrganRow>, String> {
+    let mut rows: Vec<OrganRow> = serde_json::from_str(text).map_err(|e| format!("JSON inválido: {e}"))?;
+    rows.sort_by_key(|r| r.tipo);
+    let n = super::organs::ORGAN_TYPES;
+    if rows.len() != n || rows.iter().enumerate().any(|(i, r)| r.tipo as usize != i) {
+        return Err(format!("são precisas {n} linhas, tipos 0..{}", n - 1));
+    }
+    Ok(rows)
+}
+
+pub fn load_organs() -> (Vec<OrganRow>, String) {
+    match std::fs::read_to_string(ORGANS_PATH) {
+        Ok(text) => match parse_organs(&text) {
+            Ok(rows) => (rows, ORGANS_PATH.to_string()),
+            Err(e) => {
+                log::error!("{ORGANS_PATH}: {e}; uso a tabela embutida");
+                (embedded_organs(), format!("embutida ({ORGANS_PATH} inválido)"))
+            }
+        },
+        Err(_) => (embedded_organs(), "embutida".to_string()),
+    }
+}
+
+pub fn embedded_organs() -> Vec<OrganRow> {
+    parse_organs(EMBEDDED_ORGANS).expect("assets/orgaos.json embutido inválido")
+}
+
+pub fn save_organs(rows: &[OrganRow]) -> Result<(), String> {
+    let lines: Result<Vec<String>, _> = rows.iter().map(serde_json::to_string).collect();
+    let text = format!("[\n  {}\n]\n", lines.map_err(|e| e.to_string())?.join(",\n  "));
+    std::fs::write(ORGANS_PATH, text).map_err(|e| format!("{ORGANS_PATH}: {e}"))
+}
+
+pub fn organs_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganProps> {
+    rows.iter()
+        .map(|r| crate::params::OrganProps { len_mult: r.comprimento_mult, mass_mult: r.massa_mult, _pad0: 0, _pad1: 0 })
+        .collect()
 }
 
 /// Lê e valida: 20 linhas, uma por aminoácido; devolve-as na ordem de `AMINO`.
@@ -111,7 +167,7 @@ pub fn to_gpu(rows: &[AminoRow]) -> Vec<AaProps> {
             sub_g: r.substrato_g,
             sub_c: r.substrato_c,
             uv_absorb: r.absorcao_uv,
-            _pad0: 0,
+            seg_len: r.comprimento,
             _pad1: 0,
             _pad2: 0,
         })
@@ -130,6 +186,11 @@ mod tests {
             let s = r.substrato_a + r.substrato_u + r.substrato_g + r.substrato_c;
             assert!((s - 1.0).abs() < 1e-4, "{}: substrato soma {s}", r.letra);
         }
+    }
+
+    #[test]
+    fn embedded_organ_table_is_complete() {
+        assert_eq!(embedded_organs().len(), crate::life::organs::ORGAN_TYPES);
     }
 
     #[test]

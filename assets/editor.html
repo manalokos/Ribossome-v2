@@ -40,8 +40,11 @@
   <span id="status">a carregar…</span>
 </header>
 <main>
-  <p class="note">Cada alteração é aplicada à simulação no passo seguinte. "Gravar" escreve <code>assets/aminoacidos.json</code> (a fonte dos valores ao arrancar). Passa o rato pelos cabeçalhos para ver o que cada coluna faz.</p>
+  <p class="note">Cada alteração é aplicada à simulação no passo seguinte. "Gravar" escreve <code>assets/aminoacidos.json</code> e <code>assets/orgaos.json</code> (as fontes dos valores ao arrancar). Passa o rato pelos cabeçalhos para ver o que cada coluna faz.</p>
   <div class="scroll"><table id="t"></table></div>
+  <h2>Órgãos: física</h2>
+  <p class="note">Um órgão tem o comprimento e a massa do seu aminoácido promotor (C, H ou W) multiplicados por estes valores.</p>
+  <div class="scroll" style="max-width:520px"><table id="ot"></table></div>
   <h2>Órgãos e variantes</h2>
   <p class="note">Um órgão = promotor (C, H ou W) + codão modificador: tipo = índice % 12, parâmetro = índice / 12; um segundo codão dá a intensidade (×1 por omissão). Só consulta, por agora.</p>
   <div id="organs"></div>
@@ -65,8 +68,11 @@ const COLS = [
   ["substrato_G", "G", "Preferência por G."],
   ["substrato_C", "C", "Preferência por C."],
   ["absorcao_uv", "UV", "Absorção de luz UV (sombra): triptofano = 1."],
+  ["comprimento", "compr.", "Comprimento do segmento (unidades do mundo; o v3 usava 11). Também pesa no arrasto da natação."],
 ];
-const GROUPS = [["", 1], ["física", 4], ["forma e sinais", 4], ["condutividade", 4], ["substrato", 4], ["luz", 1]];
+const GROUPS = [["", 1], ["física", 4], ["forma e sinais", 4], ["condutividade", 4], ["substrato", 4], ["luz", 1], ["corpo", 1]];
+let organRows = [];
+let otimer = null;
 let rows = [];
 let timer = null;
 const status = (msg, cls) => { const s = document.getElementById("status"); s.textContent = msg; s.className = cls || ""; };
@@ -102,6 +108,32 @@ async function load() {
   render();
 }
 
+function renderOrgans() {
+  const t = document.getElementById("ot");
+  let h = "<thead><tr><th>tipo</th><th style='text-align:left'>órgão</th><th title='multiplica o comprimento do promotor'>× comprimento</th><th title='multiplica a massa do promotor'>× massa</th></tr></thead><tbody>";
+  organRows.forEach((r, i) => {
+    h += `<tr><td>${r.tipo}</td><td style="text-align:left">${r.nome}</td>` +
+      ["comprimento_mult", "massa_mult"].map(k => `<td><input type="number" step="0.1" data-i="${i}" data-k="${k}" value="${+r[k].toFixed(3)}"></td>`).join("") + "</tr>";
+  });
+  t.innerHTML = h + "</tbody>";
+  t.querySelectorAll("input").forEach(inp => inp.addEventListener("input", e => {
+    const v = parseFloat(e.target.value);
+    if (Number.isNaN(v)) return;
+    organRows[+e.target.dataset.i][e.target.dataset.k] = v;
+    e.target.classList.add("changed");
+    clearTimeout(otimer);
+    otimer = setTimeout(async () => {
+      const r = await fetch("/api/organ_table", { method: "POST", body: JSON.stringify(organRows) });
+      status(r.ok ? "aplicado à simulação (não gravado)" : await r.text(), r.ok ? "ok" : "err");
+    }, 150);
+  }));
+}
+
+async function loadOrgans() {
+  organRows = await (await fetch("/api/organ_table")).json();
+  renderOrgans();
+}
+
 document.getElementById("save").onclick = async () => {
   const r = await fetch("/api/save", { method: "POST" });
   status(await r.text(), r.ok ? "ok" : "err");
@@ -111,10 +143,12 @@ document.getElementById("reload").onclick = async () => {
   const r = await fetch("/api/reload", { method: "POST" });
   status(await r.text(), r.ok ? "ok" : "err");
   await load();
+  await loadOrgans();
 };
 
 (async () => {
   await load();
+  await loadOrgans();
   status("pronto", "ok");
   const organs = await (await fetch("/api/organs")).json();
   document.getElementById("organs").innerHTML = organs.map(o =>

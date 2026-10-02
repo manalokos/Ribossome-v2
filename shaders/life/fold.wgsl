@@ -1,7 +1,8 @@
 // JUNTAS DO CORPO.
 //
 // A cadeia é descrita pelos ângulos de viragem θ_k em cada resíduo:
-// direção do segmento k = Σ_{j<=k} θ_j; posições a SEGMENT_LEN de distância.
+// direção do segmento k = Σ_{j<=k} θ_j; o segmento k tem o comprimento do
+// resíduo k (residue_len: aminoácido × órgão).
 // A forma de repouso é o ângulo de repouso de cada aminoácido (como no v3):
 // o corpo nasce já com ela, sem fase de dobragem. (A dobragem por contactos
 // Miyazawa-Jernigan foi retirada: era O(n²) por agente nos primeiros
@@ -30,11 +31,11 @@ fn rebuild_body(slot: u32, n: u32) {
     var mass = 0.0;
     for (var k = 0u; k < n; k++) {
         body_pos[slot * MAX_BODY + k] = p;
-        let m = residue_mass(body_get(slot, k));
+        let m = residue_mass(slot, k);
         com += p * m;
         mass += m;
         ang += joint_angle[slot * MAX_BODY + k];
-        p += vec2<f32>(cos(ang), sin(ang)) * SEGMENT_LEN;
+        p += vec2<f32>(cos(ang), sin(ang)) * residue_len(slot, k);
     }
     com /= max(mass, 1e-6);
     for (var k = 0u; k < n; k++) {
@@ -64,7 +65,7 @@ fn rft_tangent(n: u32, k: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: pt
 }
 
 // Devolve (Vx, Vy, Ω) no referencial do corpo, por passo.
-fn rft_solve(n: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: ptr<function, array<vec2<f32>, 64>>) -> vec3<f32> {
+fn rft_solve(slot: u32, n: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: ptr<function, array<vec2<f32>, 64>>) -> vec3<f32> {
     // M·[Vx,Vy,Ω] = −c, com M = Σ Dᵀ·R·D e c = Σ Dᵀ·R·u, onde R é o tensor de
     // arrasto do resíduo e D mapeia (Vx,Vy,Ω) para a velocidade do resíduo.
     var m = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
@@ -79,7 +80,8 @@ fn rft_solve(n: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: ptr<function
         // R = ξ∥·t·tᵀ + ξ⊥·(I − t·tᵀ), com ξ∥ = 1.
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
         let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
-        let rr = tt + RFT_PERP_RATIO * (id - tt);
+        // Arrasto ∝ comprimento do segmento (corpo esbelto).
+        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN);
         // Colunas de D: ∂v/∂Vx = (1,0), ∂v/∂Vy = (0,1), ∂v/∂Ω = (−r.y, r.x).
         let d0 = vec2<f32>(1.0, 0.0);
         let d1 = vec2<f32>(0.0, 1.0);
@@ -166,7 +168,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> vec4<f32> {
         let q = body_pos[base + k];
         cur[k] = vec2<f32>(cp * q.x - sp * q.y, sp * q.x + cp * q.y);
     }
-    let s = rft_solve(n, &old, &cur);
+    let s = rft_solve(slot, n, &old, &cur);
     // Mundo = R(rot)·R(Ω)·R(φ)·forma guardada nova  =>  rot avança Ω + φ.
     return vec4<f32>(s, phi);
 }
