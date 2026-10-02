@@ -47,6 +47,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         "life/body.wgsl",
         "life/drawlist.wgsl",
         "life/contact.wgsl",
+        "life/bonds.wgsl",
         "life/fold.wgsl",
         "life/organs.wgsl",
     ],
@@ -95,6 +96,9 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("contact_insert", Stage::Compute),
         ("contact_resolve", Stage::Compute),
         ("contact_apply", Stage::Compute),
+        ("bond_maintain", Stage::Compute),
+        ("bond_propose", Stage::Compute),
+        ("bond_accept_pass", Stage::Compute),
     ],
 };
 

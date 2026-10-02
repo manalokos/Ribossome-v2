@@ -22,6 +22,9 @@ const LEDGER_WORDS: u64 = 12;
 pub const MAX_SPAWN_REQUESTS: usize = 32768;
 /// Palavras por slot nos buffers de genoma e de corpo.
 const SLOT_WORDS: u64 = 16;
+/// vec4<u32> por slot no buffer das ligações (MAX_BONDS + a proposta;
+/// shaders/life/bonds.wgsl).
+pub const BOND_STRIDE: u64 = 5;
 
 /// Contagem exata da matéria livre, por canal (A U G C) e estado.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -165,6 +168,9 @@ struct Pipelines {
     contact_insert: wgpu::ComputePipeline,
     contact_resolve: wgpu::ComputePipeline,
     contact_apply: wgpu::ComputePipeline,
+    bond_maintain: wgpu::ComputePipeline,
+    bond_propose: wgpu::ComputePipeline,
+    bond_accept: wgpu::ComputePipeline,
 }
 
 /// Suavizações por nível do multigrid (antes, depois) e no nível mais grosso.
@@ -217,6 +223,8 @@ pub struct World {
     /// Sinais internos (α, β) por resíduo: slot·64 + k, vec2<f32>.
     pub signals_buf: wgpu::Buffer,
     pub draw_args_buf: wgpu::Buffer,
+    /// Ligações entre agentes (BOND_STRIDE vec4<u32> por slot).
+    pub bonds_buf: wgpu::Buffer,
     pub life_counters_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
     spawn_buf: wgpu::Buffer,
@@ -393,6 +401,9 @@ impl World {
         let signals = storage_buffer(device, "signals", max_agents * 64 * 8);
         let sensor_mem = storage_buffer(device, "sensor memory", max_agents * 64 * 4);
         let bitten = storage_buffer(device, "bitten energy", max_agents * 4);
+        let bonds_buf = storage_buffer(device, "bonds", max_agents * BOND_STRIDE * 16);
+        let bond_accept = storage_buffer(device, "bond accept", max_agents * 4);
+        let bond_disp = storage_buffer(device, "bond disp", max_agents * 16);
         // Tabela dos aminoácidos (assets/aminoacidos.json).
         let (amino, amino_source) = crate::life::table::load();
         log::info!("tabela dos aminoácidos: {amino_source}");
@@ -462,7 +473,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..24).map(|b| storage_entry(b, b == 4 || b == 20 || b == 21 || b == 23)).collect();
+        let life_entries: Vec<_> = (0..27).map(|b| storage_entry(b, b == 4 || b == 20 || b == 21 || b == 23)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -609,6 +620,9 @@ impl World {
                 &organ_buf,
                 &tail_buf,
                 &variant_buf,
+                &bonds_buf,
+                &bond_accept,
+                &bond_disp,
             ],
         );
 
@@ -694,6 +708,9 @@ impl World {
             contact_insert: compute("contact_insert"),
             contact_resolve: compute("contact_resolve"),
             contact_apply: compute("contact_apply"),
+            bond_maintain: compute("bond_maintain"),
+            bond_propose: compute("bond_propose"),
+            bond_accept: compute("bond_accept_pass"),
         };
 
         Self {
@@ -729,6 +746,7 @@ impl World {
             organs_buf,
             signals_buf: signals,
             draw_args_buf,
+            bonds_buf,
             life_counters_buf,
             free_buf,
             spawn_buf,
@@ -1156,6 +1174,9 @@ impl World {
                 run(&mut pass, "contact_clear", &pl.contact_clear, ab, [contact_cells.div_ceil(256), 1]);
                 run(&mut pass, "contact_insert", &pl.contact_insert, ab, [ag, 1]);
                 run(&mut pass, "contact_resolve", &pl.contact_resolve, ab, [ag, 1]);
+                run(&mut pass, "bond_maintain", &pl.bond_maintain, ab, [ag, 1]);
+                run(&mut pass, "bond_propose", &pl.bond_propose, ab, [ag, 1]);
+                run(&mut pass, "bond_accept", &pl.bond_accept, ab, [ag, 1]);
                 run(&mut pass, "contact_apply", &pl.contact_apply, ab, [ag, 1]);
             }
             // Nascimentos num passe à parte: a morte devolve slots (push) e o

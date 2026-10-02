@@ -49,6 +49,12 @@
 @group(3) @binding(22) var<storage, read_write> rna_tail: array<vec4<f32>>;
 // Variantes dos órgãos: tipo·ORGAN_VARIANTS + parâmetro (assets/orgaos.json).
 @group(3) @binding(23) var<storage, read> organ_variants: array<OrganVariant>;
+// Ligações entre agentes (bonds.wgsl): BOND_STRIDE vec4<u32> por slot; o
+// proponente escolhido por cada agente neste passo; e o efeito das ligações
+// por agente (dx, dy, dθ, energia), aplicado em contact_apply.
+@group(3) @binding(24) var<storage, read_write> bonds: array<vec4<u32>>;
+@group(3) @binding(25) var<storage, read_write> bond_accept: array<atomic<u32>>;
+@group(3) @binding(26) var<storage, read_write> bond_disp: array<vec4<f32>>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

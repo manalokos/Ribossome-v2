@@ -433,6 +433,19 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     let mut aug = p.require_start != 0;
     ui.checkbox(&mut aug, "tradução começa no AUG (nascimentos novos)");
     p.require_start = aug as u32;
+    ui.separator();
+    ui.strong("Ligações entre agentes (pontes salinas: K, R + com D, E −)");
+    ui.add(egui::Slider::new(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formação"))
+        .on_hover_text("probabilidade por passo de um agente tentar ligar um resíduo carregado a um vizinho de carga oposta");
+    ui.add(
+        egui::Slider::new(&mut p.bond_break, 0.0..=0.01).logarithmic(true).smallest_positive(1e-5).text("quebra (por passo)"),
+    );
+    if p.bond_break > 0.0 {
+        ui.label(format!("  vida média de uma ligação: {:.0} passos", 1.0 / p.bond_break));
+    }
+    ui.add(egui::Slider::new(&mut p.bond_energy_share, 0.0..=0.2).text("energia partilhada"))
+        .on_hover_text("fração da diferença de energia que passa por cada ligação, por passo");
+    ui.add(egui::Slider::new(&mut p.bond_signal, 0.0..=1.0).text("sinais pela ligação"));
 }
 
 fn tab_motion(ui: &mut egui::Ui, world: &mut World) {

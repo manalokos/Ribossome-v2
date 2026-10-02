@@ -133,6 +133,7 @@ fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, ge
     a.coding_span = span;
     a.radius = contact_radius(slot, a.body_len);
     agents[slot] = a;
+    bonds_clear(slot);
 }
 
 // SEMENTES: cada pedido monta o genoma com os monómeros ATIVADOS mais

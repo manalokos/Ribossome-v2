@@ -45,6 +45,10 @@ pub struct AminoRow {
     pub absorcao_uv: f32,
     /// Comprimento do segmento (unidades do mundo; o v3 usava 11 para todos).
     pub comprimento: f32,
+    /// Carga a pH ~7 (K, R +1; D, E −1; H ≈ +0,1): as cargas opostas de dois
+    /// agentes em contacto formam ligações (pontes salinas).
+    #[serde(default)]
+    pub carga: f32,
 }
 
 /// Uma linha da tabela dos órgãos (assets/orgaos.json).
@@ -239,7 +243,7 @@ pub fn to_gpu(rows: &[AminoRow]) -> Vec<AaProps> {
             sub_c: r.substrato_c,
             uv_absorb: r.absorcao_uv,
             seg_len: r.comprimento,
-            _pad1: 0,
+            charge: r.carga,
             _pad2: 0,
         })
         .collect()

@@ -223,6 +223,8 @@ impl World {
             per_res("joint_state", &self.joint_state_buf, 1),
             per_res("joint_active", &s.joint_active, 1),
             per_res("sensor_mem", &s.sensor_mem, 1),
+            // Ligações entre agentes (cenas antigas não as têm: ver load_scene).
+            per_slot("bonds", &self.bonds_buf, super::BOND_STRIDE * 4),
         ]
     }
 
@@ -441,7 +443,13 @@ impl World {
         // Agentes: limpa, espalha os vivos pelos slots gravados e refaz a
         // pilha dos slots livres (o mais baixo sai primeiro, como no início).
         self.clear_agents(gpu);
+        // Sem ligações por omissão (todas livres: 0xFFFFFFFF).
+        q.write_buffer(&self.bonds_buf, 0, &vec![0xFFu8; self.bonds_buf.size() as usize]);
         for b in self.slot_bufs() {
+            if b.name == "bonds" && !scene.blocks.contains_key("bonds") {
+                notes.push("cena sem ligações entre agentes (gravada antes de existirem)".into());
+                continue;
+            }
             let data = scene.block(b.name)?;
             let (segs, words) = segments(&b, &slots, &body_len, false);
             if data.len() as u64 != words * 4 {

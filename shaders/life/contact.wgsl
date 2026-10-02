@@ -137,13 +137,16 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (slot >= params.max_agents) { return; }
     var a = agents[slot];
     if (a.alive == 0u) { return; }
-    let np = clamp(vec2<f32>(a.pos_x, a.pos_y) + contact_disp[slot].xy, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
+    // Contacto + ligações (bond_disp: dx, dy, dθ, energia trocada).
+    let bd = bond_disp[slot];
+    let np = clamp(vec2<f32>(a.pos_x, a.pos_y) + contact_disp[slot].xy + bd.xy, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
     if (gamma_count(world_to_cell(np)) < GAMMA_SOLID_THRESHOLD) {
         a.pos_x = np.x;
         a.pos_y = np.y;
     }
     // Predação: o que este agente mordeu e o que lhe morderam.
     let lost = f32(atomicExchange(&bitten[slot], 0u)) / BITE_SCALE;
-    a.energy = min(a.energy + contact_disp[slot].z, energy_capacity(slot, a)) - lost;
+    a.rot += bd.z;
+    a.energy = min(max(a.energy + contact_disp[slot].z + bd.w, 0.0), energy_capacity(slot, a)) - lost;
     agents[slot] = a;
 }

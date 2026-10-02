@@ -210,9 +210,18 @@ gpu_struct! {
         /// Σ √arrasto·dθ² das juntas (potência viscosa ξ·ω²; só a parte ativa,
         /// o ruído térmico vem do banho). Mover depressa custa ao quadrado.
         pub motion_cost: f32,
-        pub _pad_m0: u32,
-        pub _pad_m1: u32,
-        pub _pad_m2: u32,
+        /// LIGAÇÕES (pontes salinas): probabilidade por passo de um agente
+        /// tentar ligar um resíduo carregado a um vizinho de carga oposta.
+        pub bond_rate: f32,
+        /// Probabilidade por passo de uma ligação se soltar (agitação).
+        pub bond_break: f32,
+        /// Fração da diferença de energia que passa por cada ligação, por passo.
+        pub bond_energy_share: f32,
+        /// Condutância dos sinais α/β pela ligação.
+        pub bond_signal: f32,
+        pub _pad_b0: u32,
+        pub _pad_b1: u32,
+        pub _pad_b2: u32,
     }
 }
 
@@ -286,9 +295,13 @@ impl Default for SimParams {
             swim_wobble: 1.0,
             fluid_swim_only: 0,
             motion_cost: 0.1,
-            _pad_m0: 0,
-            _pad_m1: 0,
-            _pad_m2: 0,
+            bond_rate: 0.05,
+            bond_break: 0.0002,
+            bond_energy_share: 0.01,
+            bond_signal: 0.5,
+            _pad_b0: 0,
+            _pad_b1: 0,
+            _pad_b2: 0,
         }
     }
 }
@@ -450,7 +463,8 @@ gpu_struct! {
         pub uv_absorb: f32,
         /// Comprimento do segmento (unidades do mundo).
         pub seg_len: f32,
-        pub _pad1: u32,
+        /// Carga a pH ~7 (K, R +1; D, E −1): pontes salinas entre agentes.
+        pub charge: f32,
         pub _pad2: u32,
     }
 }

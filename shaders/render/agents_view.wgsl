@@ -24,6 +24,8 @@
 @group(0) @binding(8) var<storage, read> genomes_view: array<u32>;
 @group(0) @binding(9) var<storage, read> rna_tail_view: array<vec4<f32>>;
 @group(0) @binding(10) var<storage, read> organ_variants_view: array<OrganVariant>;
+// Ligações entre agentes (shaders/life/bonds.wgsl): 5 vec4<u32> por slot.
+@group(0) @binding(11) var<storage, read> bonds_view: array<vec4<u32>>;
 
 // Fios de RNA nas pontas (as zonas não traduzidas): bases desenhadas por
 // agente (metade para cada ponta), distância entre bases e ondulação.
@@ -46,6 +48,11 @@ fn genome_base(slot: u32, i: u32) -> u32 {
 }
 
 const MAX_BODY_V: u32 = 64u;
+// Ligações por agente e vec4 por slot (iguais a MAX_BONDS / BOND_STRIDE).
+const BONDS_V: u32 = 4u;
+const BOND_STRIDE_V: u32 = 5u;
+// Instâncias por agente: tubos, órgãos, bases de RNA e ligações.
+const AGENT_INSTANCES: u32 = 3u * MAX_BODY_V + BONDS_V;
 const NO_ORGAN: u32 = 0xFFu;
 // Tamanho de um órgão em relação a um resíduo estrutural.
 const ORGAN_SCALE: f32 = 2.2;
@@ -105,9 +112,12 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     var o: AgentVsOut;
     // Instâncias por agente: 0..63 tubos, 64..127 órgãos (por cima),
     // 128..191 bases de RNA não traduzidas nas pontas.
-    let slot = draw_list_view[inst / (3u * MAX_BODY_V)];
-    let local_i = inst % (3u * MAX_BODY_V);
+    let slot = draw_list_view[inst / AGENT_INSTANCES];
+    let local_i = inst % AGENT_INSTANCES;
     let a = agents_view[slot];
+    if (local_i >= 3u * MAX_BODY_V) {
+        return bond_vertex(vi, slot, a, local_i - 3u * MAX_BODY_V);
+    }
     if (local_i >= 2u * MAX_BODY_V) {
         return rna_vertex(vi, slot, a, local_i - 2u * MAX_BODY_V);
     }
@@ -247,6 +257,48 @@ fn capsule_vertex(vi: u32, a_w: vec2<f32>, b_w: vec2<f32>, r: f32, col: vec3<f32
 // Base j das pontas: j < RNA_PER_END = 5' UTR (antes do AUG, a sair da
 // ponta N); senão 3' UTR (depois do stop, a sair da ponta C). RNA nu: o
 // genoma todo, a partir do centro. O fio ondula devagar com a idade.
+fn residue_world_v(slot: u32, a: Agent, k: u32) -> vec2<f32> {
+    let lp = body_pos_view[slot * MAX_BODY_V + k];
+    let cr = cos(a.rot);
+    let sr = sin(a.rot);
+    return vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * lp.x - sr * lp.y, sr * lp.x + cr * lp.y);
+}
+
+// LIGAÇÃO i do agente: tubo fino dourado entre os dois resíduos. Só a
+// desenha o lado de slot menor (o outro tem a mesma ligação ao contrário).
+fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
+    var o: AgentVsOut;
+    o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    let b = bonds_view[slot * BOND_STRIDE_V + i];
+    if (a.alive == 0u || b.x == 0xFFFFFFFFu || b.x <= slot) { return o; }
+    let other = agents_view[b.x];
+    if (other.alive == 0u || other.id != b.y) { return o; }
+    let hidden = view.focus_slot != 0xFFFFFFFFu && slot != view.focus_slot && b.x != view.focus_slot;
+    if (hidden || (b.z & 0xFFFFu) >= a.body_len || (b.z >> 16u) >= other.body_len) { return o; }
+    let p0 = residue_world_v(slot, a, b.z & 0xFFFFu);
+    let p1 = residue_world_v(b.x, other, b.z >> 16u);
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
+        vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
+    let c = corners[vi];
+    let r_tube = max(1.2, 1.0 / view.zoom);
+    let seg = p1 - p0;
+    let l = length(seg);
+    let e = select(vec2<f32>(1.0, 0.0), seg / l, l > 1e-4);
+    let nn = vec2<f32>(-e.y, e.x);
+    let along = select(-r_tube, l + r_tube, c.x > 0.0);
+    let w = p0 + e * along + nn * (c.y * r_tube);
+    let px = vec2<f32>((w.x - view.center_x) * view.zoom, (w.y - view.center_y) * view.zoom);
+    o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);
+    o.mode = 0u;
+    o.local = w - p0;
+    o.tangent = seg;
+    o.core_phase = vec2<f32>(r_tube, 0.0);
+    o.organ = NO_ORGAN;
+    o.color = vec3<f32>(1.0, 0.82, 0.35);
+    return o;
+}
+
 fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
     var o: AgentVsOut;
     o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);

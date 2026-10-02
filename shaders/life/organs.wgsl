@@ -225,6 +225,15 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             default: {}
         }
     }
+    // Ligações a outros agentes: o resíduo ligado conta como mais um vizinho.
+    if (params.bond_signal > 0.0) {
+        for (var i = 0u; i < MAX_BONDS; i++) {
+            let b = bond_at(slot, i);
+            if (b.x == BOND_NONE || !bond_partner_ok(b)) { continue; }
+            let k = b.z & 0xFFFFu;
+            if (k < n) { emit[k] += params.bond_signal * SIGNAL_DECAY * signals[b.x * MAX_BODY + (b.z >> 16u)]; }
+        }
+    }
     // Condução com um passo de atraso: o resíduo k recebe o que os vizinhos
     // k−1 (lado N) e k+1 (lado C) tinham no passo anterior, pesado pela
     // condutividade do seu aminoácido, perdendo SIGNAL_DECAY, mais a emissão.
