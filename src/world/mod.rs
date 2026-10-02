@@ -171,6 +171,8 @@ struct Pipelines {
     bond_maintain: wgpu::ComputePipeline,
     bond_propose: wgpu::ComputePipeline,
     bond_accept: wgpu::ComputePipeline,
+    stats_reduce: wgpu::ComputePipeline,
+    kinship: wgpu::ComputePipeline,
 }
 
 /// Suavizações por nível do multigrid (antes, depois) e no nível mais grosso.
@@ -254,6 +256,13 @@ pub struct World {
     /// Código dos órgãos (promotor × modificador) em uso.
     pub organ_code: crate::life::table::OrganCode,
     code_buf: wgpu::Buffer,
+    /// Observação: genoma de referência (k-meros) e semelhança de cada slot
+    /// com ele (−1 = sem dados); estatísticas da população (leitura assíncrona).
+    kin_target: wgpu::Buffer,
+    pub kin_buf: wgpu::Buffer,
+    stats_buf: wgpu::Buffer,
+    stats_staging: wgpu::Buffer,
+    stats_readback: Readback,
     organ_buf: wgpu::Buffer,
     /// Variantes dos órgãos (também lidas pelo desenho).
     pub variant_buf: wgpu::Buffer,
@@ -410,6 +419,15 @@ impl World {
         let (organ_code, code_source) = crate::life::table::load_code();
         log::info!("código dos órgãos: {code_source}");
         let code_buf = storage_buffer(device, "organ code", 400 * 4);
+        let kin_target = storage_buffer(device, "kin target", 257 * 4);
+        let kin_buf = storage_buffer(device, "kinship", max_agents * 4);
+        let stats_buf = storage_buffer(device, "population stats", (crate::stats::STAT_WORDS * 4) as u64);
+        let stats_staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("population stats staging"),
+            size: (crate::stats::STAT_WORDS * 4) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         gpu.queue.write_buffer(&code_buf, 0, bytemuck::cast_slice(&crate::life::table::code_to_gpu(&organ_code)));
         // Tabela dos aminoácidos (assets/aminoacidos.json).
         let (amino, amino_source) = crate::life::table::load();
@@ -481,7 +499,7 @@ impl World {
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
         let life_entries: Vec<_> =
-            (0..28).map(|b| storage_entry(b, b == 4 || b == 20 || b == 21 || b == 23 || b == 27)).collect();
+            (0..31).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -632,6 +650,9 @@ impl World {
                 &bond_accept,
                 &bond_disp,
                 &code_buf,
+                &kin_target,
+                &kin_buf,
+                &stats_buf,
             ],
         );
 
@@ -720,6 +741,8 @@ impl World {
             bond_maintain: compute("bond_maintain"),
             bond_propose: compute("bond_propose"),
             bond_accept: compute("bond_accept_pass"),
+            stats_reduce: compute("stats_reduce"),
+            kinship: compute("kinship"),
         };
 
         Self {
@@ -773,6 +796,11 @@ impl World {
             organ_buf,
             organ_code,
             code_buf,
+            kin_target,
+            kin_buf,
+            stats_buf,
+            stats_staging,
+            stats_readback: Readback::Idle,
             variant_buf,
             heat_image: None,
             fumarole_gain: 1.0,
@@ -1244,6 +1272,88 @@ impl World {
         pass.dispatch_workgroups(g, g, 1);
         pass.set_pipeline(&self.pipelines.agents_ledger);
         pass.dispatch_workgroups(groups(self.cfg.max_agents, 64), 1, 1);
+    }
+
+    /// Um passe de cálculo com os grupos do mundo (observação).
+    fn observe_pass(&self, enc: &mut wgpu::CommandEncoder, label: &str, pipeline: &wgpu::ComputePipeline) {
+        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some(label), timestamp_writes: None });
+        pass.set_bind_group(0, &self.frame_bg, &[0]);
+        pass.set_bind_group(1, &self.world_bg, &[]);
+        pass.set_bind_group(2, &self.fluid_ab, &[]);
+        pass.set_bind_group(3, &self.life_bg, &[]);
+        pass.set_pipeline(pipeline);
+        pass.dispatch_workgroups(groups(self.cfg.max_agents, 64), 1, 1);
+    }
+
+    /// Estatísticas da população: se não houver leitura em curso, grava a
+    /// redução e a cópia (chamar `stats_after_submit` depois do submit).
+    pub fn encode_stats(&mut self, enc: &mut wgpu::CommandEncoder) -> bool {
+        if !matches!(self.stats_readback, Readback::Idle) {
+            return false;
+        }
+        enc.clear_buffer(&self.stats_buf, 0, None);
+        self.observe_pass(enc, "stats", &self.pipelines.stats_reduce);
+        enc.copy_buffer_to_buffer(&self.stats_buf, 0, &self.stats_staging, 0, self.stats_buf.size());
+        self.stats_readback = Readback::Encoded;
+        true
+    }
+
+    pub fn stats_after_submit(&mut self) {
+        if let Readback::Encoded = self.stats_readback {
+            let ready = Arc::new(AtomicBool::new(false));
+            let flag = ready.clone();
+            self.stats_staging.map_async(wgpu::MapMode::Read, .., move |r| {
+                if r.is_ok() {
+                    flag.store(true, Ordering::Release);
+                }
+            });
+            self.stats_readback = Readback::Mapping(ready);
+        }
+    }
+
+    /// As estatísticas, se a leitura já chegou.
+    pub fn poll_stats(&mut self, device: &wgpu::Device) -> Option<Vec<u32>> {
+        let Readback::Mapping(ready) = &self.stats_readback else { return None };
+        device.poll(wgpu::PollType::Poll).ok();
+        if !ready.load(Ordering::Acquire) {
+            return None;
+        }
+        let w = {
+            let view = self.stats_staging.get_mapped_range(..).ok()?;
+            bytemuck::cast_slice::<u8, u32>(&view).to_vec()
+        };
+        self.stats_staging.unmap();
+        self.stats_readback = Readback::Idle;
+        Some(w)
+    }
+
+    /// Escolhe o genoma de referência do mapa genético (bases 0..3); vazio = nenhum.
+    pub fn set_kin_target(&self, queue: &wgpu::Queue, genome: &[u8]) {
+        let mut k: Vec<u32> = Vec::new();
+        let mut x = 0u32;
+        for (i, &b) in genome.iter().enumerate() {
+            x = ((x << 2) | b as u32) & 0xFFFF;
+            if i + 1 >= 8 {
+                // Canónico: o menor entre o 8-mero e o complementar invertido.
+                let mut r = 0u32;
+                let mut y = x ^ 0x5555;
+                for _ in 0..8 {
+                    r = (r << 2) | (y & 3);
+                    y >>= 2;
+                }
+                k.push(x.min(r));
+            }
+        }
+        k.sort_unstable();
+        k.dedup();
+        let mut data = vec![k.len() as u32];
+        data.extend(k);
+        queue.write_buffer(&self.kin_target, 0, bytemuck::cast_slice(&data));
+    }
+
+    /// Recalcula a semelhança de todos com o genoma de referência.
+    pub fn encode_kinship(&self, enc: &mut wgpu::CommandEncoder) {
+        self.observe_pass(enc, "kinship", &self.pipelines.kinship);
     }
 
     /// Livro-razão assíncrono: se não houver leitura em curso, grava a redução

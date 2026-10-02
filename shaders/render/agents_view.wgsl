@@ -26,6 +26,8 @@
 @group(0) @binding(10) var<storage, read> organ_variants_view: array<OrganVariant>;
 // Ligações entre agentes (shaders/life/bonds.wgsl): 5 vec4<u32> por slot.
 @group(0) @binding(11) var<storage, read> bonds_view: array<vec4<u32>>;
+// Semelhança genética de cada slot com o selecionado (−1 = sem dados).
+@group(0) @binding(12) var<storage, read> kin_view: array<f32>;
 
 // Fios de RNA nas pontas (as zonas não traduzidas): bases desenhadas por
 // agente (metade para cada ponta), distância entre bases e ondulação.
@@ -184,6 +186,17 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             case 1u: { col = signed_color(s.x, vec3<f32>(1.0, 0.45, 0.1), vec3<f32>(0.1, 0.6, 1.0)); }
             case 2u: { col = signed_color(s.y, vec3<f32>(0.3, 1.0, 0.3), vec3<f32>(0.95, 0.3, 0.9)); }
             case 3u: { col = vec3<f32>(0.5 + 0.5 * tanh(s.x), 0.5 + 0.5 * tanh(s.y), 0.35); }
+            case 4u: {
+                // Parentesco: azul escuro (nada em comum) -> vermelho -> branco (igual).
+                let q = kin_view[slot];
+                if (q < 0.0) {
+                    col = vec3<f32>(0.2);
+                } else {
+                    let t = sqrt(clamp(q, 0.0, 1.0));
+                    col = mix(mix(vec3<f32>(0.08, 0.12, 0.45), vec3<f32>(0.95, 0.15, 0.1), smoothstep(0.0, 0.7, t)),
+                              vec3<f32>(1.0, 0.95, 0.85), smoothstep(0.7, 1.0, t));
+                }
+            }
             default: {}
         }
     }

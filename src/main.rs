@@ -41,6 +41,9 @@ struct Running {
     save_job: Option<std::thread::JoinHandle<Result<String, String>>>,
     /// Epoch do último autosave.
     last_autosave: u32,
+    /// Mapa genético: id do agente de referência e frames até recalcular.
+    kin_id: Option<u32>,
+    kin_frames: u32,
 }
 
 #[derive(Default)]
@@ -264,6 +267,8 @@ impl Running {
             editor,
             save_job: None,
             last_autosave,
+            kin_id: None,
+            kin_frames: 0,
         };
         r.ui.autosave_path = autosave_path;
         r.ui.scene_msg = scene_msg;
@@ -286,6 +291,7 @@ impl Running {
             "seed_len": self.ui.seed_len,
             "camera": { "center": self.cam.center, "zoom": self.cam.zoom },
             "autosave_every": self.ui.autosave_every,
+            "estatisticas": self.ui.history.to_json(),
         })
     }
 
@@ -307,7 +313,7 @@ impl Running {
             self.ui.monomer_brightness = x as f32;
         }
         if let Some(n) = u("signal_view") {
-            self.ui.signal_view = (n as u32).min(3);
+            self.ui.signal_view = (n as u32).min(4);
         }
         if let Some(n) = u("seed_count") {
             self.ui.seed_count = n as u32;
@@ -323,6 +329,9 @@ impl Running {
         }
         if let Some(n) = u("autosave_every") {
             self.ui.autosave_every = (n as u32).max(1000);
+        }
+        if v["estatisticas"].is_object() {
+            self.ui.history = ribossome::stats::History::from_json(&v["estatisticas"]);
         }
     }
 
@@ -412,6 +421,7 @@ impl Running {
             }
             Some(SceneAction::NewWorld) => {
                 self.world.reset_settings();
+                self.ui.history = ribossome::stats::History::default();
                 startup_terrain(&mut self.world);
                 if lab_mode() {
                     self.world.configure_lab();
@@ -605,6 +615,27 @@ impl Running {
             self.ui.signal_view,
         );
 
+        // Mapa genético: o genoma do selecionado passa a ser a referência;
+        // a semelhança de todos recalcula-se de 15 em 15 frames.
+        let mut want_kin = false;
+        if self.ui.signal_view == 4 {
+            let id = self.inspector.data.as_ref().map(|d| d.agent.id);
+            if id != self.kin_id {
+                let genome = self.inspector.data.as_ref().map(|d| d.genome.clone()).unwrap_or_default();
+                self.world.set_kin_target(&self.gpu.queue, &genome);
+                self.kin_id = id;
+                self.kin_frames = 0;
+            }
+            want_kin = self.kin_frames == 0;
+            self.kin_frames = (self.kin_frames + 1) % 15;
+        }
+        let epoch_now = self.world.params.epoch;
+        if epoch_now.saturating_add(self.ui.history.every) < self.ui.history.next_epoch {
+            // O epoch voltou atrás (mundo novo ou cena carregada).
+            self.ui.history.next_epoch = epoch_now;
+        }
+        let want_stats = epoch_now >= self.ui.history.next_epoch;
+
         let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, .. } = self;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {
@@ -612,6 +643,16 @@ impl Running {
             frame.segment("world", |enc| world.encode_steps(&gpu.queue, enc, n));
         }
         frame.segment("ledger", |enc| world.encode_ledger_readback(enc));
+        if want_stats {
+            let mut started = false;
+            frame.segment("stats", |enc| started = world.encode_stats(enc));
+            if started {
+                st.history.next_epoch = epoch_now.saturating_add(st.history.every.max(100));
+            }
+        }
+        if want_kin {
+            frame.segment("kinship", |enc| world.encode_kinship(enc));
+        }
         frame.segment("draw list", |enc| world.encode_draw_list(enc));
         frame.segment("inspect", |enc| {
             inspector.encode(world, enc);
@@ -647,7 +688,11 @@ impl Running {
         });
         frame.finish();
         world.ledger_after_submit();
+        world.stats_after_submit();
         inspector.after_submit();
+        if let Some(w) = world.poll_stats(&gpu.device) {
+            st.history.push(world.params.epoch, &w, st.ledger, world.last_counters);
+        }
 
         self.runlog.after_frame(&self.world, &self.ui, &mut self.profiler);
         self.window.pre_present_notify();

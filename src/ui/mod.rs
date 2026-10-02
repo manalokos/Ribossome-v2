@@ -35,6 +35,8 @@ pub struct UiState {
     pub tab: Tab,
     /// Velocidade e população (atualizadas ~2×/s em `update_stats`).
     pub stats: Stats,
+    /// Estatísticas ao longo do tempo (gráficos e logs/estatisticas.csv).
+    pub history: crate::stats::History,
     /// Cenas: ação pedida, autosave e mensagem da última operação.
     pub scene_action: Option<SceneAction>,
     pub autosave_on: bool,
@@ -67,10 +69,11 @@ pub enum Tab {
     Vida,
     Movimento,
     Cena,
+    Graficos,
     Info,
 }
 
-const TABS: [(Tab, &str); 9] = [
+const TABS: [(Tab, &str); 10] = [
     (Tab::Vista, "Vista"),
     (Tab::Materia, "Matéria"),
     (Tab::Luz, "Luz"),
@@ -79,6 +82,7 @@ const TABS: [(Tab, &str); 9] = [
     (Tab::Vida, "Vida"),
     (Tab::Movimento, "Movimento"),
     (Tab::Cena, "Cena"),
+    (Tab::Graficos, "Gráficos"),
     (Tab::Info, "Info"),
 ];
 
@@ -140,6 +144,7 @@ impl UiState {
             monomer_brightness: 0.5,
             signal_view: 0,
             stats: Stats::default(),
+            history: crate::stats::History::default(),
             terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "assets/terreno.png".into()),
             terrain_action: None,
             terrain_msg: String::new(),
@@ -226,6 +231,7 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
         Tab::Vida => tab_life(ui, st, world),
         Tab::Movimento => tab_motion(ui, world),
         Tab::Cena => tab_scene(ui, st),
+        Tab::Graficos => crate::stats::draw(ui, &mut st.history),
         Tab::Info => tab_info(ui, st, prof),
     });
 }
@@ -279,7 +285,8 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
         }
     });
     ui.add(egui::Slider::new(&mut st.monomer_brightness, 0.0..=1.0).text("brilho dos monómeros"));
-    const SIGNAL_VIEWS: [&str; 4] = ["química", "sinal α", "sinal β", "α (vermelho) + β (verde)"];
+    const SIGNAL_VIEWS: [&str; 5] =
+        ["química", "sinal α", "sinal β", "α (vermelho) + β (verde)", "parentesco com o selecionado"];
     egui::ComboBox::from_label("cor dos agentes").selected_text(SIGNAL_VIEWS[st.signal_view as usize]).show_ui(
         ui,
         |ui| {
@@ -288,6 +295,9 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
             }
         },
     );
+    if st.signal_view == 4 {
+        ui.label("clica num organismo: vermelho = genoma igual, azul = sem nada em comum (8-meros partilhados; o filho conta como parente)");
+    }
     ui.separator();
     if ui
         .button("editor dos aminoácidos e órgãos (browser)")
