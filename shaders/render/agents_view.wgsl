@@ -19,6 +19,7 @@
 @group(0) @binding(4) var<storage, read> draw_list_view: array<u32>;
 @group(0) @binding(5) var<storage, read> organs_view: array<u32>;
 @group(0) @binding(6) var<storage, read> signals_view: array<vec2<f32>>;
+@group(0) @binding(7) var<storage, read> aa_props_view: array<AaProps, 20>;
 
 const MAX_BODY_V: u32 = 64u;
 const NO_ORGAN: u32 = 0xFFu;
@@ -107,7 +108,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         let tn = select(vec2<f32>(1.0, 0.0), tl / length(tl), length(tl) > 1e-5);
         tangent = vec2<f32>(cr * tn.x - sr * tn.y, sr * tn.x + cr * tn.y);
         // Espessura (v3): 4·√(volume/130), mais folga para os discos se tocarem.
-        r_world = 4.0 * sqrt(AA_VOLUME[aa] / 130.0) + 2.0;
+        r_world = 4.0 * sqrt(aa_props_view[aa].volume / 130.0) + 2.0;
         col = class_color(aa);
         let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
         if (oc != 0u) {

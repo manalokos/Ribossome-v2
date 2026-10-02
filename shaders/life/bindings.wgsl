@@ -39,6 +39,8 @@
 // Energia tirada a cada agente por proteases de outros neste passo
 // (milésimos, somas atómicas: ordem indiferente).
 @group(3) @binding(19) var<storage, read_write> bitten: array<atomic<u32>>;
+// Propriedades dos aminoácidos (assets/aminoacidos.json; editáveis ao vivo).
+@group(3) @binding(20) var<storage, read> aa_props: array<AaProps, 20>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

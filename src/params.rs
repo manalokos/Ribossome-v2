@@ -371,6 +371,33 @@ impl Fumarole {
 }
 
 gpu_struct! {
+    /// Propriedades de um aminoácido na GPU (de `life::table`, a tabela
+    /// `assets/aminoacidos.json`). 20 entradas, ordem de `AMINO`.
+    pub struct AaProps {
+        pub mass: f32,
+        pub volume: f32,
+        pub catalytic: f32,
+        pub flex: f32,
+        pub rest_angle: f32,
+        pub max_bend: f32,
+        pub sens_alpha: f32,
+        pub sens_beta: f32,
+        pub cond_alpha_n: f32,
+        pub cond_alpha_c: f32,
+        pub cond_beta_n: f32,
+        pub cond_beta_c: f32,
+        pub sub_a: f32,
+        pub sub_u: f32,
+        pub sub_g: f32,
+        pub sub_c: f32,
+        pub uv_absorb: f32,
+        pub _pad0: u32,
+        pub _pad1: u32,
+        pub _pad2: u32,
+    }
+}
+
+gpu_struct! {
     /// Câmara e vista (grupo próprio do render).
     pub struct ViewParams {
         /// Centro da câmara, em unidades do mundo.

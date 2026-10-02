@@ -379,14 +379,15 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // soma 1). Substrato efetivo = 4·Σ afinidade·disponível (sem
         // preferência dá o total, como antes).
         let aa_k = body_get(slot, k);
-        let aff = AA_SUBSTRATE[aa_k];
+        let prk = aa_props[aa_k];
+        let aff = vec4<f32>(prk.sub_a, prk.sub_u, prk.sub_g, prk.sub_c);
         let w_avail = aff * vec4<f32>(avail);
         let eff = 4.0 * (w_avail.x + w_avail.y + w_avail.z + w_avail.w);
         // Uma enzima real não sabe se a célula está cheia: por omissão
         // catalisa sempre que há substrato e a energia a mais perde-se como
         // calor. (A regulação pela fome do v3 fica como opção.)
         let hunger = select(1.0, clamp(1.0 - a.energy / cap, 0.0, 1.0), params.hunger_regulation != 0u);
-        let pe = clamp(params.uptake_rate * AA_CATALYTIC[aa_k] * organ_catalysis_mult(slot, k) * eff * hunger, 0.0, 1.0);
+        let pe = clamp(params.uptake_rate * prk.catalytic * organ_catalysis_mult(slot, k) * eff * hunger, 0.0, 1.0);
         let si = slot * MAX_BODY + k;
         let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);

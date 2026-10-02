@@ -227,6 +227,10 @@ pub struct World {
     /// (grãos por célula, calor por célula em fração de
     /// FUMAROLE_PIXEL_STRENGTH), ambos à resolução da grelha.
     pub custom_terrain: Option<(Vec<u32>, Vec<f32>)>,
+    /// Tabela dos aminoácidos em uso e de onde veio.
+    pub amino: Vec<crate::life::table::AminoRow>,
+    pub amino_source: String,
+    pub aa_buf: wgpu::Buffer,
     /// Calor por píxel do terreno carregado (grelha; None = só as pontuais).
     pub heat_image: Option<Vec<f32>>,
     /// Multiplicador de todo o calor das fumarolas.
@@ -347,6 +351,16 @@ impl World {
         let signals = storage_buffer(device, "signals", max_agents * 64 * 8);
         let sensor_mem = storage_buffer(device, "sensor memory", max_agents * 64 * 4);
         let bitten = storage_buffer(device, "bitten energy", max_agents * 4);
+        // Tabela dos aminoácidos (assets/aminoacidos.json).
+        let (amino, amino_source) = crate::life::table::load();
+        log::info!("tabela dos aminoácidos: {amino_source}");
+        let aa_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("amino table"),
+            size: (20 * size_of::<crate::params::AaProps>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue.write_buffer(&aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&amino)));
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
             size: 16,
@@ -387,7 +401,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..20).map(|b| storage_entry(b, b == 4)).collect();
+        let life_entries: Vec<_> = (0..21).map(|b| storage_entry(b, b == 4 || b == 20)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -530,6 +544,7 @@ impl World {
                 &signals,
                 &sensor_mem,
                 &bitten,
+                &aa_buf,
             ],
         );
 
@@ -656,6 +671,9 @@ impl World {
             last_counters: None,
             seed_density: SEED_DENSITY_DEFAULT,
             custom_terrain: None,
+            amino,
+            amino_source,
+            aa_buf,
             heat_image: None,
             fumarole_gain: 1.0,
             heat_key: Vec::new(),
@@ -748,6 +766,12 @@ impl World {
         gpu.queue.write_buffer(&self.free_buf, 0, bytemuck::cast_slice(&free_slots));
         gpu.queue.write_buffer(&self.life_counters_buf, 0, bytemuck::cast_slice(&[max, 0, 0, 0, 0, 0, 0, 0u32]));
         self.pending_spawns.clear();
+    }
+
+    /// Troca a tabela dos aminoácidos (efeito no passo seguinte).
+    pub fn set_amino(&mut self, queue: &wgpu::Queue, rows: Vec<crate::life::table::AminoRow>) {
+        queue.write_buffer(&self.aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&rows)));
+        self.amino = rows;
     }
 
     /// Carrega um terreno de um PNG (ver `terrain::load_png`); entra na

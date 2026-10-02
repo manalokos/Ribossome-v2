@@ -2,6 +2,7 @@
 
 pub mod amino;
 pub mod organs;
+pub mod table;
 
 use crate::params::SpawnRequest;
 

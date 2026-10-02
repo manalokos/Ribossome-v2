@@ -42,6 +42,9 @@ fn trial(gpu: &Gpu, name: &str, genome: &str) {
     world.params.phoretic_gain = 0.0;
     world.params.pairing_rate = 0.0;
     world.params.death_probability = 0.0;
+    // Sem boca não comem: sem manutenção, para medir só a natação.
+    world.params.maintenance_cost = 0.0;
+    world.params.sedimentation = 0.0;
     let s = cfg.sim_size();
     let mut rng = ribossome::life::SplitMix(5);
     let reqs: Vec<SpawnRequest> = (0..200)

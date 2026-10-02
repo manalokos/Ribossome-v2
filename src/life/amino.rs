@@ -219,144 +219,10 @@ pub fn flexibility() -> [f32; 20] {
     f
 }
 
-/// Ângulo de repouso de cada junta (rad, COM SINAL): os ângulos base do v3
-/// (commit 7199600, jan. 2026; valores de desenho). Substitui a tendência de
-/// volta de Chou-Fasman, que era sempre do mesmo lado (homoquiral).
-pub const REST_ANGLE: [f32; 20] = [
-    0.10,      // A
-    0.13,      // C
-    0.05,      // D
-    -0.12,     // E
-    0.03,      // F
-    -0.06,     // G
-    -0.07,     // H
-    0.09,      // I
-    0.31,      // K
-    -0.24,     // L
-    -0.52,     // M
-    0.21,      // N
-    -0.333,    // P
-    -0.221,    // Q
-    -0.27,     // R
-    -0.349066, // S
-    0.10112,   // T
-    0.09,      // V
-    0.349066,  // W
-    -std::f32::consts::FRAC_PI_6, // Y (−0,523599 no v3)
-];
 
-/// Desvio MÁXIMO que os sinais conseguem impor a cada junta (rad, ordem de
-/// `AMINO`). Escala qualitativa do mapa de Ramachandran (área permitida do
-/// esqueleto): a glicina (sem cadeia lateral) é a mais livre; a prolina tem o
-/// φ preso pelo anel; os β-ramificados (V, I, T) e os aromáticos volumosos
-/// (F, W, Y) são restritos; os restantes ficam no meio. Os valores absolutos
-/// são de desenho (afinados para ondular sem enrolar o corpo num anel).
-pub const MAX_BEND: [f32; 20] = [
-    0.60, // A
-    0.60, // C
-    0.60, // D
-    0.60, // E
-    0.50, // F
-    1.20, // G
-    0.60, // H
-    0.40, // I
-    0.60, // K
-    0.60, // L
-    0.60, // M
-    0.60, // N
-    0.25, // P
-    0.60, // Q
-    0.60, // R
-    0.60, // S
-    0.40, // T
-    0.40, // V
-    0.50, // W
-    0.50, // Y
-];
 
-/// AFINIDADE DE SUBSTRATO de cada aminoácido pelos 4 canais (A, U, G, C),
-/// ordem de `AMINO`; soma 1. Regra QUALITATIVA (não são valores medidos),
-/// inspirada nos contactos proteína–RNA recorrentes: aromáticos (F W Y, e H)
-/// empilham com as purinas (A, G); Arg e Lys preferem G (o contacto mais
-/// frequente nas interfaces proteína–RNA); Asp e Glu fazem pontes de
-/// hidrogénio com C e A; os polares (S T N Q) e a Cys com as pirimidinas
-/// (U, C); alifáticos, Gly e Pro não distinguem. Cria nichos: quem come A
-/// não compete com quem come G.
-pub const SUBSTRATE: [[f32; 4]; 20] = [
-    [0.25, 0.25, 0.25, 0.25], // A
-    [0.20, 0.40, 0.20, 0.20], // C
-    [0.30, 0.15, 0.15, 0.40], // D
-    [0.30, 0.15, 0.15, 0.40], // E
-    [0.40, 0.10, 0.40, 0.10], // F
-    [0.25, 0.25, 0.25, 0.25], // G
-    [0.35, 0.15, 0.35, 0.15], // H
-    [0.25, 0.25, 0.25, 0.25], // I
-    [0.20, 0.20, 0.40, 0.20], // K
-    [0.25, 0.25, 0.25, 0.25], // L
-    [0.25, 0.25, 0.25, 0.25], // M
-    [0.15, 0.35, 0.15, 0.35], // N
-    [0.25, 0.25, 0.25, 0.25], // P
-    [0.15, 0.35, 0.15, 0.35], // Q
-    [0.20, 0.20, 0.40, 0.20], // R
-    [0.15, 0.35, 0.15, 0.35], // S
-    [0.15, 0.35, 0.15, 0.35], // T
-    [0.25, 0.25, 0.25, 0.25], // V
-    [0.40, 0.10, 0.40, 0.10], // W
-    [0.40, 0.10, 0.40, 0.10], // Y
-];
 
-/// CONDUTIVIDADE dos sinais por aminoácido (v3, `config/amino_acids.json`,
-/// ordem de `AMINO`): (α vindo do lado N, α vindo do lado C, β vindo do lado
-/// N, β vindo do lado C). Cada resíduo recebe o sinal dos dois vizinhos
-/// pesado por estes fatores; somam ~1 por canal e alguns são negativos (o
-/// resíduo inverte o sinal que vem desse lado). A sequência decide assim por
-/// onde e em que sentido os sinais andam.
-pub const CONDUCTANCE: [(f32, f32, f32, f32); 20] = [
-    (0.8, 0.2, 0.7, 0.3),    // A
-    (0.5, 0.5, 0.5, 0.5),    // C
-    (-0.2, 1.2, -0.3, 1.3),  // D
-    (1.4, -0.4, 1.3, -0.3),  // E
-    (0.6, 0.4, 0.55, 0.45),  // F
-    (0.5, 0.5, 0.5, 0.5),    // G
-    (1.2, -0.2, -0.3, 1.3),  // H
-    (0.65, 0.35, 0.7, 0.3),  // I
-    (1.4, -0.4, 1.3, -0.3),  // K
-    (-0.3, 1.3, -0.2, 1.2),  // L
-    (0.8, 0.2, -0.1, 1.1),   // M
-    (0.7, 0.3, 0.65, 0.35),  // N
-    (1.5, -0.5, 1.4, -0.4),  // P
-    (1.0, 0.0, 0.75, 0.25),  // Q
-    (-0.4, 1.4, -0.3, 1.3),  // R
-    (0.5, 0.5, 0.5, 0.5),    // S
-    (0.9, 0.1, 1.0, 0.0),    // T
-    (-0.3, 1.3, 1.2, -0.2),  // V
-    (0.55, 0.45, 0.6, 0.4),  // W
-    (-0.5, 1.5, -0.4, 1.4),  // Y
-];
 
-/// Sensibilidade de cada junta ao sinal α e ao sinal β (valores do v3, ordem de `AMINO`).
-pub const SIGNAL_SENSITIVITY: [(f32, f32); 20] = [
-    (-0.2, 0.2),      // A
-    (0.0, 0.349066),  // C
-    (-0.2, 0.3),      // D
-    (0.1, 0.12),      // E
-    (0.2, -0.33),     // F
-    (0.7, 0.1),       // G
-    (0.2, -0.61),     // H
-    (-0.3, 0.69),     // I
-    (0.6, -0.16),     // K
-    (-0.3332, 0.1),   // L
-    (0.14, -0.64),    // M
-    (0.2, 0.3),       // N
-    (0.5, -0.1),      // P
-    (0.24, -0.4),     // Q
-    (0.5, -0.15),     // R
-    (-0.349066, 0.0), // S
-    (0.1, -0.5),      // T
-    (-0.3, 0.73),     // V
-    (0.31, -0.1),     // W
-    (-0.2, 0.52),     // Y
-];
 
 /// Tabelas WGSL geradas (código genético e propriedades por aminoácido).
 pub fn wgsl() -> String {
@@ -368,49 +234,10 @@ pub fn wgsl() -> String {
         s += &format!("{}u{}", c, if i < 63 { ", " } else { "" });
     }
     s += ");\n";
-    let col = |name: &str, f: &dyn Fn(&AminoAcid) -> f32| {
-        let vals: Vec<String> = AMINO.iter().map(|a| format!("{:.4}", f(a))).collect();
-        format!("const {name} = array<f32, 20>({});\n", vals.join(", "))
-    };
-    s += &col("AA_MASS", &|a| a.mass);
-    s += &col("AA_VOLUME", &|a| a.volume);
-    s += &col("AA_P_HELIX", &|a| a.p_helix);
-    s += &col("AA_P_SHEET", &|a| a.p_sheet);
-    s += &col("AA_P_TURN", &|a| a.p_turn);
-    s += &col("AA_HYDROPATHY", &|a| a.hydropathy);
-    s += &col("AA_CHARGE_PH7", &|a| a.charge_at(7.0));
-    s += &col("AA_CATALYTIC", &|a| a.catalytic);
-    let sa: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.0)).collect();
-    let sb: Vec<String> = SIGNAL_SENSITIVITY.iter().map(|v| format!("{:.4}", v.1)).collect();
-    s += &format!("const AA_ALPHA_SENS = array<f32, 20>({});\n", sa.join(", "));
-    let cd: Vec<String> =
-        CONDUCTANCE.iter().map(|c| format!("vec4<f32>({:.3}, {:.3}, {:.3}, {:.3})", c.0, c.1, c.2, c.3)).collect();
-    s += &format!("const AA_CONDUCTANCE = array<vec4<f32>, 20>({});\n", cd.join(", "));
-    let su: Vec<String> =
-        SUBSTRATE.iter().map(|c| format!("vec4<f32>({:.3}, {:.3}, {:.3}, {:.3})", c[0], c[1], c[2], c[3])).collect();
-    s += &format!("const AA_SUBSTRATE = array<vec4<f32>, 20>({});\n", su.join(", "));
-    let mb: Vec<String> = MAX_BEND.iter().map(|v| format!("{v:.3}")).collect();
-    s += &format!("const AA_MAX_BEND = array<f32, 20>({});\n", mb.join(", "));
-    let ra: Vec<String> = REST_ANGLE.iter().map(|v| format!("{v:.5}")).collect();
-    s += &format!("const AA_REST_ANGLE = array<f32, 20>({});\n", ra.join(", "));
-    s += &format!("const AA_BETA_SENS = array<f32, 20>({});\n", sb.join(", "));
-    let flex = flexibility();
-    let fv: Vec<String> = flex.iter().map(|v| format!("{v:.4}")).collect();
-    s += &format!("const AA_FLEX = array<f32, 20>({});\n", fv.join(", "));
-    let mj = mj_matrix();
-    let mv: Vec<String> = mj.iter().flatten().map(|v| format!("{v:.2}")).collect();
-    s += &format!("const AA_MJ = array<f32, 400>({});\n", mv.join(", "));
+    // As propriedades numéricas (massa, catálise, ângulos, sinais,
+    // substrato, absorção UV) vêm da tabela assets/aminoacidos.json, num
+    // buffer da GPU (life::table): editáveis sem recompilar os shaders.
     s
-}
-
-#[cfg(test)]
-mod substrate_tests {
-    #[test]
-    fn substrate_rows_sum_to_one() {
-        for (i, r) in super::SUBSTRATE.iter().enumerate() {
-            assert!((r.iter().sum::<f32>() - 1.0).abs() < 1e-5, "linha {i}");
-        }
-    }
 }
 
 #[cfg(test)]

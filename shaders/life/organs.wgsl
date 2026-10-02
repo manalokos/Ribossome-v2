@@ -77,8 +77,9 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     let s = signals[slot * MAX_BODY + k];
     let o = organ_get(slot, k);
     let amp = select(1.0, (2.0 + 0.5 * f32(organ_param(o))) * organ_gain(o), organ_type(o) == ORGAN_MUSCLE);
-    let lim = AA_MAX_BEND[aa];
-    return lim * tanh(SIGNAL_GAIN * amp * (s.x * AA_ALPHA_SENS[aa] + s.y * AA_BETA_SENS[aa]) / lim);
+    let pr = aa_props[aa];
+    let lim = max(pr.max_bend, 1e-3);
+    return lim * tanh(SIGNAL_GAIN * amp * (s.x * pr.sens_alpha + s.y * pr.sens_beta) / lim);
 }
 
 // Amostra as células num disco de raio SENSOR_RADIUS à volta de `pos`:
@@ -204,7 +205,8 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
     for (var k = 0u; k < n; k++) {
         let here = signals[base + k];
         let next = select(vec2<f32>(0.0), signals[base + k + 1u], k + 1u < n);
-        let c = AA_CONDUCTANCE[body_get(slot, k)];
+        let pr = aa_props[body_get(slot, k)];
+        let c = vec4<f32>(pr.cond_alpha_n, pr.cond_alpha_c, pr.cond_beta_n, pr.cond_beta_c);
         let incoming = vec2<f32>(c.x * prev.x + c.y * next.x, c.z * prev.y + c.w * next.y);
         let s = SIGNAL_DECAY * incoming + emit[k];
         signals[base + k] = clamp(s, vec2<f32>(-SIGNAL_MAX), vec2<f32>(SIGNAL_MAX));

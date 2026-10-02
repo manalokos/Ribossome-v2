@@ -18,7 +18,8 @@ const JOINT_MAX_STEP: f32 = 0.05;
 const S_JOINT: u32 = 5u << 16u;     // + índice da junta
 
 fn joint_stiffness(aa: u32) -> f32 {
-    return params.chain_stiffness / (AA_FLEX[aa] * AA_FLEX[aa]);
+    let f = aa_props[aa].flex;
+    return params.chain_stiffness / (f * f);
 }
 
 // Reconstrói as posições locais (centradas no centro de massa) a partir dos ângulos.

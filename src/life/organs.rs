@@ -12,7 +12,7 @@
 //! aminoácido promotor; o órgão acrescenta-lhe uma função.
 //!
 //! Os sinais internos são dois canais (α, β) por resíduo, conduzidos entre
-//! vizinhos com a condutividade de cada aminoácido (`amino::CONDUCTANCE`).
+//! vizinhos com a condutividade de cada aminoácido (tabela `assets/aminoacidos.json`).
 //! Todas as juntas dobram conforme α e β (sensibilidade por aminoácido); o
 //! "músculo" amplifica a resposta local; a natação faz-se pelo RFT.
 //!
