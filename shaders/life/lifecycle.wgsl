@@ -26,6 +26,8 @@ const UV_HAZARD_SCALE: f32 = 0.001;
 const MIN_GENE_LEN: u32 = 6u;
 const S_BROWN: u32 = 9u;
 const S_BIOTURB: u32 = 10u;
+// Passos da média da velocidade de natação (o avanço que o ganho amplifica).
+const SWIM_AVG_STEPS: f32 = 100.0;
 const S_PHOTOSYS: u32 = 7u << 16u;   // + índice do resíduo
 // Fotossistema: energia por passo com luz plena e sol 1 (por órgão, × ganho) e
 // probabilidade de reativar um gasto por passo com luz plena.
@@ -282,13 +284,23 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // muito para um lado e para o outro) e a orientação errada estragava a
     // natação; com a rotação física, um movimento recíproco não desloca nada.
     let swim_raw = joints_step(slot, a, kt_here);
-    let swim = vec3<f32>(swim_raw.xy * max(params.swim_gain, 0.0), swim_raw.z);
+    // O ganho de natação amplifica só o AVANÇO MÉDIO, não o vaivém de cada
+    // batida: multiplicar tudo (como antes) tornava o balanço lateral, que
+    // se anula num ciclo, 10× maior (os agentes andavam ~25× mais de lado do
+    // que em frente). Deslocamento = movimento físico + (ganho − 1) × média
+    // da velocidade de natação (~SWIM_AVG_STEPS passos, mais que um ciclo).
+    let swim = vec3<f32>(swim_raw.xy, swim_raw.z);
     // Natação: o movimento rígido vem no referencial (alinhado) do corpo;
     // roda-o para o mundo.
     var swim_v = vec2<f32>(0.0);
+    var aux = rna_tail[slot * 2u + 1u];
+    if (a.age == 0u) { aux = vec4<f32>(0.0); } // slot reutilizado: sem herança
     if (any(swim_raw != vec4<f32>(0.0))) {
         // Orientação a meio do passo (o corpo roda Ω durante o passo).
-        let sv = rotate(swim.xy, a.rot + 0.5 * swim.z);
+        let sv_phys = rotate(swim.xy, a.rot + 0.5 * swim.z);
+        let avg = mix(aux.zw, sv_phys, 1.0 / SWIM_AVG_STEPS);
+        aux = vec4<f32>(aux.xy, avg);
+        let sv = sv_phys + (max(params.swim_gain, 0.0) - 1.0) * avg;
         swim_v = sv;
         let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(np0)) < GAMMA_SOLID_THRESHOLD) {
@@ -298,6 +310,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         a.rot += swim.z + swim_raw.w;
     }
     a.age += 1u;
+    // (zw = média da velocidade de natação; xy = curvatura dos fios, a seguir)
+    rna_tail[slot * 2u + 1u] = aux;
     update_rna_tails(slot, a);
 
     // ---- BIOTURBAÇÃO: um resíduo (ao acaso) que atravessa ENTULHO empurra
@@ -649,7 +663,7 @@ fn update_rna_tails(slot: u32, a: Agent) {
     let n = a.body_len;
     if (n == 0u) { return; }
     let s0 = rna_tail[slot * 2u];
-    var bend = rna_tail[slot * 2u + 1u];
+    var bend = rna_tail[slot * 2u + 1u]; // zw = média da natação (não mexer)
     let pn = residue_world(slot, a, 0u);
     let pc = residue_world(slot, a, n - 1u);
     if (a.age > 1u) {
@@ -666,7 +680,7 @@ fn update_rna_tails(slot: u32, a: Agent) {
         bend.x = clamp(bend.x * TAIL_RELAX - TAIL_DRAG * dot(vn, vec2<f32>(-dn.y, dn.x)), -TAIL_MAX_BEND, TAIL_MAX_BEND);
         bend.y = clamp(bend.y * TAIL_RELAX - TAIL_DRAG * dot(vc, vec2<f32>(-dc.y, dc.x)), -TAIL_MAX_BEND, TAIL_MAX_BEND);
     } else {
-        bend = vec4<f32>(0.0);
+        bend = vec4<f32>(0.0, 0.0, bend.z, bend.w);
     }
     rna_tail[slot * 2u] = vec4<f32>(pn, pc);
     rna_tail[slot * 2u + 1u] = bend;
