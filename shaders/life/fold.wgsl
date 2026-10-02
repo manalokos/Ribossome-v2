@@ -73,8 +73,8 @@ struct RftCtx {
 
 // Multiplicador de arrasto do resíduo k (órgãos volumosos arrastam mais).
 fn residue_drag_mult(slot: u32, k: u32) -> f32 {
-    let t = organ_type(organ_get(slot, k));
-    return select(1.0, max(organ_props[t].drag_mult, 0.05), t != 0xFFu);
+    let o = organ_get(slot, k);
+    return select(1.0, max(organ_cost(o).drag_mult, 0.05), o != 0u);
 }
 
 // Posição nova (alinhada) do resíduo k.

@@ -62,6 +62,11 @@ pub struct OrganRow {
     /// (armazenamento) são mais "pesados" a nadar.
     #[serde(default = "one")]
     pub arrasto_mult: f32,
+    /// 1 = a manutenção multiplica pela intensidade do órgão (boca, músculo,
+    /// armazenamento, fotossistema, protease: mais intensidade = mais
+    /// proteína a manter). 0 = sinais (sensores, relógio, relé).
+    #[serde(default)]
+    pub intensidade_paga: f32,
     /// As 6 variantes (parâmetro do modificador 0..5): propriedade -> valor
     /// (as propriedades de cada tipo estão em `organs::ORGAN_PROPS`).
     pub variantes: Vec<std::collections::BTreeMap<String, f32>>,
@@ -120,10 +125,35 @@ pub fn save_organs(rows: &[OrganRow]) -> Result<(), String> {
     std::fs::write(ORGANS_PATH, text).map_err(|e| format!("{ORGANS_PATH}: {e}"))
 }
 
+/// Custos de cada variante, em múltiplos dos do tipo (1 se faltarem): uma
+/// variante mais forte paga em massa, arrasto, comprimento ou manutenção.
+pub const VARIANT_COSTS: [(&str, &str); 4] = [
+    ("custo_comprimento", "× comprimento do tipo"),
+    ("custo_massa", "× massa do tipo"),
+    ("custo_arrasto", "× arrasto do tipo"),
+    ("custo_manutencao", "× manutenção do tipo"),
+];
+
+/// Propriedades físicas por variante (tipo·VARIANTS + parâmetro): as do tipo
+/// × os custos da variante.
 pub fn organs_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganProps> {
-    rows.iter()
-        .map(|r| crate::params::OrganProps { len_mult: r.comprimento_mult, mass_mult: r.massa_mult, upkeep: r.manutencao, drag_mult: r.arrasto_mult })
-        .collect()
+    let mut out = Vec::new();
+    for r in rows {
+        for v in &r.variantes {
+            let c = |k: &str| v.get(k).copied().unwrap_or(1.0);
+            out.push(crate::params::OrganProps {
+                len_mult: r.comprimento_mult * c("custo_comprimento"),
+                mass_mult: r.massa_mult * c("custo_massa"),
+                upkeep: r.manutencao * c("custo_manutencao"),
+                drag_mult: r.arrasto_mult * c("custo_arrasto"),
+                gain_pays: r.intensidade_paga,
+                _pad0: 0.0,
+                _pad1: 0.0,
+                _pad2: 0.0,
+            });
+        }
+    }
+    out
 }
 
 /// Variantes para a GPU: tipo·VARIANTS + parâmetro, propriedades pela ordem

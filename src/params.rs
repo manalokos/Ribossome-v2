@@ -453,6 +453,12 @@ gpu_struct! {
         pub upkeep: f32,
         /// Arrasto do segmento × isto.
         pub drag_mult: f32,
+        /// 1 = a manutenção multiplica pela intensidade (órgãos que fazem
+        /// trabalho); 0 = não (sinais: a intensidade é só um peso).
+        pub gain_pays: f32,
+        pub _pad0: f32,
+        pub _pad1: f32,
+        pub _pad2: f32,
     }
 }
 

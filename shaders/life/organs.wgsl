@@ -46,6 +46,11 @@ fn organ_var(o: u32) -> OrganVariant {
     return organ_variants[organ_type(o) * ORGAN_VARIANTS + min(organ_param(o), ORGAN_VARIANTS - 1u)];
 }
 
+// Propriedades físicas (custos) da variante do órgão `o` (o != 0).
+fn organ_cost(o: u32) -> OrganProps {
+    return organ_props[organ_type(o) * ORGAN_VARIANTS + min(organ_param(o), ORGAN_VARIANTS - 1u)];
+}
+
 // Capacidade extra de energia e custo de manutenção dos órgãos do agente.
 fn organ_capacity(slot: u32, n: u32) -> f32 {
     var c = 0.0;
@@ -59,8 +64,11 @@ fn organ_capacity(slot: u32, n: u32) -> f32 {
 fn organ_upkeep(slot: u32, n: u32) -> f32 {
     var u = 0.0;
     for (var k = 0u; k < n; k++) {
-        let t = organ_type(organ_get(slot, k));
-        if (t != 0xFFu) { u += organ_props[t].upkeep; }
+        let o = organ_get(slot, k);
+        if (o != 0u) {
+            let c = organ_cost(o);
+            u += c.upkeep * select(1.0, organ_gain(o), c.gain_pays > 0.5);
+        }
     }
     return u;
 }

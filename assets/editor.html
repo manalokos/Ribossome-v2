@@ -106,16 +106,21 @@ async function load() {
 }
 
 let organInfo = [];
+// Custos por variante, em múltiplos dos do tipo (1 = igual ao tipo).
+const COSTS = [["custo_comprimento", "× compr."], ["custo_massa", "× massa"], ["custo_arrasto", "× arrasto"], ["custo_manutencao", "× manut."]];
 
 function organCard(r, info) {
   const props = info.props.map(p => p.nome);
   let h = `<div class="organ"><h3>${info.simbolo} ${info.nome} <span style="color:var(--dim);font-weight:400">(tipo ${r.tipo})</span></h3>`;
-  h += `<div style="margin:4px 0 8px">` + [["comprimento_mult", "× comprimento"], ["massa_mult", "× massa"], ["arrasto_mult", "× arrasto"], ["manutencao", "manutenção"]]
-    .map(([k, l]) => `<label style="margin-right:14px;color:var(--dim)">${l} <input type="number" step="0.1" data-t="${r.tipo}" data-k="${k}" value="${+r[k].toFixed(3)}"></label>`).join("") + `</div>`;
+  h += `<div style="margin:4px 0 8px">` + [["comprimento_mult", "× comprimento"], ["massa_mult", "× massa"], ["arrasto_mult", "× arrasto"], ["manutencao", "manutenção"], ["intensidade_paga", "intensidade paga (0/1)"]]
+    .map(([k, l]) => `<label style="margin-right:14px;color:var(--dim)">${l} <input type="number" step="0.1" data-t="${r.tipo}" data-k="${k}" value="${+(r[k] ?? 0).toFixed(3)}"></label>`).join("") + `</div>`;
   h += `<div class="scroll"><table><thead><tr><th>variante</th>` +
-    info.props.map(p => `<th title="${p.desc}">${p.nome}</th>`).join("") + `<th style="text-align:left">o que faz</th></tr></thead><tbody>`;
+    info.props.map(p => `<th title="${p.desc}">${p.nome}</th>`).join("") +
+    COSTS.map(([k, l]) => `<th title="custo da variante: ${l.slice(2)} do tipo" style="color:var(--dim)">${l}</th>`).join("") +
+    `<th style="text-align:left">o que faz</th></tr></thead><tbody>`;
   r.variantes.forEach((v, vi) => {
     h += `<tr><td>${vi}</td>` + props.map(k => `<td><input type="number" step="0.05" data-t="${r.tipo}" data-v="${vi}" data-k="${k}" value="${+(v[k] ?? 0).toFixed(3)}"></td>`).join("") +
+      COSTS.map(([k]) => `<td><input type="number" step="0.05" data-t="${r.tipo}" data-v="${vi}" data-k="${k}" value="${+(v[k] ?? 1).toFixed(3)}"></td>`).join("") +
       `<td class="txt" data-t="${r.tipo}" data-v="${vi}" style="text-align:left;white-space:normal;color:var(--dim);min-width:320px">${info.textos[vi]}</td></tr>`;
   });
   return h + `</tbody></table></div></div>`;

@@ -41,8 +41,9 @@
 @group(3) @binding(19) var<storage, read_write> bitten: array<atomic<u32>>;
 // Propriedades dos aminoácidos (assets/aminoacidos.json; editáveis ao vivo).
 @group(3) @binding(20) var<storage, read> aa_props: array<AaProps, 20>;
-// Multiplicadores físicos por tipo de órgão (assets/orgaos.json).
-@group(3) @binding(21) var<storage, read> organ_props: array<OrganProps, ORGAN_TYPES>;
+// Multiplicadores físicos por VARIANTE de órgão (tipo·ORGAN_VARIANTS +
+// parâmetro; assets/orgaos.json): as do tipo × os custos da variante.
+@group(3) @binding(21) var<storage, read> organ_props: array<OrganProps, ORGAN_TYPES * ORGAN_VARIANTS>;
 // Fios de RNA das pontas (só visual), 2 por slot: (ponta N anterior, ponta C
 // anterior) no mundo; (curvatura do fio N, curvatura do fio C, _, _).
 @group(3) @binding(22) var<storage, read_write> rna_tail: array<vec4<f32>>;

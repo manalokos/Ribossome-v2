@@ -24,15 +24,15 @@ fn body_get(slot: u32, i: u32) -> u32 {
 // se o resíduo for um órgão.
 fn residue_mass(slot: u32, k: u32) -> f32 {
     var m = 0.02 * aa_props[body_get(slot, k)].mass / 118.0;
-    let t = organ_type(organ_get(slot, k));
-    if (t != 0xFFu) { m *= organ_props[t].mass_mult; }
+    let o = organ_get(slot, k);
+    if (o != 0u) { m *= organ_cost(o).mass_mult; }
     return m;
 }
 
 fn residue_len(slot: u32, k: u32) -> f32 {
     var l = aa_props[body_get(slot, k)].seg_len;
-    let t = organ_type(organ_get(slot, k));
-    if (t != 0xFFu) { l *= organ_props[t].len_mult; }
+    let o = organ_get(slot, k);
+    if (o != 0u) { l *= organ_cost(o).len_mult; }
     return max(l, 1.0);
 }
 

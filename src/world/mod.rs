@@ -407,7 +407,8 @@ impl World {
         log::info!("tabela dos órgãos: {organ_source}");
         let organ_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("organ table"),
-            size: (crate::life::organs::ORGAN_TYPES * size_of::<crate::params::OrganProps>()) as u64,
+            size: (crate::life::organs::ORGAN_TYPES * crate::life::organs::VARIANTS * size_of::<crate::params::OrganProps>())
+                as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
