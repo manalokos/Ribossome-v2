@@ -72,17 +72,30 @@ struct RftOut {
     flow: vec3<f32>,
 }
 
-// Arrasto extra de um resíduo dentro de terreno: o entulho prende (e a rocha
-// ainda mais). Um agente preso por uma ponta roda à volta dela; a natação
-// dentro do sedimento fica travada.
-const RUBBLE_ANCHOR_DRAG: f32 = 15.0;
-const ROCK_ANCHOR_DRAG: f32 = 200.0;
+// Arrasto extra de um resíduo dentro de terreno: o entulho prende (e junto
+// à rocha ainda mais). CONTÍNUO: usa os grãos interpolados na posição exata
+// do resíduo (com valores por célula, o arrasto saltava de 1 para 31 ao
+// cruzar uma fronteira e os agentes no entulho vibravam).
+const RUBBLE_ANCHOR_PER_GRAIN: f32 = 3.0;
+const ROCK_ANCHOR: f32 = 20.0;
+
+fn grains_at(pw: vec2<f32>) -> f32 {
+    let w = f32(WORLD_UNITS_PER_CELL);
+    let g = pw / w - 0.5;
+    let c0 = vec2<i32>(floor(g));
+    let f = g - floor(g);
+    var v = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+    for (var q = 0u; q < 4u; q++) {
+        let c = clamp(c0 + vec2<i32>(i32(q & 1u), i32(q >> 1u)), vec2<i32>(0), vec2<i32>(i32(GRID_SIZE) - 1));
+        v[q] = f32(min(gamma_count(u32(c.y) * GRID_SIZE + u32(c.x)), 4u));
+    }
+    return mix(mix(v[0], v[1], f.x), mix(v[2], v[3], f.x), f.y);
+}
 
 fn anchor_drag(world_pos: vec2<f32>) -> f32 {
-    let g = gamma_count(world_to_cell(world_pos));
-    if (g == 0u) { return 1.0; }
-    if (g >= GAMMA_SOLID_THRESHOLD) { return ROCK_ANCHOR_DRAG; }
-    return 1.0 + RUBBLE_ANCHOR_DRAG * f32(g);
+    let g = grains_at(world_pos);
+    let rock = max(g - 2.0, 0.0);
+    return 1.0 + RUBBLE_ANCHOR_PER_GRAIN * g + ROCK_ANCHOR * rock * rock;
 }
 
 // Força-livre e binário-livre: M·x = −Σ Dᵀ·R·(u − u_f), com M = Σ Dᵀ·R·D.
