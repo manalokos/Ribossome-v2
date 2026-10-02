@@ -39,7 +39,8 @@ fn vs_fullscreen(@builtin(vertex_index) vi: u32) -> VsOut {
 // luminância para se lerem também com daltonismo. O tom vem da FRAÇÃO de
 // ativados (não da soma: dourado + azul somados davam cinzento) e o brilho
 // da quantidade total.
-const MONOMER_SPENT_COLOR: vec3<f32> = vec3<f32>(0.12, 0.12, 0.13);
+// Gastos: cinzento visível (a matéria está lá; só não é comida).
+const MONOMER_SPENT_COLOR: vec3<f32> = vec3<f32>(0.30, 0.30, 0.32);
 const MONOMER_GAMMA: f32 = 0.5;     // alpha_gamma_adjust do v3
 const DYE_VIS_GAIN: f32 = 2.0;
 const WATER: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);

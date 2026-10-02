@@ -73,12 +73,13 @@ fn chem_add_state(idx: u32, ch: u32, n: u32, spent: bool) {
     }
 }
 
-// O terreno (entulho ou rocha) não guarda monómeros: um depósito apontado a
-// uma célula com gamma vai para a célula de água livre mais próxima (anéis
-// até raio 12, como no v3). Se estiver tudo cercado, fica na própria célula
-// e o squeeze trata do excesso.
+// A rocha não guarda monómeros: um depósito apontado a uma célula de rocha
+// vai para a célula de água ou entulho mais próxima (anéis até raio 12, como
+// no v3). Se estiver tudo cercado, fica na própria célula e a infiltração e
+// o squeeze tratam do excesso.
 fn chem_open_cell(idx: u32) -> u32 {
-    if (gamma_count(idx) == 0u) { return idx; }
+    // Água ou entulho (poroso) servem; só a rocha não.
+    if (gamma_count(idx) < GAMMA_SOLID_THRESHOLD) { return idx; }
     let gx = i32(idx % GRID_SIZE);
     let gy = i32(idx / GRID_SIZE);
     for (var r = 1; r <= 12; r++) {
@@ -89,7 +90,7 @@ fn chem_open_cell(idx: u32) -> u32 {
                 let qy = gy + dy;
                 if (qx < 0 || qy < 0 || qx >= i32(GRID_SIZE) || qy >= i32(GRID_SIZE)) { continue; }
                 let q = u32(qy) * GRID_SIZE + u32(qx);
-                if (gamma_count(q) == 0u) { return q; }
+                if (gamma_count(q) < GAMMA_SOLID_THRESHOLD) { return q; }
             }
         }
     }

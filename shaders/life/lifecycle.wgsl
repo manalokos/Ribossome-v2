@@ -226,11 +226,23 @@ fn agent_matter(slot: u32) -> vec4<u32> {
     return m;
 }
 
+// MORTE: toda a matéria (genoma + complementos capturados) volta ao meio,
+// GASTA, repartida pelas células onde estão os resíduos do corpo (os restos
+// ficam onde o corpo estava, sem despejar tudo numa célula só).
 fn die(slot: u32, a_in: Agent) {
     var a = a_in;
     let m = agent_matter(slot);
-    let cell = chem_open_cell(world_to_cell(vec2<f32>(a.pos_x, a.pos_y)));
-    for (var ch = 0u; ch < 4u; ch++) { chem_add_state(cell, ch, m[ch], true); }
+    let n = max(a.body_len, 1u);
+    for (var k = 0u; k < n; k++) {
+        var pk = vec2<f32>(a.pos_x, a.pos_y);
+        if (a.body_len > 0u) { pk = residue_world(slot, a, k); }
+        let cell = chem_open_cell(world_to_cell(pk));
+        for (var ch = 0u; ch < 4u; ch++) {
+            // Parte igual por resíduo; o resto da divisão vai para os primeiros.
+            let share = m[ch] / n + select(0u, 1u, k < m[ch] % n);
+            if (share > 0u) { chem_add_state(cell, ch, share, true); }
+        }
+    }
     a.alive = 0u;
     agents[slot] = a;
     slot_push(slot);
