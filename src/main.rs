@@ -109,7 +109,7 @@ impl Running {
         // Terreno de uma imagem (RIBO_TERRAIN=caminho.png).
         if let Ok(path) = std::env::var("RIBO_TERRAIN") {
             match world.load_terrain_png(std::path::Path::new(&path)) {
-                Ok(nf) => log::info!("terreno de {path} ({nf} fumarolas)"),
+                Ok(nf) => log::info!("terreno de {path} ({nf} células quentes)"),
                 Err(e) => log::error!("RIBO_TERRAIN: {e}; uso o terreno gerado"),
             }
         }
@@ -178,6 +178,60 @@ impl Running {
         self.surface.configure(&self.gpu.device, &self.surface_cfg);
     }
 
+    /// Carregar / gravar / repor o terreno (botões do painel "Terreno").
+    fn terrain_action(&mut self, action: ribossome::ui::TerrainAction) {
+        use ribossome::ui::TerrainAction;
+        // Janela de ficheiros do sistema, a começar no último caminho usado.
+        let last = std::path::PathBuf::from(self.ui.terrain_path.trim());
+        let dir = last
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .map(|d| d.to_path_buf())
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_default();
+        let name = last.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "terreno.png".into());
+        let dialog = rfd::FileDialog::new().add_filter("PNG", &["png"]).set_directory(&dir);
+        let chosen = match action {
+            TerrainAction::Load => dialog.set_title("Carregar terreno").pick_file(),
+            TerrainAction::Save => dialog.set_title("Gravar terreno").set_file_name(&name).save_file(),
+            TerrainAction::Generated => Some(last.clone()),
+        };
+        let Some(path) = chosen else {
+            self.ui.terrain_msg = "cancelado".into();
+            return;
+        };
+        self.ui.terrain_path = path.display().to_string();
+        let resow = match action {
+            TerrainAction::Load => match self.world.load_terrain_png(&path) {
+                Ok(nf) => {
+                    self.ui.terrain_msg = format!("carregado {} ({nf} células quentes); mundo semeado de novo", path.display());
+                    true
+                }
+                Err(e) => {
+                    self.ui.terrain_msg = format!("erro: {e}");
+                    false
+                }
+            },
+            TerrainAction::Save => {
+                self.ui.terrain_msg = match self.world.save_terrain_png(&self.gpu, &path) {
+                    Ok(()) => format!("gravado em {}", path.display()),
+                    Err(e) => format!("erro: {e}"),
+                };
+                false
+            }
+            TerrainAction::Generated => {
+                self.world.use_generated_terrain();
+                self.ui.terrain_msg = "terreno gerado; mundo semeado de novo".into();
+                true
+            }
+        };
+        if resow {
+            // Mesma semente: só o terreno muda.
+            self.seed -= 1;
+            self.ui.reseed = true;
+        }
+    }
+
     fn redraw(&mut self) {
         self.runlog.before_frame(&mut self.profiler);
         self.inspector.poll(&self.gpu.device);
@@ -203,37 +257,7 @@ impl Running {
             self.world.request_seeds(&reqs);
         }
         if let Some(action) = self.ui.terrain_action.take() {
-            use ribossome::ui::TerrainAction;
-            let path = std::path::PathBuf::from(self.ui.terrain_path.trim());
-            let resow = match action {
-                TerrainAction::Load => match self.world.load_terrain_png(&path) {
-                    Ok(nf) => {
-                        self.ui.terrain_msg = format!("carregado {} ({nf} fumarolas); mundo semeado de novo", path.display());
-                        true
-                    }
-                    Err(e) => {
-                        self.ui.terrain_msg = format!("erro: {e}");
-                        false
-                    }
-                },
-                TerrainAction::Save => {
-                    self.ui.terrain_msg = match self.world.save_terrain_png(&self.gpu, &path) {
-                        Ok(()) => format!("gravado em {}", path.display()),
-                        Err(e) => format!("erro: {e}"),
-                    };
-                    false
-                }
-                TerrainAction::Generated => {
-                    self.world.use_generated_terrain();
-                    self.ui.terrain_msg = "terreno gerado; mundo semeado de novo".into();
-                    true
-                }
-            };
-            if resow {
-                // Mesma semente: só o terreno muda.
-                self.seed -= 1;
-                self.ui.reseed = true;
-            }
+            self.terrain_action(action);
         }
         if self.ui.reseed {
             self.ui.reseed = false;
@@ -282,6 +306,7 @@ impl Running {
                 self.egui_renderer.update_texture(&self.gpu.device, &self.gpu.queue, id, &delta);
             }
         }
+        self.view.uv_depth.set(self.world.params.uv_depth);
         self.view.update(
             &self.gpu.queue,
             &self.cam,

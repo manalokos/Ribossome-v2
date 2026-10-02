@@ -43,6 +43,8 @@ const MONOMER_SPENT_COLOR: vec3<f32> = vec3<f32>(0.22, 0.22, 0.24);
 const MONOMER_GAMMA: f32 = 0.5;     // alpha_gamma_adjust do v3
 const DYE_VIS_GAIN: f32 = 2.0;
 const WATER: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
+// Brilho mínimo na sombra total do terreno (vista normal).
+const SHADOW_FLOOR: f32 = 0.3;
 
 // Teclas 1–4 (só ativados): A vermelho, U amarelo, G verde, C azul.
 fn channel_color(ch: u32) -> vec3<f32> {
@@ -73,6 +75,13 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         act[ch] = f32(v & 0xFFFFu);
         spent[ch] = f32(v >> 16u);
     }
+    // SOMBRA do terreno: a luz da célula a dividir pela que teria em água
+    // aberta à mesma profundidade (assim só o terreno faz sombra; a água
+    // sozinha não escurece o fundo). 1 = iluminado, 0 = sombra total.
+    let depth_t = f32(GRID_SIZE - u32(cell_f.y)) / f32(GRID_SIZE);
+    let open_light = exp(-max(view.uv_depth, 0.5) * depth_t);
+    let lit = clamp(light_view[idx] / max(open_light, 1e-12), 0.0, 1.0);
+    let shade = mix(SHADOW_FLOOR, 1.0, lit);
     // Água: preta, com um brilho quente onde chega a luz UV (com as sombras).
     let water = WATER + vec3<f32>(0.06, 0.05, 0.035) * clamp(light_view[idx] * 3.0, 0.0, 2.0);
     // Contagens em unidades de 3 quanta, com tone map de Reinhard (como no v3).
@@ -119,7 +128,12 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     if (g > 0u) {
         let rock = vec3<f32>(0.32, 0.29, 0.26) + 0.04 * f32(g % 3u);
         let rubble = vec3<f32>(0.22, 0.20, 0.18);
-        return vec4<f32>(select(rubble, rock, g >= 3u), 1.0);
+        // A rocha mostra a luz que lhe CHEGA (a da célula de cima): a
+        // superfície fica iluminada e o interior escuro.
+        let iy_up = min(u32(cell_f.y) + 1u, GRID_SIZE - 1u);
+        let depth_up = f32(GRID_SIZE - iy_up) / f32(GRID_SIZE);
+        let lit_up = clamp(light_view[iy_up * GRID_SIZE + u32(cell_f.x)] / max(exp(-max(view.uv_depth, 0.5) * depth_up), 1e-12), 0.0, 1.0);
+        return vec4<f32>(select(rubble, rock, g >= 3u) * mix(SHADOW_FLOOR, 1.0, lit_up), 1.0);
     }
 
     // Normal: os ATIVADOS têm a média das cores dos seus canais (A vermelho,
@@ -134,6 +148,6 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     let act_frac = act_amt / max(total_amt, 1e-5);
     let hue = mix(MONOMER_SPENT_COLOR, act_col, act_frac);
     let inten = pow(clamp(total_amt, 0.0, 1.0), MONOMER_GAMMA);
-    let c = mix(water, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0));
+    let c = mix(water, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) * shade;
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }

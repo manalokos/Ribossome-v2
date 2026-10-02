@@ -97,19 +97,19 @@ pub fn generate(cfg: &WorldConfig, seed: u32, fumaroles: &[Fumarole]) -> Vec<u32
 //
 // Canal AZUL = terreno: 0 = água (0 grãos), 255 = rocha maciça (ROCK grãos),
 // linear (azul fraco = entulho, 1–2; a partir de ~metade = rocha, >= 3).
-// VERMELHO = fumarolas: cada mancha contígua claramente vermelha (vermelho
-// alto, pouco verde, vermelho bem acima do azul) é uma fumarola, no centro
-// dela. Uma imagem em cinzentos também serve (azul = cinzento; um cinzento
-// nunca conta como vermelho). A imagem pode ter qualquer tamanho: é
-// reamostrada (vizinho mais próximo) para a grelha.
+// VERMELHO = fumarolas, POR PÍXEL: o calor do píxel é (vermelho − verde)/255
+// vezes a força de uma fumarola v3 no centro (`FUMAROLE_PIXEL_STRENGTH`).
+// Vermelho puro aquece ao máximo; um cinzento (vermelho = verde) não aquece,
+// por isso imagens em cinzentos também servem (só terreno). A imagem pode ter
+// qualquer tamanho: é reamostrada (vizinho mais próximo) para a grelha.
 // A linha de cima da imagem é o cimo do mundo (+y no mundo = cima no ecrã).
 
-fn is_fumarole_px(r: u8, g: u8, b: u8) -> bool {
-    r >= 200 && g <= 60 && r as u32 > b as u32 + 30
-}
+/// Força de aquecimento de um píxel vermelho puro (= centro da fumarola v3).
+pub const FUMAROLE_PIXEL_STRENGTH: f32 = 5000.0;
 
-/// Lê um PNG e devolve (grãos por célula, fumarolas).
-pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<(Vec<u32>, Vec<Fumarole>), String> {
+/// Lê um PNG. Devolve (grãos por célula, calor por célula em fração de
+/// `FUMAROLE_PIXEL_STRENGTH`), ambos à resolução da grelha.
+pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<(Vec<u32>, Vec<f32>), String> {
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut dec = png::Decoder::new(std::io::BufReader::new(file));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -122,89 +122,35 @@ pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<(Vec<u32>, 
         png::ColorType::GrayscaleAlpha => 2,
         png::ColorType::Rgb => 3,
         png::ColorType::Rgba => 4,
-        png::ColorType::Indexed => return Err("PNG indexado não suportado (grava em cinzento ou RGB)".into()),
+        png::ColorType::Indexed => return Err("PNG indexado não suportado (grava em RGB)".into()),
     };
-    let px = |x: usize, y: usize| -> (u8, u8, u8) {
-        let i = (y * w + x) * ch;
-        if ch < 3 { (buf[i], buf[i], buf[i]) } else { (buf[i], buf[i + 1], buf[i + 2]) }
-    };
-
-    // Fumarolas: manchas vermelhas contíguas na imagem original.
-    let mut seen = vec![false; w * h];
-    let mut fumaroles = Vec::new();
-    for y0 in 0..h {
-        for x0 in 0..w {
-            let (r, g, b) = px(x0, y0);
-            if seen[y0 * w + x0] || !is_fumarole_px(r, g, b) {
-                continue;
-            }
-            let (mut sx, mut sy, mut n) = (0f64, 0f64, 0f64);
-            let mut stack = vec![(x0, y0)];
-            seen[y0 * w + x0] = true;
-            while let Some((x, y)) = stack.pop() {
-                sx += x as f64;
-                sy += y as f64;
-                n += 1.0;
-                let nb = [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)];
-                for (nx, ny) in nb {
-                    if nx < w && ny < h && !seen[ny * w + nx] {
-                        let (r, g, b) = px(nx, ny);
-                        if is_fumarole_px(r, g, b) {
-                            seen[ny * w + nx] = true;
-                            stack.push((nx, ny));
-                        }
-                    }
-                }
-            }
-            let d = Fumarole::v3_default();
-            fumaroles.push(Fumarole::new(
-                ((sx / n + 0.5) / w as f64) as f32,
-                (1.0 - (sy / n + 0.5) / h as f64) as f32,
-                d.strength,
-                d.spread,
-            ));
-        }
-    }
-
     let n = cfg.grid_size as usize;
     let mut g = vec![0u32; n * n];
+    let mut heat = vec![0f32; n * n];
     for y in 0..n {
         // Linha 0 da imagem = cimo do mundo.
         let iy = ((n - 1 - y) * h) / n;
         for x in 0..n {
             let ix = (x * w) / n;
-            let (_, _, b) = px(ix, iy);
+            let i = (iy * w + ix) * ch;
+            let (r, gg, b) = if ch < 3 { (buf[i], buf[i], buf[i]) } else { (buf[i], buf[i + 1], buf[i + 2]) };
             g[y * n + x] = ((b as f32 / 255.0) * ROCK as f32).round() as u32;
+            heat[y * n + x] = (r as f32 - gg as f32).max(0.0) / 255.0;
         }
     }
-    Ok((g, fumaroles))
+    Ok((g, heat))
 }
 
-/// Grava o terreno em PNG (terreno no azul, fumarolas a vermelho).
-pub fn save_png(path: &std::path::Path, cfg: &WorldConfig, gamma: &[u32], fumaroles: &[Fumarole]) -> Result<(), String> {
+/// Grava o terreno em PNG: azul = grãos, vermelho = calor (fração de
+/// `FUMAROLE_PIXEL_STRENGTH`, à resolução da grelha).
+pub fn save_png(path: &std::path::Path, cfg: &WorldConfig, gamma: &[u32], heat: &[f32]) -> Result<(), String> {
     let n = cfg.grid_size as usize;
     let mut rgb = vec![0u8; n * n * 3];
     for y in 0..n {
         for x in 0..n {
-            let v = ((gamma[y * n + x].min(ROCK) * 255) / ROCK) as u8;
             let o = ((n - 1 - y) * n + x) * 3;
-            rgb[o + 2] = v;
-        }
-    }
-    for f in fumaroles.iter().filter(|f| f.enabled != 0) {
-        let cx = (f.x_frac * n as f32) as i64;
-        let cy = ((1.0 - f.y_frac) * n as f32) as i64;
-        for dy in -2..=2 {
-            for dx in -2..=2 {
-                let (x, y) = (cx + dx, cy + dy);
-                if x >= 0 && y >= 0 && (x as usize) < n && (y as usize) < n {
-                    let o = (y as usize * n + x as usize) * 3;
-                    // Vermelho por cima do terreno (o azul fica: o terreno
-                    // lê-se na mesma; a fumarola fica na água se o azul for 0).
-                    rgb[o] = 255;
-                    rgb[o + 1] = 0;
-                }
-            }
+            rgb[o] = (heat[y * n + x].clamp(0.0, 1.0) * 255.0).round() as u8;
+            rgb[o + 2] = ((gamma[y * n + x].min(ROCK) * 255) / ROCK) as u8;
         }
     }
     let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -212,4 +158,29 @@ pub fn save_png(path: &std::path::Path, cfg: &WorldConfig, gamma: &[u32], fumaro
     enc.set_color(png::ColorType::Rgb);
     enc.set_depth(png::BitDepth::Eight);
     enc.write_header().and_then(|mut w| w.write_image_data(&rgb)).map_err(|e| e.to_string())
+}
+
+/// Calor das fumarolas PONTUAIS (as do terreno gerado e dos sliders), à
+/// resolução da grelha, em fração de `FUMAROLE_PIXEL_STRENGTH`. Mesmo perfil
+/// que o shader usava: força·(1 − d/r)² dentro do raio.
+pub fn rasterize_fumaroles(cfg: &WorldConfig, fumaroles: &[Fumarole]) -> Vec<f32> {
+    let n = cfg.grid_size as usize;
+    let mut heat = vec![0f32; n * n];
+    let cell_world = cfg.world_units_per_cell as f32;
+    for f in fumaroles.iter().filter(|f| f.enabled != 0 && f.strength > 0.0) {
+        let (cx, cy) = (f.x_frac * n as f32, f.y_frac * n as f32);
+        let r = (f.spread / cell_world).max(1.0);
+        let (x0, x1) = (((cx - r).floor().max(0.0)) as usize, ((cx + r).ceil() as usize).min(n));
+        let (y0, y1) = (((cy - r).floor().max(0.0)) as usize, ((cy + r).ceil() as usize).min(n));
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+                if d < r {
+                    let w0 = 1.0 - d / r;
+                    heat[y * n + x] += f.strength * w0 * w0 / FUMAROLE_PIXEL_STRENGTH;
+                }
+            }
+        }
+    }
+    heat
 }

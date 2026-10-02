@@ -49,6 +49,8 @@ pub struct WorldView {
     draw_args: wgpu::Buffer,
     /// Slot a desenhar sozinho (u32::MAX = todos).
     pub focus: std::cell::Cell<u32>,
+    /// Profundidade ótica da água (copiada de SimParams antes de desenhar).
+    pub uv_depth: std::cell::Cell<f32>,
 }
 
 impl WorldView {
@@ -246,6 +248,7 @@ impl WorldView {
             agents_pipeline,
             draw_args: world.draw_args_buf.clone(),
             focus: std::cell::Cell::new(u32::MAX),
+            uv_depth: std::cell::Cell::new(11.0),
         }
     }
 
@@ -268,7 +271,7 @@ impl WorldView {
             monomer_brightness: brightness,
             focus_slot: self.focus.get(),
             signal_view,
-            _vpad0: 0,
+            uv_depth: self.uv_depth.get(),
             _vpad1: 0,
             _vpad2: 0,
         };

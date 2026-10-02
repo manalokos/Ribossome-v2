@@ -35,9 +35,9 @@ pub struct UiState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerrainAction {
-    /// Carrega o PNG e semeia de novo (mesma semente).
+    /// Escolhe um PNG (janela), carrega-o e semeia de novo (mesma semente).
     Load,
-    /// Grava o terreno atual em PNG.
+    /// Escolhe onde gravar (janela) e grava o terreno atual em PNG.
     Save,
     /// Volta ao terreno gerado e semeia de novo.
     Generated,
@@ -162,16 +162,16 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
             },
         );
         egui::CollapsingHeader::new("Terreno (imagem)").default_open(false).show(ui, |ui| {
-            ui.small("PNG: AZUL = terreno (0 água, fraco entulho, forte rocha, 255 rocha maciça); VERMELHO = fumarola. Cinzentos também servem.");
+            ui.small("PNG: AZUL = terreno (0 água, fraco entulho, forte rocha, 255 rocha maciça); VERMELHO = calor por píxel (vermelho − verde). Cinzentos também servem.");
             ui.horizontal(|ui| {
                 ui.label("ficheiro");
                 ui.text_edit_singleline(&mut st.terrain_path);
             });
             ui.horizontal(|ui| {
-                if ui.button("carregar (semeia de novo)").clicked() {
+                if ui.button("carregar…").on_hover_text("escolhe um PNG; o mundo é semeado de novo").clicked() {
                     st.terrain_action = Some(TerrainAction::Load);
                 }
-                if ui.button("gravar o atual").clicked() {
+                if ui.button("gravar…").on_hover_text("grava o terreno atual (e o calor) num PNG").clicked() {
                     st.terrain_action = Some(TerrainAction::Save);
                 }
                 if ui.button("terreno gerado").clicked() {
@@ -248,6 +248,10 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
         ui.add(egui::Slider::new(&mut p.fluid_decay, 0.9..=1.0).text("decay por frame"));
     });
     egui::CollapsingHeader::new("Fumarolas").default_open(false).show(ui, |ui| {
+        ui.add(egui::Slider::new(&mut world.fumarole_gain, 0.0..=5.0).text("força das fumarolas ×"));
+        if world.heat_image.is_some() {
+            ui.small("+ calor dos píxeis vermelhos do terreno carregado");
+        }
         for (i, f) in world.fumaroles.iter_mut().enumerate() {
             ui.push_id(i, |ui| {
                 let mut on = f.enabled != 0;

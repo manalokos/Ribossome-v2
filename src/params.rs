@@ -355,7 +355,9 @@ gpu_struct! {
         pub focus_slot: u32,
         /// Cor dos agentes: 0 química, 1 sinal α, 2 sinal β, 3 α e β.
         pub signal_view: u32,
-        pub _vpad0: u32,
+        /// Profundidade ótica da água (= SimParams::uv_depth), para a vista
+        /// normal separar a sombra do terreno do escurecer com a profundidade.
+        pub uv_depth: f32,
         pub _vpad1: u32,
         pub _vpad2: u32,
     }

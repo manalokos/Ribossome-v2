@@ -245,20 +245,8 @@ fn update_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     let tt = temp_in[fgrid(x, min(y + 1u, FLUID_SIZE - 1u))];
     t = mix(t, (tl + tr + tb + tt) * 0.25, TEMP_DIFFUSE);
 
-    // Fumarolas: posição em fração do mundo, raio em unidades do mundo.
-    let cell_world = SIM_SIZE / f32(FLUID_SIZE);
-    for (var i = 0u; i < params.fumarole_count; i++) {
-        let fum = fumaroles[i];
-        if (fum.enabled == 0u || fum.strength <= 0.0) { continue; }
-        let fxp = f32(FLUID_SIZE) * clamp(fum.x_frac, 0.0, 1.0);
-        let fyp = f32(FLUID_SIZE) * clamp(fum.y_frac, 0.0, 1.0);
-        let r = max(fum.spread / cell_world, 1.0);
-        let d = length(vec2<f32>(f32(x) + 0.5 - fxp, f32(y) + 0.5 - fyp));
-        if (d < r) {
-            let w0 = 1.0 - d / r;
-            t += fum.strength * TEMP_HEAT_RATE * w0 * w0 * dt;
-        }
-    }
+    // Fumarolas: mapa de calor por célula (CPU: pontuais + píxeis vermelhos).
+    t += heat_src[idx] * TEMP_HEAT_RATE * dt;
 
     // SOL: a água absorve pouco; a rocha iluminada absorve muito e aquece,
     // semeando convecção.

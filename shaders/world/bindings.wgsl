@@ -28,4 +28,5 @@
 // Forças acumuladas (f32 como bits, atómico: muitos escritores por célula).
 @group(2) @binding(7) var<storage, read_write> force_vectors: array<atomic<u32>>;
 @group(2) @binding(8) var<storage, read_write> fluid_forces: array<vec2<f32>>;
-@group(2) @binding(9) var<storage, read> fumaroles: array<Fumarole>;
+// Fonte de calor por célula do fluido (fumarolas pontuais + píxeis da imagem).
+@group(2) @binding(9) var<storage, read> heat_src: array<f32>;

@@ -77,6 +77,7 @@ impl Capture {
     /// Desenha com a câmara dada e devolve RGBA (linha de cima primeiro).
     pub fn render(&self, gpu: &Gpu, world: &World, cam: &Camera, view_mode: u32, brightness: f32) -> Vec<u8> {
         let s = self.size as f32;
+        self.view.uv_depth.set(world.params.uv_depth);
         self.view.update(&gpu.queue, cam, [s, s], view_mode, brightness, self.signal_view.get());
         let target = self.texture.create_view(&Default::default());
         let mut enc = gpu.device.create_command_encoder(&Default::default());

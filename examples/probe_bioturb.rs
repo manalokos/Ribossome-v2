@@ -23,7 +23,7 @@ fn main() {
             g[y * n + x] = 1;
         }
     }
-    world.custom_terrain = Some((g.clone(), Vec::new()));
+    world.custom_terrain = Some((g.clone(), vec![0.0; n * n]));
     let base = world.seed_lab(&gpu, 1, 1.5);
     world.params.bioturbation = env("BIO", 0.05);
     let mut rng = ribossome::life::SplitMix(3);

@@ -16,6 +16,7 @@ glam = { version = "0.30", features = ["bytemuck"] }
 log = "0.4"
 env_logger = "0.11"
 png = "0.17"
+rfd = "0.17.2"
 
 [profile.dev]
 opt-level = 1

@@ -173,7 +173,11 @@ pub struct World {
     pub velocity_buf: wgpu::Buffer,
     /// Temperatura publicada (temp_in).
     pub temp_buf: wgpu::Buffer,
-    fumarole_buf: wgpu::Buffer,
+    /// Fonte de calor por célula do FLUIDO (força; o shader multiplica por
+    /// TEMP_HEAT_RATE). Reconstruída no CPU quando algo muda.
+    heat_buf: wgpu::Buffer,
+    /// Assinatura do que está no heat_buf (para só reenviar quando muda).
+    heat_key: Vec<u8>,
     ledger_buf: wgpu::Buffer,
     ledger_staging: wgpu::Buffer,
     readback: Readback,
@@ -208,7 +212,13 @@ pub struct World {
     pub seed_density: f32,
     /// Terreno carregado de uma imagem (grãos por célula, fumarolas): usado
     /// nas próximas sementeiras em vez do gerado. None = gerado.
-    pub custom_terrain: Option<(Vec<u32>, Vec<Fumarole>)>,
+    /// (grãos por célula, calor por célula em fração de
+    /// FUMAROLE_PIXEL_STRENGTH), ambos à resolução da grelha.
+    pub custom_terrain: Option<(Vec<u32>, Vec<f32>)>,
+    /// Calor por píxel do terreno carregado (grelha; None = só as pontuais).
+    pub heat_image: Option<Vec<f32>>,
+    /// Multiplicador de todo o calor das fumarolas.
+    pub fumarole_gain: f32,
 }
 
 /// Contadores do ciclo de vida (life_counters na GPU).
@@ -300,7 +310,7 @@ impl World {
         let temp_b = storage_buffer(device, "temperature out", fcells * 4);
         let force_vec = storage_buffer(device, "force vectors", fcells * 8);
         let forces = storage_buffer(device, "fluid forces", fcells * 8);
-        let fumarole_buf = storage_buffer(device, "fumaroles", (MAX_FUMAROLES * size_of::<Fumarole>()) as u64);
+        let heat_buf = storage_buffer(device, "fumarole heat", fcells * 4);
         // Organismos: slots fixos; todos começam livres.
         let max_agents = cfg.max_agents as u64;
         let agents_buf = storage_buffer(device, "agents", max_agents * size_of::<Agent>() as u64);
@@ -393,12 +403,12 @@ impl World {
         let fluid_ab = bind_all(
             "fluid ab",
             &fluid_layout,
-            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &fumarole_buf],
+            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf],
         );
         let fluid_ba = bind_all(
             "fluid ba",
             &fluid_layout,
-            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &fumarole_buf],
+            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf],
         );
 
         // Grupo 4 — multigrid da pressão: um uniforme por nível (offset
@@ -593,7 +603,7 @@ impl World {
             slope_buf,
             velocity_buf: vel_a,
             temp_buf: temp_a,
-            fumarole_buf,
+            heat_buf,
             ledger_buf,
             ledger_staging,
             readback: Readback::Idle,
@@ -621,6 +631,9 @@ impl World {
             last_counters: None,
             seed_density: SEED_DENSITY_DEFAULT,
             custom_terrain: None,
+            heat_image: None,
+            fumarole_gain: 1.0,
+            heat_key: Vec::new(),
         }
     }
 
@@ -646,8 +659,10 @@ impl World {
     /// dos monómeros escritos.
     pub fn seed_matter(&mut self, gpu: &Gpu, seed: u64) -> Ledger {
         let gamma = match &self.custom_terrain {
-            Some((g, f)) => {
-                self.fumaroles = f.iter().copied().take(MAX_FUMAROLES).collect();
+            Some((g, h)) => {
+                // Terreno de imagem: as fumarolas são os píxeis vermelhos.
+                self.fumaroles.clear();
+                self.heat_image = Some(h.clone());
                 g.clone()
             }
             None => terrain::generate(&self.cfg, seed as u32, &self.fumaroles),
@@ -717,24 +732,60 @@ impl World {
     }
 
     /// Carrega um terreno de um PNG (ver `terrain::load_png`); entra na
-    /// próxima sementeira. Devolve o número de fumarolas encontradas.
+    /// próxima sementeira. Devolve quantas células aquecem.
     pub fn load_terrain_png(&mut self, path: &std::path::Path) -> Result<usize, String> {
-        let (g, f) = terrain::load_png(path, &self.cfg)?;
-        let nf = f.len();
-        self.custom_terrain = Some((g, f));
-        Ok(nf)
+        let (g, h) = terrain::load_png(path, &self.cfg)?;
+        let hot = h.iter().filter(|&&v| v > 0.0).count();
+        self.custom_terrain = Some((g, h));
+        Ok(hot)
     }
 
     /// Volta ao terreno gerado (com a fumarola por omissão) na próxima sementeira.
     pub fn use_generated_terrain(&mut self) {
         self.custom_terrain = None;
+        self.heat_image = None;
         self.fumaroles = vec![Fumarole::v3_default()];
     }
 
     /// Grava o terreno ATUAL (lido da GPU) e as fumarolas num PNG.
     pub fn save_terrain_png(&self, gpu: &Gpu, path: &std::path::Path) -> Result<(), String> {
         let g = self.read_gamma_blocking(gpu);
-        terrain::save_png(path, &self.cfg, &g, &self.fumaroles)
+        terrain::save_png(path, &self.cfg, &g, &self.heat_grid())
+    }
+
+    /// Calor total à resolução da grelha (fração de FUMAROLE_PIXEL_STRENGTH,
+    /// sem o multiplicador): píxeis da imagem + fumarolas pontuais.
+    pub fn heat_grid(&self) -> Vec<f32> {
+        let mut h = terrain::rasterize_fumaroles(&self.cfg, &self.fumaroles);
+        if let Some(img) = &self.heat_image {
+            for (a, b) in h.iter_mut().zip(img) {
+                *a += b;
+            }
+        }
+        h
+    }
+
+    /// Reenvia o calor das fumarolas se mudou (fumarolas, imagem ou ganho):
+    /// média da grelha para o fluido, × força de um píxel × ganho.
+    fn upload_heat(&mut self, queue: &wgpu::Queue) {
+        let mut key: Vec<u8> = bytemuck::cast_slice(&self.fumaroles).to_vec();
+        key.extend_from_slice(&self.fumarole_gain.to_le_bytes());
+        key.extend_from_slice(&(self.heat_image.as_ref().map_or(0, |v| v.as_ptr() as usize)).to_le_bytes());
+        if key == self.heat_key {
+            return;
+        }
+        let grid = self.heat_grid();
+        let (n, f) = (self.cfg.grid_size as usize, self.cfg.fluid_size as usize);
+        let k = (n / f).max(1);
+        let scale = terrain::FUMAROLE_PIXEL_STRENGTH * self.fumarole_gain.max(0.0) / (k * k) as f32;
+        let mut fl = vec![0f32; f * f];
+        for y in 0..n.min(f * k) {
+            for x in 0..n.min(f * k) {
+                fl[(y / k) * f + x / k] += grid[y * n + x] * scale;
+            }
+        }
+        queue.write_buffer(&self.heat_buf, 0, bytemuck::cast_slice(&fl));
+        self.heat_key = key;
     }
 
     /// Lê o terreno inteiro de forma síncrona (testes).
@@ -756,11 +807,8 @@ impl World {
         }
         let st = self.settings;
         let substep = st.fluid_substep.clamp(1, 4);
-        let nfum = self.fumaroles.len().min(MAX_FUMAROLES);
-        if nfum > 0 {
-            queue.write_buffer(&self.fumarole_buf, 0, bytemuck::cast_slice(&self.fumaroles[..nfum]));
-        }
-        self.params.fumarole_count = nfum as u32;
+        self.upload_heat(queue);
+        self.params.fumarole_count = self.fumaroles.len() as u32;
         self.params.fluid_dt = self.params.dt * substep as f32;
         self.params.fluid_enabled = st.fluid_enabled as u32;
         self.params.max_agents = self.cfg.max_agents;
