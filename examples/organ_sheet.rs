@@ -28,6 +28,8 @@ fn main() {
     world.seed_lab(&gpu, 5, 1.5);
     world.params.pairing_rate = 0.0;
     world.params.death_probability = 0.0;
+    world.params.maintenance_cost = 0.0;
+    world.params.sedimentation = 0.0;
     let s = cfg.sim_size();
     let ala = "GCU ".repeat(6);
     let mut reqs = Vec::new();
