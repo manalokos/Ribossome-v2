@@ -6,9 +6,7 @@
 // profundidade, como luz difusa.
 // Calculada a 1/LIGHT_DIV da resolução (a varredura é sequencial nas
 // linhas: a 2048² custava ~7 ms). Cada linha da luz cobre 2 linhas da
-// grelha; a média de cima usa pesos binomiais (1 4 6 4 1)/16 sobre x−2..x+2,
-// que espalha por linha da luz o mesmo que a média simples de 5 vizinhos em
-// 2 linhas da grelha.
+// grelha; a média de cima é a média simples de 7 vizinhos (light_above).
 // Por omissão a luz PROPAGA-SE (light_propagate): em cada passo cada linha
 // recebe a luz da linha de cima do passo ANTERIOR, todas em paralelo. O
 // equilíbrio é o mesmo da varredura, mas a luz desce light_rows_per_step
@@ -45,6 +43,19 @@ fn light_transmit(lx: u32, ly: u32) -> f32 {
     return exp(-UV_SHADOW_ABSORB * g - AGENT_UV_ABSORB * shade);
 }
 
+// Média SIMPLES dos LIGHT_TAPS vizinhos da linha `row` (x−3..x+3), com as
+// paredes a refletir (borda repetida). 7 vizinhos a meia resolução: sombras
+// difusas (o Filipe pediu mais difusas que com 5).
+const LIGHT_TAPS: i32 = 7;
+fn light_above(x: u32, row: u32) -> f32 {
+    var s = 0.0;
+    for (var d = 0; d < LIGHT_TAPS; d++) {
+        let xs = clamp(i32(x) + d - LIGHT_TAPS / 2, 0, i32(LIGHT_SIZE) - 1);
+        s += light_grid[row * LIGHT_SIZE + u32(xs)];
+    }
+    return s / f32(LIGHT_TAPS);
+}
+
 @compute @workgroup_size(256)
 fn clear_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.y * 65535u * 256u + gid.x;
@@ -74,19 +85,12 @@ fn compute_uv_light(@builtin(local_invocation_id) lid_v: vec3<u32>) {
     }
     storageBarrier();
     workgroupBarrier();
-    var w = array<f32, 5>(0.0625, 0.25, 0.375, 0.25, 0.0625);
     for (var t = 1u; t < LIGHT_SIZE; t++) {
         let y = LIGHT_SIZE - 1u - t;
-        let up = (y + 1u) * LIGHT_SIZE;
-        for (var c = 0u; c < cols; c++) {
+            for (var c = 0u; c < cols; c++) {
             let x = lid * cols + c;
             if (x >= LIGHT_SIZE) { continue; }
-            var above = 0.0;
-            for (var d = 0u; d < 5u; d++) {
-                // x−2..x+2, com as paredes a refletir (borda repetida).
-                let xs = clamp(i32(x) + i32(d) - 2, 0, i32(LIGHT_SIZE) - 1);
-                above += w[d] * light_grid[up + u32(xs)];
-            }
+            let above = light_above(x, y + 1u);
             // light_grid ainda tem a transmissão desta célula (pré-passo).
             light_grid[y * LIGHT_SIZE + x] *= above * row_water;
         }
@@ -105,14 +109,7 @@ fn light_propagate(@builtin(global_invocation_id) gid: vec3<u32>) {
     let y = i / LIGHT_SIZE;
     let row_water = exp(-max(params.uv_depth, 0.5) * f32(LIGHT_DIV) / f32(GRID_SIZE));
     var above = 1.0;
-    if (y + 1u < LIGHT_SIZE) {
-        var w = array<f32, 5>(0.0625, 0.25, 0.375, 0.25, 0.0625);
-        above = 0.0;
-        for (var d = 0u; d < 5u; d++) {
-            let xs = clamp(i32(x) + i32(d) - 2, 0, i32(LIGHT_SIZE) - 1);
-            above += w[d] * light_grid[(y + 1u) * LIGHT_SIZE + u32(xs)];
-        }
-    }
+    if (y + 1u < LIGHT_SIZE) { above = light_above(x, y + 1u); }
     light_next[i] = above * row_water * light_transmit(x, y);
 }
 

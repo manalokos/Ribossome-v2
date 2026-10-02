@@ -39,12 +39,12 @@ fn vs_fullscreen(@builtin(vertex_index) vi: u32) -> VsOut {
 // luminância para se lerem também com daltonismo. O tom vem da FRAÇÃO de
 // ativados (não da soma: dourado + azul somados davam cinzento) e o brilho
 // da quantidade total.
-const MONOMER_SPENT_COLOR: vec3<f32> = vec3<f32>(0.22, 0.22, 0.24);
+const MONOMER_SPENT_COLOR: vec3<f32> = vec3<f32>(0.12, 0.12, 0.13);
 const MONOMER_GAMMA: f32 = 0.5;     // alpha_gamma_adjust do v3
 const DYE_VIS_GAIN: f32 = 2.0;
 const WATER: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
-// Brilho mínimo na sombra total do terreno (vista normal).
-const SHADOW_FLOOR: f32 = 0.3;
+// Brilho dourado da luz UV (somado na vista normal).
+const LIGHT_GOLD: vec3<f32> = vec3<f32>(0.30, 0.22, 0.06);
 
 // Teclas 1–4 (só ativados): A vermelho, U amarelo, G verde, C azul.
 fn channel_color(ch: u32) -> vec3<f32> {
@@ -75,19 +75,16 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         act[ch] = f32(v & 0xFFFFu);
         spent[ch] = f32(v >> 16u);
     }
-    // SOMBRA do terreno: a luz da célula a dividir pela que teria em água
-    // aberta à mesma profundidade (assim só o terreno faz sombra; a água
-    // sozinha não escurece o fundo). 1 = iluminado, 0 = sombra total.
+    // LUZ como SOMA DOURADA: onde chega luz soma-se um brilho dourado; a
+    // sombra (do terreno e dos agentes) é a falta dele. Não multiplica nada,
+    // por isso os monómeros guardam a cor. √luz para se ver mais fundo do que
+    // a luz física (que cai exp(-uv_depth) do topo ao fundo).
     // A luz está a 1/LIGHT_DIV da resolução.
     let ly = u32(cell_f.y) / LIGHT_DIV;
     let lidx = ly * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV;
     let light_here = light_view[lidx];
-    let depth_t = f32((LIGHT_SIZE - ly) * LIGHT_DIV) / f32(GRID_SIZE);
-    let open_light = exp(-max(view.uv_depth, 0.5) * depth_t);
-    let lit = clamp(light_here / max(open_light, 1e-12), 0.0, 1.0);
-    let shade = mix(SHADOW_FLOOR, 1.0, lit);
-    // Água: preta, com um brilho quente onde chega a luz UV (com as sombras).
-    let water = WATER + vec3<f32>(0.06, 0.05, 0.035) * clamp(light_here * 3.0, 0.0, 2.0);
+    let glow = LIGHT_GOLD * sqrt(clamp(light_here, 0.0, 1.0));
+    let water = WATER;
     // Contagens em unidades de 3 quanta, com tone map de Reinhard (como no v3).
     let act_lin = act / 3.0 * DYE_VIS_GAIN;
     let act_tm = act_lin / (vec4<f32>(1.0) + act_lin);
@@ -132,12 +129,12 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     if (g > 0u) {
         let rock = vec3<f32>(0.32, 0.29, 0.26) + 0.04 * f32(g % 3u);
         let rubble = vec3<f32>(0.22, 0.20, 0.18);
-        // A rocha mostra a luz que lhe CHEGA (a da célula de cima): a
-        // superfície fica iluminada e o interior escuro.
+        // A rocha soma a luz que lhe CHEGA (a da célula de cima): a
+        // superfície fica dourada, o interior não.
         let ly_up = min(ly + 1u, LIGHT_SIZE - 1u);
-        let depth_up = f32((LIGHT_SIZE - ly_up) * LIGHT_DIV) / f32(GRID_SIZE);
-        let lit_up = clamp(light_view[ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV] / max(exp(-max(view.uv_depth, 0.5) * depth_up), 1e-12), 0.0, 1.0);
-        return vec4<f32>(select(rubble, rock, g >= 3u) * mix(SHADOW_FLOOR, 1.0, lit_up), 1.0);
+        let light_up = light_view[ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV];
+        let rock_glow = LIGHT_GOLD * sqrt(clamp(light_up, 0.0, 1.0));
+        return vec4<f32>(clamp(select(rubble, rock, g >= 3u) + rock_glow, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     }
 
     // Normal: os ATIVADOS têm a média das cores dos seus canais (A vermelho,
@@ -149,9 +146,12 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     var act_col = vec3<f32>(0.0);
     for (var ch = 0u; ch < 4u; ch++) { act_col += channel_color(ch) * act[ch]; }
     act_col /= max(dot(act, vec4<f32>(1.0)), 1e-5);
+    // Satura: a média de 4 cores tende para bege; normalizar pelo canal mais
+    // forte dá a cor dominante com brilho total (contraste com os gastos).
+    act_col /= max(max(act_col.r, max(act_col.g, act_col.b)), 1e-5);
     let act_frac = act_amt / max(total_amt, 1e-5);
     let hue = mix(MONOMER_SPENT_COLOR, act_col, act_frac);
     let inten = pow(clamp(total_amt, 0.0, 1.0), MONOMER_GAMMA);
-    let c = mix(water, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) * shade;
+    let c = mix(water, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
