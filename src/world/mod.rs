@@ -1,6 +1,9 @@
 //! O mundo: grelha de monómeros, fluido com temperatura, luz UV e terreno.
 
+mod snapshot;
 pub mod terrain;
+
+pub use snapshot::{Scene, ledger_from_json, ledger_json};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -73,7 +76,8 @@ enum Readback {
 }
 
 /// Definições do mundo que não vão para a GPU como parâmetros.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct WorldSettings {
     pub fluid_enabled: bool,
     /// Resolve o fluido de N em N passos, com dt×N (2 no v3).
@@ -246,6 +250,21 @@ pub struct World {
     pub heat_image: Option<Vec<f32>>,
     /// Multiplicador de todo o calor das fumarolas.
     pub fumarole_gain: f32,
+    /// Buffers de estado sem campo próprio, para as cenas gravadas.
+    snap: SnapBuffers,
+}
+
+/// Buffers de estado (além dos públicos) que uma cena grava.
+struct SnapBuffers {
+    pressure: wgpu::Buffer,
+    joint_angle: wgpu::Buffer,
+    joint_base: wgpu::Buffer,
+    joint_active: wgpu::Buffer,
+    sensor_mem: wgpu::Buffer,
+    bitten: wgpu::Buffer,
+    /// Cópia por segmentos (compactar / espalhar os slots vivos).
+    copy_segments: wgpu::ComputePipeline,
+    copy_layout: wgpu::BindGroupLayout,
 }
 
 /// Timestamps por encode_steps (pares antes/depois de cada kernel).
@@ -728,7 +747,20 @@ impl World {
             heat_image: None,
             fumarole_gain: 1.0,
             heat_key: Vec::new(),
+            snap: snapshot::snap_buffers(device, p_a, joint_angle, joint_base, joint_active, sensor_mem, bitten),
         }
+    }
+
+    /// Volta aos parâmetros e definições por omissão (os do código), com
+    /// epoch 0 e a mesma semente. Não mexe na GPU: segue-se uma sementeira.
+    pub fn reset_settings(&mut self) {
+        self.params = SimParams { seed: self.params.seed, ..Default::default() };
+        self.settings = WorldSettings::default();
+        self.fumaroles = vec![Fumarole::v3_default()];
+        self.fumarole_gain = 1.0;
+        self.seed_density = SEED_DENSITY_DEFAULT;
+        self.custom_terrain = None;
+        self.heat_image = None;
     }
 
     /// Pede sementes (geração 0); são processadas no início do próximo `encode_steps`.

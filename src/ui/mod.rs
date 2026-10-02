@@ -35,6 +35,25 @@ pub struct UiState {
     pub tab: Tab,
     /// Velocidade e população (atualizadas ~2×/s em `update_stats`).
     pub stats: Stats,
+    /// Cenas: ação pedida, autosave e mensagem da última operação.
+    pub scene_action: Option<SceneAction>,
+    pub autosave_on: bool,
+    pub autosave_every: u32,
+    /// Ficheiro do autosave (None = desligado neste arranque, p. ex. testes).
+    pub autosave_path: Option<String>,
+    pub scene_msg: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SceneAction {
+    /// Escolhe onde gravar (janela) e grava a cena.
+    Save,
+    /// Escolhe uma cena (janela) e carrega-a.
+    Load,
+    /// Grava já o autosave.
+    AutosaveNow,
+    /// Mundo novo com todos os valores por omissão (e o terreno de arranque).
+    NewWorld,
 }
 
 /// Separadores do painel.
@@ -47,10 +66,11 @@ pub enum Tab {
     Terreno,
     Vida,
     Movimento,
+    Cena,
     Info,
 }
 
-const TABS: [(Tab, &str); 8] = [
+const TABS: [(Tab, &str); 9] = [
     (Tab::Vista, "Vista"),
     (Tab::Materia, "Matéria"),
     (Tab::Luz, "Luz"),
@@ -58,6 +78,7 @@ const TABS: [(Tab, &str); 8] = [
     (Tab::Terreno, "Terreno"),
     (Tab::Vida, "Vida"),
     (Tab::Movimento, "Movimento"),
+    (Tab::Cena, "Cena"),
     (Tab::Info, "Info"),
 ];
 
@@ -128,6 +149,11 @@ impl UiState {
             seed_len: [12, 120],
             seed_aug: true,
             seed_now: false,
+            scene_action: None,
+            autosave_on: true,
+            autosave_every: 50_000,
+            autosave_path: None,
+            scene_msg: String::new(),
         }
     }
 }
@@ -199,8 +225,51 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
         Tab::Terreno => tab_terrain(ui, st, world),
         Tab::Vida => tab_life(ui, st, world),
         Tab::Movimento => tab_motion(ui, world),
+        Tab::Cena => tab_scene(ui, st),
         Tab::Info => tab_info(ui, st, prof),
     });
+}
+
+fn tab_scene(ui: &mut egui::Ui, st: &mut UiState) {
+    ui.label("Uma cena = o mundo inteiro (matéria, terreno, água, agentes) e todos os parâmetros.");
+    ui.label("As tabelas dos aminoácidos e órgãos vêm sempre de assets/ (não da cena).");
+    ui.horizontal(|ui| {
+        if ui.button("gravar cena…").clicked() {
+            st.scene_action = Some(SceneAction::Save);
+        }
+        if ui.button("carregar cena…").clicked() {
+            st.scene_action = Some(SceneAction::Load);
+        }
+    });
+    ui.separator();
+    match &st.autosave_path {
+        Some(path) => {
+            ui.checkbox(&mut st.autosave_on, format!("autosave em {path}"))
+                .on_hover_text("ao arrancar, o programa continua deste ficheiro; ao fechar grava-o");
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut st.autosave_every).range(1000..=10_000_000).speed(1000));
+                ui.label("epochs entre gravações");
+            });
+            if ui.button("gravar autosave agora").clicked() {
+                st.scene_action = Some(SceneAction::AutosaveNow);
+            }
+        }
+        None => {
+            ui.label("autosave desligado neste arranque (cenário de teste)");
+        }
+    }
+    ui.separator();
+    if ui
+        .button("mundo novo com os valores por omissão")
+        .on_hover_text("esquece os parâmetros da cena/autosave: valores do código e o terreno de arranque")
+        .clicked()
+    {
+        st.scene_action = Some(SceneAction::NewWorld);
+    }
+    if !st.scene_msg.is_empty() {
+        ui.separator();
+        ui.label(&st.scene_msg);
+    }
 }
 
 fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {

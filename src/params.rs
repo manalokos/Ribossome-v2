@@ -5,17 +5,38 @@
 //! calcula para o WGSL tem o mesmo tamanho que a struct Rust.
 
 /// Mapeia um tipo escalar Rust para o nome WGSL.
-pub trait WgslScalar {
+pub trait WgslScalar: Copy {
     const WGSL: &'static str;
+    /// Conversões exatas para gravar os campos por nome (cenas).
+    fn to_f64(self) -> f64;
+    fn from_f64(v: f64) -> Self;
 }
 impl WgslScalar for f32 {
     const WGSL: &'static str = "f32";
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+    fn from_f64(v: f64) -> Self {
+        v as f32
+    }
 }
 impl WgslScalar for u32 {
     const WGSL: &'static str = "u32";
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+    fn from_f64(v: f64) -> Self {
+        v as u32
+    }
 }
 impl WgslScalar for i32 {
     const WGSL: &'static str = "i32";
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+    fn from_f64(v: f64) -> Self {
+        v as i32
+    }
 }
 
 /// Struct uniforme partilhada. Só escalares de 4 bytes, para o layout WGSL
@@ -43,6 +64,20 @@ macro_rules! gpu_struct {
                 $( s += &format!("    {}: {},\n", stringify!($field), <$ty as $crate::params::WgslScalar>::WGSL); )*
                 s += "}\n";
                 s
+            }
+
+            /// Os campos por nome (para gravar cenas: um campo novo ou
+            /// removido não estraga uma gravação antiga).
+            pub fn to_named(&self) -> Vec<(&'static str, f64)> {
+                vec![$( (stringify!($field), <$ty as $crate::params::WgslScalar>::to_f64(self.$field)) ),*]
+            }
+
+            /// Muda um campo pelo nome; false se não existir.
+            pub fn set_named(&mut self, name: &str, v: f64) -> bool {
+                match name {
+                    $( stringify!($field) => { self.$field = <$ty as $crate::params::WgslScalar>::from_f64(v); true } )*
+                    _ => false,
+                }
             }
         }
     };

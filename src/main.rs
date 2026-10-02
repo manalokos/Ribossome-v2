@@ -37,6 +37,10 @@ struct Running {
     runlog: ribossome::runlog::RunLog,
     /// Editor local da tabela dos aminoácidos (http://127.0.0.1:8787).
     editor: Option<ribossome::editor::Editor>,
+    /// Gravação de cena em curso (a thread que comprime e escreve).
+    save_job: Option<std::thread::JoinHandle<Result<String, String>>>,
+    /// Epoch do último autosave.
+    last_autosave: u32,
 }
 
 #[derive(Default)]
@@ -87,6 +91,33 @@ fn test_scenario(world: &mut World) {
 
 /// Terreno carregado por omissão no mundo completo (azul = terreno, vermelho = calor).
 const DEFAULT_TERRAIN: &str = "assets/terreno.png";
+
+/// Pasta das cenas gravadas e do autosave.
+const SAVES_DIR: &str = "saves";
+
+/// O autosave deste modo (o laboratório tem outro tamanho de mundo).
+fn autosave_file() -> &'static str {
+    if lab_mode() { "saves/autosave_lab.ribo" } else { "saves/autosave.ribo" }
+}
+
+/// Terreno de arranque. De uma imagem: RIBO_TERRAIN=caminho.png; por omissão
+/// (mundo completo) o terreno do projeto, assets/terreno.png; "-" = gerado.
+fn startup_terrain(world: &mut World) {
+    let terrain = std::env::var("RIBO_TERRAIN")
+        .ok()
+        .or_else(|| (!lab_mode() && std::path::Path::new(DEFAULT_TERRAIN).exists()).then(|| DEFAULT_TERRAIN.into()))
+        .filter(|p| p != "-");
+    if terrain.as_deref() == Some("plano") {
+        // Sem terreno nenhum (testes).
+        let n = world.cfg.cells() as usize;
+        world.custom_terrain = Some((vec![0; n], vec![0.0; n]));
+    } else if let Some(path) = terrain {
+        match world.load_terrain_png(std::path::Path::new(&path)) {
+            Ok(nf) => log::info!("terreno de {path} ({nf} células quentes)"),
+            Err(e) => log::error!("RIBO_TERRAIN: {e}; uso o terreno gerado"),
+        }
+    }
+}
 
 /// Monómeros ativados por canal e célula na piscina do modo laboratório.
 const LAB_PER_CHANNEL: f32 = 1.5;
@@ -146,29 +177,41 @@ impl Running {
         log::info!("mundo {}² células, {} unidades", cfg.grid_size, cfg.sim_size());
         let seed = 1;
         let mut world = World::new(&gpu, cfg, seed as u32);
-        // Terreno de uma imagem: RIBO_TERRAIN=caminho.png; por omissão (mundo
-        // completo) o terreno do projeto, assets/terreno.png; "-" = gerado.
-        let terrain = std::env::var("RIBO_TERRAIN")
-            .ok()
-            .or_else(|| (!lab_mode() && std::path::Path::new(DEFAULT_TERRAIN).exists()).then(|| DEFAULT_TERRAIN.into()))
-            .filter(|p| p != "-");
-        if terrain.as_deref() == Some("plano") {
-            // Sem terreno nenhum (testes).
-            let n = (cfg.grid_size * cfg.grid_size) as usize;
-            world.custom_terrain = Some((vec![0; n], vec![0.0; n]));
-        } else if let Some(path) = terrain {
-            match world.load_terrain_png(std::path::Path::new(&path)) {
-                Ok(nf) => log::info!("terreno de {path} ({nf} células quentes)"),
-                Err(e) => log::error!("RIBO_TERRAIN: {e}; uso o terreno gerado"),
-            }
-        }
-        let baseline = if lab_mode() {
+        startup_terrain(&mut world);
+        let mut baseline = if lab_mode() {
             world.configure_lab();
             world.seed_lab(&gpu, seed, LAB_PER_CHANNEL)
         } else {
             world.seed_matter(&gpu, seed)
         };
         test_scenario(&mut world);
+        // Autosave: desligado nos cenários de teste; RIBO_RESUME=0 arranca um
+        // mundo novo (mas continua a gravar por cima do autosave).
+        let testing = std::env::var("RIBO_SWIMMERS").is_ok();
+        let resume = std::env::var("RIBO_RESUME").map(|v| v != "0").unwrap_or(true);
+        let autosave_path = (!testing).then(|| autosave_file().to_string());
+        let mut scene_msg = String::new();
+        let mut resumed = None;
+        if let Some(path) = autosave_path.as_deref().filter(|p| resume && std::path::Path::new(p).exists()) {
+            let t = std::time::Instant::now();
+            match ribossome::world::Scene::read(std::path::Path::new(path)).and_then(|s| world.load_scene(&gpu, &s)) {
+                Ok((extra, notes)) => {
+                    scene_msg = format!("retomado de {path} (epoch {})", world.params.epoch);
+                    log::info!("{scene_msg} em {:.1} s", t.elapsed().as_secs_f32());
+                    for n in notes {
+                        log::warn!("autosave: {n}");
+                    }
+                    if let Some(b) = ribossome::world::ledger_from_json(&extra["baseline"]) {
+                        baseline = b;
+                    }
+                    resumed = Some(extra);
+                }
+                Err(e) => {
+                    scene_msg = format!("não consegui retomar {path}: {e}; mundo novo");
+                    log::error!("{scene_msg}");
+                }
+            }
+        }
         let view = WorldView::new(&gpu.device, &world, format);
         let cam = Camera::fit(&cfg, [surface_cfg.width as f32, surface_cfg.height as f32]);
 
@@ -196,7 +239,8 @@ impl Running {
         let mut inspector = ui::inspector::Inspector::new(&gpu, &world);
         inspector.register(&gpu.device, &mut egui_renderer);
 
-        Self {
+        let last_autosave = world.params.epoch;
+        let mut r = Self {
             window,
             surface,
             surface_cfg,
@@ -217,7 +261,186 @@ impl Running {
             seed_rng: ribossome::life::SplitMix(seed ^ 0x5EED),
             runlog,
             editor,
+            save_job: None,
+            last_autosave,
+        };
+        r.ui.autosave_path = autosave_path;
+        r.ui.scene_msg = scene_msg;
+        if let Some(extra) = resumed {
+            r.apply_interface(&extra);
         }
+        r
+    }
+
+    /// Estado da interface que vai com a cena (vista, câmara, base da matéria).
+    fn interface_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "baseline": ribossome::world::ledger_json(&self.ui.baseline),
+            "seed": self.seed,
+            "steps_per_frame": self.ui.steps_per_frame,
+            "view_mode": self.ui.view_mode,
+            "monomer_brightness": self.ui.monomer_brightness,
+            "signal_view": self.ui.signal_view,
+            "seed_count": self.ui.seed_count,
+            "seed_len": self.ui.seed_len,
+            "camera": { "center": self.cam.center, "zoom": self.cam.zoom },
+            "autosave_every": self.ui.autosave_every,
+        })
+    }
+
+    fn apply_interface(&mut self, v: &serde_json::Value) {
+        let u = |k: &str| v[k].as_u64();
+        if let Some(b) = ribossome::world::ledger_from_json(&v["baseline"]) {
+            self.ui.baseline = b;
+        }
+        if let Some(s) = u("seed") {
+            self.seed = s;
+        }
+        if let Some(n) = u("steps_per_frame") {
+            self.ui.steps_per_frame = (n as u32).clamp(1, ribossome::world::MAX_STEPS_PER_FRAME);
+        }
+        if let Some(n) = u("view_mode") {
+            self.ui.view_mode = (n as u32).min(9);
+        }
+        if let Some(x) = v["monomer_brightness"].as_f64() {
+            self.ui.monomer_brightness = x as f32;
+        }
+        if let Some(n) = u("signal_view") {
+            self.ui.signal_view = (n as u32).min(3);
+        }
+        if let Some(n) = u("seed_count") {
+            self.ui.seed_count = n as u32;
+        }
+        if let Some(a) = v["seed_len"].as_array().filter(|a| a.len() == 2) {
+            self.ui.seed_len = [a[0].as_u64().unwrap_or(12) as u32, a[1].as_u64().unwrap_or(120) as u32];
+        }
+        if let (Some(c), Some(z)) = (v["camera"]["center"].as_array(), v["camera"]["zoom"].as_f64())
+            && c.len() == 2
+        {
+            self.cam.center = [c[0].as_f64().unwrap_or(0.0) as f32, c[1].as_f64().unwrap_or(0.0) as f32];
+            self.cam.zoom = z as f32;
+        }
+        if let Some(n) = u("autosave_every") {
+            self.ui.autosave_every = (n as u32).max(1000);
+        }
+    }
+
+    /// Começa a gravar uma cena (espera pela gravação anterior, se houver).
+    fn start_save(&mut self, path: std::path::PathBuf, keep_previous: bool) {
+        self.finish_save(true);
+        let t = std::time::Instant::now();
+        let extra = self.interface_json();
+        self.save_job = Some(self.world.save_scene(&self.gpu, path, extra, keep_previous));
+        log::info!("cena: estado lido da GPU em {:.2} s (epoch {})", t.elapsed().as_secs_f32(), self.world.params.epoch);
+        self.ui.scene_msg = "a gravar…".into();
+    }
+
+    /// Recolhe o resultado da gravação em curso (`wait`: espera por ela).
+    fn finish_save(&mut self, wait: bool) {
+        let Some(job) = self.save_job.take_if(|j| wait || j.is_finished()) else { return };
+        self.ui.scene_msg = match job.join() {
+            Ok(Ok(m)) => {
+                log::info!("cena gravada: {m}");
+                format!("gravado {m}")
+            }
+            Ok(Err(e)) => {
+                log::error!("cena: {e}");
+                format!("erro a gravar: {e}")
+            }
+            Err(_) => "erro a gravar (a thread falhou)".into(),
+        };
+    }
+
+    /// Ações do separador "Cena" e o autosave periódico.
+    fn scene_tick(&mut self) {
+        use ribossome::ui::SceneAction;
+        self.finish_save(false);
+        let epoch = self.world.params.epoch;
+        if epoch < self.last_autosave {
+            self.last_autosave = epoch;
+        }
+        match self.ui.scene_action.take() {
+            Some(SceneAction::Save) => {
+                let dir = std::path::Path::new(SAVES_DIR);
+                let _ = std::fs::create_dir_all(dir);
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("cena do ribossome", &["ribo"])
+                    .set_directory(dir.canonicalize().unwrap_or_default())
+                    .set_file_name(format!("cena_epoch{epoch}.ribo"))
+                    .set_title("Gravar cena")
+                    .save_file()
+                {
+                    self.start_save(path, false);
+                }
+            }
+            Some(SceneAction::Load) => {
+                let dir = std::path::Path::new(SAVES_DIR).canonicalize().unwrap_or_default();
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("cena do ribossome", &["ribo"])
+                    .set_directory(dir)
+                    .set_title("Carregar cena")
+                    .pick_file()
+                {
+                    self.finish_save(true);
+                    match ribossome::world::Scene::read(&path).and_then(|s| self.world.load_scene(&self.gpu, &s)) {
+                        Ok((extra, notes)) => {
+                            self.apply_interface(&extra);
+                            self.ui.ledger = None;
+                            self.last_autosave = self.world.params.epoch;
+                            self.ui.scene_msg = format!("carregado {} (epoch {})", path.display(), self.world.params.epoch);
+                            log::info!("{}", self.ui.scene_msg);
+                            for n in &notes {
+                                log::warn!("cena: {n}");
+                            }
+                            if !notes.is_empty() {
+                                self.ui.scene_msg += &format!("\n{}", notes.join("\n"));
+                            }
+                        }
+                        Err(e) => {
+                            self.ui.scene_msg = format!("erro: {e}");
+                            log::error!("cena: {e}");
+                        }
+                    }
+                }
+            }
+            Some(SceneAction::AutosaveNow) => {
+                if let Some(p) = self.ui.autosave_path.clone() {
+                    self.start_save(p.into(), true);
+                    self.last_autosave = epoch;
+                }
+            }
+            Some(SceneAction::NewWorld) => {
+                self.world.reset_settings();
+                startup_terrain(&mut self.world);
+                if lab_mode() {
+                    self.world.configure_lab();
+                }
+                self.seed = 0;
+                self.ui.reseed = true;
+                self.last_autosave = 0;
+                self.ui.scene_msg = "mundo novo com os valores por omissão".into();
+                log::info!("{}", self.ui.scene_msg);
+            }
+            None => {}
+        }
+        if self.ui.autosave_on
+            && self.save_job.is_none()
+            && let Some(p) = self.ui.autosave_path.clone()
+            && epoch.wrapping_sub(self.last_autosave) >= self.ui.autosave_every.max(1000)
+        {
+            self.start_save(p.into(), true);
+            self.last_autosave = epoch;
+        }
+    }
+
+    /// Ao fechar: grava o autosave e espera que fique escrito.
+    fn on_close(&mut self) {
+        if self.ui.autosave_on
+            && let Some(p) = self.ui.autosave_path.clone()
+        {
+            self.start_save(p.into(), true);
+        }
+        self.finish_save(true);
     }
 
     fn screen(&self) -> [f32; 2] {
@@ -297,6 +520,7 @@ impl Running {
                 ed.open_browser();
             }
         }
+        self.scene_tick();
         self.inspector.poll(&self.gpu.device);
         if self.inspector.follow
             && let Some(d) = &self.inspector.data
@@ -438,7 +662,10 @@ impl Running {
         let egui_keys = ctx.egui_wants_keyboard_input();
 
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.on_close();
+                event_loop.exit();
+            }
             WindowEvent::Resized(size) => {
                 self.surface_cfg.width = size.width.max(1);
                 self.surface_cfg.height = size.height.max(1);
