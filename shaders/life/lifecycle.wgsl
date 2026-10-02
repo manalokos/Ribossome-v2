@@ -25,6 +25,7 @@ const HOT_DEATH_MULT: f32 = 10.0;
 const UV_HAZARD_SCALE: f32 = 0.001;
 const MIN_GENE_LEN: u32 = 6u;
 const S_BROWN: u32 = 9u;
+const S_BIOTURB: u32 = 10u;
 // Ciclo catalítico: probabilidade por passo de hidrolisar o ligando ligado e
 // de soltar o produto (taxas globais, iguais para todos).
 const MOTOR_P_HYDROLYSIS: f32 = 0.2;
@@ -262,9 +263,11 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let swim = vec3<f32>(swim_raw.xy * max(params.swim_gain, 0.0), swim_raw.z);
     // Natação: o movimento rígido vem no referencial (alinhado) do corpo;
     // roda-o para o mundo.
+    var swim_v = vec2<f32>(0.0);
     if (any(swim_raw != vec4<f32>(0.0))) {
         // Orientação a meio do passo (o corpo roda Ω durante o passo).
         let sv = rotate(swim.xy, a.rot + 0.5 * swim.z);
+        swim_v = sv;
         let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(np0)) < GAMMA_SOLID_THRESHOLD) {
             a.pos_x = np0.x;
@@ -273,6 +276,37 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         a.rot += swim.z + swim_raw.w;
     }
     a.age += 1u;
+
+    // ---- BIOTURBAÇÃO: um resíduo (ao acaso) que atravessa ENTULHO empurra
+    // um grão para a célula seguinte, na direção em que se move (translação
+    // + rotação do corpo). Só entulho (1–2 grãos) e só para onde continua a
+    // ser entulho: os agentes não fazem nem partem rocha. Custa energia. O
+    // grão move-se com gamma_move_one: matéria e terreno conservam-se. ----
+    if (params.bioturbation > 0.0 && a.body_len > 0u) {
+        let q = rng_f4(a.id, params.epoch, S_BIOTURB);
+        let k = min(u32(q.x * f32(a.body_len)), a.body_len - 1u);
+        let rel = rotate(body_pos[slot * MAX_BODY + k], a.rot);
+        let v_res = swim_v + swim.z * vec2<f32>(-rel.y, rel.x);
+        let cells_moved = length(v_res) / f32(WORLD_UNITS_PER_CELL);
+        let p_push = clamp(params.bioturbation * cells_moved * f32(a.body_len), 0.0, 1.0);
+        if (q.y < p_push && a.energy > params.bioturbation_cost) {
+            let rw = vec2<f32>(a.pos_x, a.pos_y) + rel;
+            let src = world_to_cell(rw);
+            let g = gamma_count(src);
+            if (g > 0u && g < GAMMA_SOLID_THRESHOLD) {
+                // Vizinho no eixo dominante do movimento.
+                var d = vec2<i32>(select(-1, 1, v_res.x > 0.0), 0);
+                if (abs(v_res.y) > abs(v_res.x)) { d = vec2<i32>(0, select(-1, 1, v_res.y > 0.0)); }
+                let c = vec2<i32>(i32(src % GRID_SIZE), i32(src / GRID_SIZE)) + d;
+                if (all(c >= vec2<i32>(0)) && all(c < vec2<i32>(i32(GRID_SIZE)))) {
+                    let dst = u32(c.y) * GRID_SIZE + u32(c.x);
+                    if (gamma_count(dst) + 1u < GAMMA_SOLID_THRESHOLD && gamma_move_one(src, dst)) {
+                        a.energy -= params.bioturbation_cost;
+                    }
+                }
+            }
+        }
+    }
 
     // ---- Deriva passiva: levado à velocidade da água (baixo Reynolds). ----
     var p = vec2<f32>(a.pos_x, a.pos_y);

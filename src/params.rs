@@ -139,8 +139,12 @@ gpu_struct! {
         /// Ganho da natação: escala o deslocamento (translação e rotação) que o
         /// RFT calcula por mudança de forma, i.e. a rapidez do corpo face ao mundo.
         pub swim_gain: f32,
-        pub _pad0: u32,
-        pub _pad1: u32,
+        /// BIOTURBAÇÃO: probabilidade, por célula percorrida e por resíduo,
+        /// de um resíduo em movimento empurrar um grão de ENTULHO para a
+        /// célula seguinte (a rocha não se mexe). 0 = desligada.
+        pub bioturbation: f32,
+        /// Energia gasta por grão empurrado (o trabalho não é de graça).
+        pub bioturbation_cost: f32,
     }
 }
 
@@ -196,8 +200,8 @@ impl Default for SimParams {
             reactivation_rate: 0.0,
             // 10: com 1 a natação era lenta demais para dar vantagem visível.
             swim_gain: 10.0,
-            _pad0: 0,
-            _pad1: 0,
+            bioturbation: 0.05,
+            bioturbation_cost: 0.05,
         }
     }
 }

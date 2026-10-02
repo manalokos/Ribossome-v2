@@ -95,15 +95,17 @@ pub fn generate(cfg: &WorldConfig, seed: u32, fumaroles: &[Fumarole]) -> Vec<u32
 
 // ---- Terreno de/para imagem PNG -------------------------------------------
 //
-// Tons de cinzento: preto = água (0 grãos), branco = rocha maciça (ROCK
-// grãos), linear entre os dois (cinzento escuro = entulho, 1–2; cinzento
-// médio para cima = rocha, >= 3). Píxeis VERMELHOS puros marcam fumarolas
-// (uma por mancha contígua, no centro dela; contam como água). A imagem pode
-// ter qualquer tamanho: é reamostrada (vizinho mais próximo) para a grelha.
+// Canal AZUL = terreno: 0 = água (0 grãos), 255 = rocha maciça (ROCK grãos),
+// linear (azul fraco = entulho, 1–2; a partir de ~metade = rocha, >= 3).
+// VERMELHO = fumarolas: cada mancha contígua claramente vermelha (vermelho
+// alto, pouco verde, vermelho bem acima do azul) é uma fumarola, no centro
+// dela. Uma imagem em cinzentos também serve (azul = cinzento; um cinzento
+// nunca conta como vermelho). A imagem pode ter qualquer tamanho: é
+// reamostrada (vizinho mais próximo) para a grelha.
 // A linha de cima da imagem é o cimo do mundo (+y no mundo = cima no ecrã).
 
 fn is_fumarole_px(r: u8, g: u8, b: u8) -> bool {
-    r >= 200 && g <= 60 && b <= 60
+    r >= 200 && g <= 60 && r as u32 > b as u32 + 30
 }
 
 /// Lê um PNG e devolve (grãos por célula, fumarolas).
@@ -171,18 +173,14 @@ pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<(Vec<u32>, 
         let iy = ((n - 1 - y) * h) / n;
         for x in 0..n {
             let ix = (x * w) / n;
-            let (r, gg, b) = px(ix, iy);
-            if is_fumarole_px(r, gg, b) {
-                continue;
-            }
-            let lum = (0.299 * r as f32 + 0.587 * gg as f32 + 0.114 * b as f32) / 255.0;
-            g[y * n + x] = (lum * ROCK as f32).round() as u32;
+            let (_, _, b) = px(ix, iy);
+            g[y * n + x] = ((b as f32 / 255.0) * ROCK as f32).round() as u32;
         }
     }
     Ok((g, fumaroles))
 }
 
-/// Grava o terreno em PNG (mesmo mapeamento; fumarolas a vermelho).
+/// Grava o terreno em PNG (terreno no azul, fumarolas a vermelho).
 pub fn save_png(path: &std::path::Path, cfg: &WorldConfig, gamma: &[u32], fumaroles: &[Fumarole]) -> Result<(), String> {
     let n = cfg.grid_size as usize;
     let mut rgb = vec![0u8; n * n * 3];
@@ -190,7 +188,7 @@ pub fn save_png(path: &std::path::Path, cfg: &WorldConfig, gamma: &[u32], fumaro
         for x in 0..n {
             let v = ((gamma[y * n + x].min(ROCK) * 255) / ROCK) as u8;
             let o = ((n - 1 - y) * n + x) * 3;
-            rgb[o..o + 3].fill(v);
+            rgb[o + 2] = v;
         }
     }
     for f in fumaroles.iter().filter(|f| f.enabled != 0) {
@@ -201,7 +199,10 @@ pub fn save_png(path: &std::path::Path, cfg: &WorldConfig, gamma: &[u32], fumaro
                 let (x, y) = (cx + dx, cy + dy);
                 if x >= 0 && y >= 0 && (x as usize) < n && (y as usize) < n {
                     let o = (y as usize * n + x as usize) * 3;
-                    rgb[o..o + 3].copy_from_slice(&[255, 0, 0]);
+                    // Vermelho por cima do terreno (o azul fica: o terreno
+                    // lê-se na mesma; a fumarola fica na água se o azul for 0).
+                    rgb[o] = 255;
+                    rgb[o + 1] = 0;
                 }
             }
         }

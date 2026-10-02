@@ -2,3 +2,4 @@
 *.snap
 /autosave*
 /logs
+/terreno*.png

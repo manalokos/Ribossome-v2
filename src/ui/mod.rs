@@ -162,7 +162,7 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
             },
         );
         egui::CollapsingHeader::new("Terreno (imagem)").default_open(false).show(ui, |ui| {
-            ui.small("PNG em cinzentos: preto água, cinzento escuro entulho, claro rocha, branco rocha maciça; vermelho = fumarola");
+            ui.small("PNG: AZUL = terreno (0 água, fraco entulho, forte rocha, 255 rocha maciça); VERMELHO = fumarola. Cinzentos também servem.");
             ui.horizontal(|ui| {
                 ui.label("ficheiro");
                 ui.text_edit_singleline(&mut st.terrain_path);
@@ -298,6 +298,11 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         ui.checkbox(&mut aug, "tradução começa no AUG (nascimentos novos)");
         world.params.require_start = aug as u32;
         ui.add(egui::Slider::new(&mut world.params.swim_gain, 0.0..=50.0).text("ganho da natação"));
+        ui.add(
+            egui::Slider::new(&mut world.params.bioturbation, 0.0..=0.5)
+                .text("bioturbação (empurrar entulho)"),
+        );
+        ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("custo por grão empurrado"));
         let mut rft = world.params.rft_enabled != 0;
         ui.checkbox(&mut rft, "natação (RFT)");
         world.params.rft_enabled = rft as u32;
