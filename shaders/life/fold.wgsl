@@ -13,9 +13,11 @@
 // flexibilidade², Vihinen 1994) para o alvo = repouso + motor catalítico +
 // desvio pelos sinais α/β, com ruído térmico ∝ temperatura local.
 
-// Mobilidade das juntas (rad por passo por RT de binário) e limite por passo.
+// Mobilidade das juntas (rad por passo por RT de binário) e limite por passo
+// (só proteção numérica: com 0.05 o limite atrasava as juntas e era esse
+// atraso artificial que fazia nadar os relógios lentos).
 const JOINT_MOBILITY: f32 = 0.01;
-const JOINT_MAX_STEP: f32 = 0.05;
+const JOINT_MAX_STEP: f32 = 0.2;
 const S_JOINT: u32 = 5u << 16u;     // + índice da junta
 
 fn joint_stiffness(aa: u32) -> f32 {

@@ -23,7 +23,7 @@
 //!   bit 2 nível ou VARIAÇÃO desde o passo anterior. Os de comida e luz
 //!   amostram as células num raio: os TOTAIS somam o disco todo; os
 //!   DIRECIONAIS dão (lado esquerdo − lado direito) da cadeia;
-//! - relógio: bit 0 canal, bits 1–2 período (20, 40, 80, 160 passos);
+//! - relógio: canal, período e modulação por α/β vêm das variantes (assets/orgaos.json);
 //! - relé: bits 0–1 modo (α->β, β->α, inverte α, inverte β), bit 2 ganho ×2;
 //! - boca: catálise ×(2 + p); músculo: resposta ×(2 + p/2);
 //!   armazenamento: +4·(p + 1) de capacidade;
