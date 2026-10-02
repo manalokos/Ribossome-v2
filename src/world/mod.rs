@@ -85,6 +85,11 @@ pub struct WorldSettings {
     /// Iterações de Jacobi (arredondado para par: o resultado tem de cair em pressure_a).
     pub jacobi_iters: u32,
     /// Recalcula a luz UV de N em N passos.
+    /// Luz por PROPAGAÇÃO: em cada passo cada linha recebe a luz da linha
+    /// de cima do passo anterior (paralelo, barato). A luz desce
+    /// `light_rows_per_step` linhas por passo; 0 = varredura inteira de
+    /// light_interval em light_interval passos (exata, cara).
+    pub light_rows_per_step: u32,
     pub light_interval: u32,
     /// Física dos grãos do terreno ligada.
     pub terrain_enabled: bool,
@@ -104,6 +109,7 @@ impl Default for WorldSettings {
             jacobi_iters: 128,
             // 10: a sombra dos agentes acompanha-os (a luz custa ~0,5 ms).
             light_interval: 10,
+            light_rows_per_step: 1,
             terrain_enabled: true,
             contact_enabled: true,
         }
@@ -118,6 +124,8 @@ struct Pipelines {
     uv_light: wgpu::ComputePipeline,
     clear_shade: wgpu::ComputePipeline,
     light_transmit: wgpu::ComputePipeline,
+    light_propagate: wgpu::ComputePipeline,
+    light_commit: wgpu::ComputePipeline,
     agents_shade: wgpu::ComputePipeline,
     clear_force_vectors: wgpu::ComputePipeline,
     update_temperature: wgpu::ComputePipeline,
@@ -299,6 +307,7 @@ impl World {
         let light_buf = storage_buffer(device, "uv light", cells * 4);
         let lcells = (cfg.grid_size / shaders::LIGHT_DIV) as u64 * (cfg.grid_size / shaders::LIGHT_DIV) as u64;
         let shade_buf = storage_buffer(device, "agent shade", lcells * 4);
+        let light_tmp = storage_buffer(device, "uv light next", lcells * 4);
         let slope_buf = storage_buffer(device, "gamma slope", cells * 8);
         let ledger_staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ledger staging"),
@@ -365,7 +374,7 @@ impl World {
         // Grupo 1 — mundo (resolução do ambiente).
         let world_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("world layout"),
-            entries: &(0..7).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
+            entries: &(0..8).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
         });
         // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
         let fluid_entries: Vec<_> = (0..10).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
@@ -403,7 +412,7 @@ impl World {
         let world_bg = bind_all(
             "world bg",
             &world_layout,
-            &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf, &chem_next, &shade_buf],
+            &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf, &chem_next, &shade_buf, &light_tmp],
         );
         // Ping-pong: "ab" lê a e escreve b (velocidade e pressão em simultâneo).
         let fluid_ab = bind_all(
@@ -564,6 +573,8 @@ impl World {
             uv_light: compute("compute_uv_light"),
             clear_shade: compute("clear_shade"),
             light_transmit: compute("light_transmit_pass"),
+            light_propagate: compute("light_propagate"),
+            light_commit: compute("light_commit"),
             agents_shade: compute("agents_shade"),
             clear_force_vectors: compute("clear_force_vectors"),
             update_temperature: compute("update_temperature"),
@@ -874,14 +885,25 @@ impl World {
             }
             run(&mut pass, &pl.slope, ab, [g, g]);
 
-            if self.light_dirty || epoch % st.light_interval.max(1) == 0 {
-                self.light_dirty = false;
-                // Sombra dos agentes: limpa e marca os resíduos, depois varre.
-                let lcells = (self.cfg.grid_size / shaders::LIGHT_DIV).pow(2);
+            let lcells = (self.cfg.grid_size / shaders::LIGHT_DIV).pow(2);
+            let sweep = self.light_dirty || (st.light_rows_per_step == 0 && epoch % st.light_interval.max(1) == 0);
+            if sweep || st.light_rows_per_step > 0 {
+                // Sombra dos agentes: limpa e marca os resíduos.
                 run(&mut pass, &pl.clear_shade, ab, [groups(lcells, 256), 1]);
                 run(&mut pass, &pl.agents_shade, ab, [groups(self.cfg.max_agents, 64), 1]);
+            }
+            if sweep {
+                // Varredura inteira (exata): na sementeira, quando o terreno
+                // muda de vez, ou no modo antigo.
+                self.light_dirty = false;
                 run(&mut pass, &pl.light_transmit, ab, [groups(lcells, 256), 1]);
                 run(&mut pass, &pl.uv_light, ab, [1, 1]);
+            } else {
+                // Propagação: N linhas por passo, todas as células em paralelo.
+                for _ in 0..st.light_rows_per_step.min(16) {
+                    run(&mut pass, &pl.light_propagate, ab, [groups(lcells, 256), 1]);
+                    run(&mut pass, &pl.light_commit, ab, [groups(lcells, 256), 1]);
+                }
             }
 
             if st.fluid_enabled && epoch % substep == 0 {

@@ -56,6 +56,8 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("compute_uv_light", Stage::Compute),
         ("clear_shade", Stage::Compute),
         ("light_transmit_pass", Stage::Compute),
+        ("light_propagate", Stage::Compute),
+        ("light_commit", Stage::Compute),
         ("agents_shade", Stage::Compute),
         ("clear_force_vectors", Stage::Compute),
         ("update_temperature", Stage::Compute),

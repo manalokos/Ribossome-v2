@@ -19,6 +19,7 @@ fn main() {
     world.settings.fluid_enabled = env("FLUID", 1) != 0;
     world.settings.terrain_enabled = env("TERRAIN", 1) != 0;
     world.settings.light_interval = env("LIGHT_EVERY", world.settings.light_interval);
+    world.settings.light_rows_per_step = env("LIGHT_ROWS", world.settings.light_rows_per_step);
     let seeds: u32 = env("SEEDS", 500);
     if seeds > 0 {
         let mut rng = ribossome::life::SplitMix(3);

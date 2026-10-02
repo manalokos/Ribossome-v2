@@ -35,3 +35,5 @@
 // Sombra dos agentes: resíduos por célula da luz (LIGHT_SIZE²), refeita antes
 // de cada cálculo da luz.
 @group(1) @binding(6) var<storage, read_write> shade_grid: array<atomic<u32>>;
+// Luz do passo seguinte (propagação; light_commit copia para light_grid).
+@group(1) @binding(7) var<storage, read_write> light_next: array<f32>;
