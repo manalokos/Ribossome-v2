@@ -324,7 +324,7 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
         },
     );
     if st.signal_view == 4 {
-        ui.label("clica num organismo: vermelho = genoma igual, azul = sem nada em comum (8-meros partilhados; o filho conta como parente)");
+        ui.label("clica num organismo: bola verde = genoma próximo, amarela = meio, vermelha = distante (8-meros partilhados; o filho conta como parente)");
     }
     ui.separator();
     if ui

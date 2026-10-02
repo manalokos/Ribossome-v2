@@ -53,8 +53,11 @@ const MAX_BODY_V: u32 = 64u;
 // Ligações por agente e vec4 por slot (iguais a MAX_BONDS / BOND_STRIDE).
 const BONDS_V: u32 = 4u;
 const BOND_STRIDE_V: u32 = 5u;
-// Instâncias por agente: tubos, órgãos, bases de RNA e ligações.
-const AGENT_INSTANCES: u32 = 3u * MAX_BODY_V + BONDS_V;
+// Instâncias por agente: tubos, órgãos, bases de RNA, ligações e a bola do
+// parentesco.
+const AGENT_INSTANCES: u32 = 3u * MAX_BODY_V + BONDS_V + 1u;
+// Raio da bola do parentesco, em píxeis do ecrã (igual para todos).
+const KIN_DOT_PX: f32 = 5.0;
 const NO_ORGAN: u32 = 0xFFu;
 // Tamanho de um órgão em relação a um resíduo estrutural.
 const ORGAN_SCALE: f32 = 2.2;
@@ -119,6 +122,9 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     let slot = draw_list_view[inst / AGENT_INSTANCES];
     let local_i = inst % AGENT_INSTANCES;
     let a = agents_view[slot];
+    if (local_i == 3u * MAX_BODY_V + BONDS_V) {
+        return kin_vertex(vi, slot, a);
+    }
     if (local_i >= 3u * MAX_BODY_V) {
         return bond_vertex(vi, slot, a, local_i - 3u * MAX_BODY_V);
     }
@@ -186,23 +192,12 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             case 1u: { col = signed_color(s.x, vec3<f32>(1.0, 0.45, 0.1), vec3<f32>(0.1, 0.6, 1.0)); }
             case 2u: { col = signed_color(s.y, vec3<f32>(0.3, 1.0, 0.3), vec3<f32>(0.95, 0.3, 0.9)); }
             case 3u: { col = vec3<f32>(0.5 + 0.5 * tanh(s.x), 0.5 + 0.5 * tanh(s.y), 0.35); }
-            case 4u: {
-                // Parentesco: azul escuro (nada em comum) -> vermelho -> branco (igual).
-                let q = kin_view[slot];
-                if (q < 0.0) {
-                    col = vec3<f32>(0.2);
-                } else {
-                    let t = sqrt(clamp(q, 0.0, 1.0));
-                    col = mix(mix(vec3<f32>(0.08, 0.12, 0.45), vec3<f32>(0.95, 0.15, 0.1), smoothstep(0.0, 0.7, t)),
-                              vec3<f32>(1.0, 0.95, 0.85), smoothstep(0.7, 1.0, t));
-                }
-            }
             default: {}
         }
     }
     // Pouca energia = mais escuro (só na vista química).
     let dim = mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
-    o.color = select(col, col * dim, view.signal_view == 0u);
+    o.color = select(col, col * dim, view.signal_view == 0u || view.signal_view == 4u);
     if (!glyph && !naked) {
         // TUBO: cápsula do resíduo k até ao k+1 (o último só tem a ponta).
         // A espessura é a do resíduo k sem o aumento dos órgãos.
@@ -325,6 +320,20 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
     // Dourado = ligada ao tocar; azul-claro = de nascimento (pai e filho).
     o.color = select(vec3<f32>(1.0, 0.82, 0.35), vec3<f32>(0.45, 0.85, 1.0), (b.z >> 16u) != 0u);
     return o;
+}
+
+// PARENTESCO (vista 4): bola por cima do agente, do mesmo tamanho no ecrã
+// para todos. Verde = genoma próximo do selecionado, amarelo, vermelho = distante.
+fn kin_vertex(vi: u32, slot: u32, a: Agent) -> AgentVsOut {
+    var o: AgentVsOut;
+    o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    let q = kin_view[slot];
+    if (view.signal_view != 4u || a.alive == 0u || q < 0.0) { return o; }
+    let t = clamp(q, 0.0, 1.0);
+    let col = select(mix(vec3<f32>(1.0, 0.85, 0.1), vec3<f32>(0.15, 1.0, 0.25), (t - 0.5) * 2.0),
+                     mix(vec3<f32>(1.0, 0.12, 0.08), vec3<f32>(1.0, 0.85, 0.1), t * 2.0), t < 0.5);
+    let c = vec2<f32>(a.pos_x, a.pos_y);
+    return capsule_vertex(vi, c, c, KIN_DOT_PX / view.zoom, col);
 }
 
 fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
