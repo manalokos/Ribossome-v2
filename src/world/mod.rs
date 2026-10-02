@@ -132,6 +132,7 @@ struct Pipelines {
     copy_temperature: wgpu::ComputePipeline,
     buoyancy: wgpu::ComputePipeline,
     gather_forces: wgpu::ComputePipeline,
+    smooth_velocity: wgpu::ComputePipeline,
     add_forces: wgpu::ComputePipeline,
     clear_forces: wgpu::ComputePipeline,
     diffuse_velocity: wgpu::ComputePipeline,
@@ -331,6 +332,7 @@ impl World {
             mapped_at_creation: false,
         });
         let vel_a = storage_buffer(device, "velocity a", fcells * 8);
+        let vel_smooth = storage_buffer(device, "velocity smooth", fcells * 8);
         let vel_b = storage_buffer(device, "velocity b", fcells * 8);
         let p_a = storage_buffer(device, "pressure a", fcells * 4);
         let p_b = storage_buffer(device, "pressure b", fcells * 4);
@@ -420,7 +422,7 @@ impl World {
             entries: &(0..8).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
         });
         // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
-        let fluid_entries: Vec<_> = (0..10).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
+        let fluid_entries: Vec<_> = (0..11).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
         let fluid_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fluid layout"),
             entries: &fluid_entries,
@@ -461,12 +463,12 @@ impl World {
         let fluid_ab = bind_all(
             "fluid ab",
             &fluid_layout,
-            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf],
+            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth],
         );
         let fluid_ba = bind_all(
             "fluid ba",
             &fluid_layout,
-            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf],
+            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth],
         );
 
         // Grupo 4 — multigrid da pressão: um uniforme por nível (offset
@@ -629,6 +631,7 @@ impl World {
             copy_temperature: compute("copy_temperature"),
             buoyancy: compute("buoyancy"),
             gather_forces: compute("gather_forces"),
+            smooth_velocity: compute("smooth_velocity"),
             add_forces: compute("add_forces"),
             clear_forces: compute("clear_forces"),
             diffuse_velocity: compute("diffuse_velocity"),
@@ -1023,6 +1026,7 @@ impl World {
                 }
                 run(&mut pass, &pl.subtract_gradient, ab, f); // a -> b
                 run(&mut pass, &pl.boundaries, ba, f); // b -> a (final em a)
+                run(&mut pass, &pl.smooth_velocity, ab, f); // a -> suavizada (agentes)
                 run(&mut pass, &pl.thermal_activation, ab, [g, g]);
             }
 

@@ -31,6 +31,9 @@
 @group(2) @binding(8) var<storage, read_write> fluid_forces: array<vec2<f32>>;
 // Fonte de calor por célula do fluido (fumarolas pontuais + píxeis da imagem).
 @group(2) @binding(9) var<storage, read> heat_src: array<f32>;
+// Velocidade final SUAVIZADA (média de 5 células), calculada uma vez por passo
+// do fluido; os resíduos dos agentes leem-na (uma leitura em vez de 5).
+@group(2) @binding(10) var<storage, read_write> velocity_smooth: array<vec2<f32>>;
 
 // Sombra dos agentes: resíduos por célula da luz (LIGHT_SIZE²), refeita antes
 // de cada cálculo da luz.

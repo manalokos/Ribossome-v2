@@ -220,13 +220,18 @@ fn fluid_velocity_at_world(pos_world: vec2<f32>) -> vec2<f32> {
 }
 
 // ---- Forças ----
+// Soma de forças em PONTO FIXO (inteiro de 32 bits em complemento para 2
+// sobre o u32 atómico): uma só soma atómica, sem laço de tentativas (com
+// muitos agentes juntos o laço em vírgula flutuante ficava à espera), e a
+// soma inteira não depende da ordem (determinística).
+const FORCE_FP: f32 = 256.0;
 fn atomic_add_force(i: u32, v: f32) {
-    loop {
-        let old_bits = atomicLoad(&force_vectors[i]);
-        let new_bits = bitcast<u32>(bitcast<f32>(old_bits) + v);
-        let res = atomicCompareExchangeWeak(&force_vectors[i], old_bits, new_bits);
-        if (res.exchanged) { break; }
-    }
+    let q = i32(round(clamp(v, -1.0e5, 1.0e5) * FORCE_FP));
+    if (q != 0) { atomicAdd(&force_vectors[i], bitcast<u32>(q)); }
+}
+
+fn force_at_fp(i: u32) -> f32 {
+    return f32(bitcast<i32>(atomicLoad(&force_vectors[i]))) / FORCE_FP;
 }
 
 @compute @workgroup_size(16, 16)
@@ -311,7 +316,7 @@ fn buoyancy(@builtin(global_invocation_id) gid: vec3<u32>) {
 fn gather_forces(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= FLUID_SIZE || gid.y >= FLUID_SIZE) { return; }
     let idx = fgrid(gid.x, gid.y);
-    let f = vec2<f32>(bitcast<f32>(atomicLoad(&force_vectors[idx * 2u])), bitcast<f32>(atomicLoad(&force_vectors[idx * 2u + 1u])));
+    let f = vec2<f32>(force_at_fp(idx * 2u), force_at_fp(idx * 2u + 1u));
     fluid_forces[idx] = clamp_vec2_len(sanitize_vec2(f), MAX_FORCE);
 }
 
@@ -563,4 +568,36 @@ fn enforce_boundaries(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (y == 0u || y == FLUID_SIZE - 1u) { v.y = 0.0; }
     v = reflect_if_into_solid(x, y, v);
     velocity_out[idx] = clamp_vec2_len(sanitize_vec2(v), MAX_VEL);
+}
+
+// Suaviza a velocidade final (lida em velocity_in, a "a") para os agentes.
+@compute @workgroup_size(16, 16)
+fn smooth_velocity(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let x = gid.x;
+    let y = gid.y;
+    if (x >= FLUID_SIZE || y >= FLUID_SIZE) { return; }
+    let xm = select(x, x - 1u, x > 0u);
+    let xp = min(x + 1u, FLUID_SIZE - 1u);
+    let ym = select(y, y - 1u, y > 0u);
+    let yp = min(y + 1u, FLUID_SIZE - 1u);
+    let v = sanitize_vec2(velocity_in[fgrid(x, y)]) + sanitize_vec2(velocity_in[fgrid(xm, y)])
+        + sanitize_vec2(velocity_in[fgrid(xp, y)]) + sanitize_vec2(velocity_in[fgrid(x, ym)])
+        + sanitize_vec2(velocity_in[fgrid(x, yp)]);
+    velocity_smooth[fgrid(x, y)] = v * 0.2;
+}
+
+// Velocidade suavizada num ponto do mundo (bilinear).
+fn fluid_smooth_at_world(pos_world: vec2<f32>) -> vec2<f32> {
+    let g = f32(FLUID_SIZE);
+    let gx = clamp(pos_world.x / SIM_SIZE * g, 0.5, g - 0.5) - 0.5;
+    let gy = clamp(pos_world.y / SIM_SIZE * g, 0.5, g - 0.5) - 0.5;
+    let x0 = u32(floor(gx));
+    let y0 = u32(floor(gy));
+    let x1 = min(x0 + 1u, FLUID_SIZE - 1u);
+    let y1 = min(y0 + 1u, FLUID_SIZE - 1u);
+    let tx = fract(gx);
+    let ty = fract(gy);
+    let v0 = mix(velocity_smooth[fgrid(x0, y0)], velocity_smooth[fgrid(x1, y0)], tx);
+    let v1 = mix(velocity_smooth[fgrid(x0, y1)], velocity_smooth[fgrid(x1, y1)], tx);
+    return mix(v0, v1, ty);
 }

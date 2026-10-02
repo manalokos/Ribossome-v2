@@ -66,6 +66,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("copy_temperature", Stage::Compute),
         ("buoyancy", Stage::Compute),
         ("gather_forces", Stage::Compute),
+        ("smooth_velocity", Stage::Compute),
         ("add_forces", Stage::Compute),
         ("clear_forces", Stage::Compute),
         ("diffuse_velocity", Stage::Compute),

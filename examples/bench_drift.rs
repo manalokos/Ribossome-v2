@@ -13,7 +13,13 @@ fn main() {
     let gpu = Gpu::new_headless().unwrap();
     let cfg = WorldConfig::DEFAULT;
     let mut world = World::new(&gpu, cfg, 1);
+    if let Ok(t) = std::env::var("TERRAIN") {
+        world.load_terrain_png(std::path::Path::new(&t)).unwrap();
+    }
     world.seed_matter(&gpu, 1);
+    world.params.monomer_pressure = env("PRESS", world.params.monomer_pressure);
+    world.params.agent_fluid_push = env("PUSH", world.params.agent_fluid_push);
+    world.params.monomer_uv_absorb = env("MABS", world.params.monomer_uv_absorb);
     world.params.death_probability = 0.14;
     world.params.uv_damage = 10.0;
     world.settings.fluid_enabled = env("FLUID", 1) != 0;

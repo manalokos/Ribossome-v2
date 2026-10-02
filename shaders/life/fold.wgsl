@@ -156,12 +156,8 @@ fn rft_solve(
 // próprio agente pese pouco na água que o leva.
 fn water_at(p: vec2<f32>, soft: bool) -> vec2<f32> {
     let h = SIM_SIZE / f32(FLUID_SIZE);
-    var v = fluid_velocity_at_world(p);
-    if (soft) {
-        v += fluid_velocity_at_world(p + vec2<f32>(h, 0.0)) + fluid_velocity_at_world(p - vec2<f32>(h, 0.0))
-            + fluid_velocity_at_world(p + vec2<f32>(0.0, h)) + fluid_velocity_at_world(p - vec2<f32>(0.0, h));
-        v *= 0.2;
-    }
+    // Suavizada: o campo pré-calculado em smooth_velocity (uma leitura).
+    let v = select(fluid_velocity_at_world(p), fluid_smooth_at_world(p), soft);
     return v * h * max(params.dt, 0.0);
 }
 
