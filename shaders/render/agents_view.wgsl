@@ -1,6 +1,7 @@
-// Agentes: um quadrado instanciado por RESÍDUO (slot·64 + k), desenhado
-// como disco com a cor da classe química (classes do v3). Os órgãos têm
-// forma própria (desenhada por SDF no fragmento, orientada pela cadeia):
+// Agentes: DUAS instâncias por resíduo. Primeiro um TUBO (cápsula do
+// resíduo k até ao k+1, com a cor da classe química do v3 e sombreado de
+// cilindro); depois, só nos órgãos, a forma do órgão por cima (SDF no
+// fragmento, orientada pela cadeia):
 //   boca        disco com uma abertura escura virada para fora;
 //   músculo     elipse ao longo da cadeia, com estrias;
 //   sensores    TOTAIS: coroa de 6 antenas; DIRECIONAIS: 2 antenas, uma de
@@ -28,6 +29,8 @@ const ORGAN_SCALE: f32 = 2.2;
 
 struct AgentVsOut {
     @builtin(position) pos: vec4<f32>,
+    // 0 = tubo (segmento do resíduo k até ao k+1), 1 = órgão por cima.
+    @location(5) @interpolate(flat) mode: u32,
     // Coordenadas no quadrado (−1..1), eixos do mundo.
     @location(0) local: vec2<f32>,
     @location(1) color: vec3<f32>,
@@ -77,8 +80,11 @@ fn organ_extent(t: u32) -> f32 {
 @vertex
 fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) -> AgentVsOut {
     var o: AgentVsOut;
-    let slot = draw_list_view[inst / MAX_BODY_V];
-    let k = inst % MAX_BODY_V;
+    // Instâncias por agente: 0..63 tubos, 64..127 órgãos (por cima).
+    let slot = draw_list_view[inst / (2u * MAX_BODY_V)];
+    let local_i = inst % (2u * MAX_BODY_V);
+    let glyph = local_i >= MAX_BODY_V;
+    let k = local_i % MAX_BODY_V;
     let a = agents_view[slot];
     let naked = a.body_len == 0u;
     let hidden = view.focus_slot != 0xFFFFFFFFu && slot != view.focus_slot;
@@ -131,6 +137,47 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             default: {}
         }
     }
+    // Pouca energia = mais escuro (só na vista química).
+    let dim = mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
+    o.color = select(col, col * dim, view.signal_view == 0u);
+    if (!glyph && !naked) {
+        // TUBO: cápsula do resíduo k até ao k+1 (o último só tem a ponta).
+        // A espessura é a do resíduo k sem o aumento dos órgãos.
+        var r_tube = r_world;
+        if (organ != NO_ORGAN) { r_tube /= ORGAN_SCALE; }
+        r_tube = max(r_tube, 1.0 / view.zoom);
+        var b = centre;
+        if (k + 1u < a.body_len) {
+            let lp1 = body_pos_view[slot * MAX_BODY_V + k + 1u];
+            let cr = cos(a.rot);
+            let sr = sin(a.rot);
+            b = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * lp1.x - sr * lp1.y, sr * lp1.x + cr * lp1.y);
+        }
+        let seg = b - centre;
+        let l = length(seg);
+        let e = select(vec2<f32>(1.0, 0.0), seg / l, l > 1e-4);
+        let nn = vec2<f32>(-e.y, e.x);
+        // Quadrado orientado que cobre a cápsula.
+        let along = select(-r_tube, l + r_tube, c.x > 0.0);
+        let w = centre + e * along + nn * (c.y * r_tube);
+        let px = vec2<f32>((w.x - view.center_x) * view.zoom, (w.y - view.center_y) * view.zoom);
+        o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);
+        o.mode = 0u;
+        o.local = w - centre;
+        o.tangent = seg;
+        o.core_phase = vec2<f32>(r_tube, 0.0);
+        o.organ = organ;
+        return o;
+    }
+    if (glyph && !naked && organ == NO_ORGAN) {
+        // Resíduo estrutural: só o tubo.
+        o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return o;
+    }
+    if (glyph && naked) {
+        o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return o;
+    }
     let ext = organ_extent(organ);
     // Nunca menos de 1,5 píxeis, para se ver com o zoom afastado.
     let r = max(r_world * ext, 1.5 / view.zoom);
@@ -141,9 +188,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     o.organ = organ;
     o.tangent = tangent;
     o.core_phase = vec2<f32>(1.0 / ext, phase);
-    // Pouca energia = mais escuro (só na vista química).
-    let dim = mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
-    o.color = select(col, col * dim, view.signal_view == 0u);
+    o.mode = 1u;
     return o;
 }
 
@@ -163,6 +208,16 @@ fn antenna(p: vec2<f32>, tip: vec2<f32>, core: f32) -> f32 {
 
 @fragment
 fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
+    if (in.mode == 0u) {
+        // TUBO: cápsula com sombreado de cilindro (centro claro, bordas escuras).
+        let r_t = in.core_phase.x;
+        let dd = seg_dist(in.local, vec2<f32>(0.0), in.tangent);
+        if (dd > r_t) { discard; }
+        let x = dd / r_t;
+        let shade = sqrt(max(1.0 - x * x, 0.0));
+        let c = in.color * (0.35 + 0.65 * shade) + vec3<f32>(0.18) * pow(shade, 8.0);
+        return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    }
     let p = in.local;
     let d = length(p);
     let core = in.core_phase.x;

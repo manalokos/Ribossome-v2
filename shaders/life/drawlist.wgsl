@@ -5,6 +5,7 @@ fn build_draw_list(@builtin(global_invocation_id) gid: vec3<u32>) {
     let slot = gid.x;
     if (slot == 0u) { atomicStore(&draw_args[0], 6u); }
     if (slot >= params.max_agents || agents[slot].alive == 0u) { return; }
-    let i = atomicAdd(&draw_args[1], 64u) / 64u;
+    // Duas instâncias por resíduo: o tubo até ao seguinte e o órgão por cima.
+    let i = atomicAdd(&draw_args[1], 128u) / 128u;
     draw_list[i] = slot;
 }
