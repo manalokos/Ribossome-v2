@@ -13,6 +13,7 @@ fn main() {
         println!("terreno {t}: {hot} células quentes");
     }
     world.seed_matter(&gpu, 1);
+    if let Ok(v) = std::env::var("PRESS") { world.params.monomer_pressure = v.parse().unwrap(); }
     let n = cfg.grid_size as usize;
     for round in 1..=6 {
         for _ in 0..16 {
@@ -62,6 +63,15 @@ fn main() {
                 else if dist[i] > 12 { far_s += t; far_n += 1; }
             }
         }
+        // Uniformidade: desvio-padrão relativo da densidade da água (mundo todo).
+        let (mut s1, mut s2, mut cnt) = (0f64, 0f64, 0f64);
+        for i in 0..n * n {
+            if g[i] != 0 { continue; }
+            let t: f64 = (0..4).map(|c| ((cells[i * 4 + c] & 0xFFFF) + (cells[i * 4 + c] >> 16)) as f64).sum();
+            s1 += t; s2 += t * t; cnt += 1.0;
+        }
+        let mean = s1 / cnt;
+        println!("  água: média {mean:.2}, desvio relativo {:.3}", ((s2 / cnt - mean * mean).max(0.0)).sqrt() / mean);
         println!("  junto ao terreno: média {:.2} ({:.2}% vazias); longe: média {:.2}", near_s as f64 / near_n as f64, near_empty as f64 / near_n as f64 * 100.0, far_s as f64 / far_n as f64);
         println!(
             "passo {:>5}: água perto do fundo {water}: vazias {empty} ({:.2}%), <3 {low} ({:.2}%), média {:.2}; entulho {rub} células, média {:.2}",

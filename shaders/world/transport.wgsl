@@ -26,6 +26,8 @@ const DIFF_AGITATION_SPEED: f32 = 0.5;   // células do fluido / s
 // Monómeros dentro de gamma rastejam à taxa base, atenuada pela ocupação.
 const BURIED_DIFF_FACTOR: f32 = 1.0;
 const GAMMA_POROSITY_K: f32 = 0.3;
+// Saltos extra por unidade de pressão × queda de enchimento.
+const PRESSURE_HOP_P: f32 = 0.01;
 // Dispersão mecânica no entulho: desvio aleatório / deslocamento médio.
 const RUBBLE_DISPERSION: f32 = 1.0;
 // Célula acima da capacidade expulsa o excesso depressa (em todo o lado).
@@ -118,6 +120,31 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Janela de destinos 4×4 à volta de floor(disp): o ponto de partida
     // (0..1) mais disp mais um salto de ±1 cai sempre dentro dela.
     let base = vec2<i32>(i32(floor(disp.x)) - 1, i32(floor(disp.y)) - 1);
+
+    // PRESSÃO OSMÓTICA: os saltos de difusão preferem a vizinha menos cheia,
+    // ∝ à diferença de ENCHIMENTO (contagem / capacidade; assim o entulho,
+    // com menos espaço, compara-se bem com a água). Fluxo ∝ gradiente (Fick)
+    // que espalha as zonas densas e enche as vazias. Direções: +x, −x, +y, −y.
+    var press = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
+    var max_drop = 0.0;
+    if (params.monomer_pressure > 0.0) {
+        let f_self = f32(src_total) / f32(max(chem_capacity(idx), 1u));
+        var nb = array<i32, 4>(1, -1, i32(GRID_SIZE), -i32(GRID_SIZE));
+        var inside = array<bool, 4>(x + 1u < GRID_SIZE, x > 0u, y + 1u < GRID_SIZE, y > 0u);
+        for (var d = 0u; d < 4u; d++) {
+            if (!inside[d]) { continue; }
+            let n = u32(i32(idx) + nb[d]);
+            let cap_n = chem_capacity(n);
+            if (cap_n == 0u) { continue; }
+            let f_n = f32(chem_cell_total(n)) / f32(cap_n);
+            press[d] = max(0.05, 1.0 + params.monomer_pressure * (f_self - f_n));
+            max_drop = max(max_drop, f_self - f_n);
+        }
+    }
+    // A pressão também aumenta o FLUXO: saltos extra ∝ à maior queda de
+    // enchimento para uma vizinha (uma célula cheia ao lado de uma vazia
+    // despeja mais).
+    p_diff = clamp(p_diff + PRESSURE_HOP_P * params.monomer_pressure * max_drop, 0.0, 0.5);
     let light_t = uv_light_at_cell(x, y);
 
     for (var ch = 0u; ch < 4u; ch++) {
@@ -161,7 +188,6 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (y + 1u < GRID_SIZE) { coh[2] = 1.0 + params.cohesion * f32(min(chem_act_count(idx + GRID_SIZE, ch), 8u)); }
             if (y > 0u) { coh[3] = 1.0 + params.cohesion * f32(min(chem_act_count(idx - GRID_SIZE, ch), 8u)); }
         }
-        let coh_sum = coh[0] + coh[1] + coh[2] + coh[3];
 
         // ---- Movimento: histograma de destinos (ativados nos 16 bits baixos) ----
         var bins = array<u32, 16>(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
@@ -187,14 +213,14 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             let r = rf.z;
             if (r < p_diff) {
-                var d = min(u32(rf.w * 4.0), 3u);
-                if (k < act_n && coh_sum > 4.0001) {
-                    var u = rf.w * coh_sum;
-                    d = 3u;
-                    for (var cd = 0u; cd < 4u; cd++) {
-                        if (u < coh[cd]) { d = cd; break; }
-                        u -= coh[cd];
-                    }
+                // Direção: pressão × coesão (esta só para os ativados).
+                var w = press;
+                if (k < act_n) { for (var cd = 0u; cd < 4u; cd++) { w[cd] *= coh[cd]; } }
+                var u = rf.w * (w[0] + w[1] + w[2] + w[3]);
+                var d = 3u;
+                for (var cd = 0u; cd < 4u; cd++) {
+                    if (u < w[cd]) { d = cd; break; }
+                    u -= w[cd];
                 }
                 if (d == 0u) { p.x += 1.0; } else if (d == 1u) { p.x -= 1.0; }
                 else if (d == 2u) { p.y += 1.0; } else { p.y -= 1.0; }

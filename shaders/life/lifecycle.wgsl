@@ -30,9 +30,10 @@ const S_PHOTOSYS: u32 = 7u << 16u;   // + índice do resíduo
 // Fotossistema: energia por passo com luz plena e sol 1 (por órgão, × ganho) e
 // probabilidade de reativar um gasto por passo com luz plena.
 // (Por luz ABSORVIDA: um fotossistema sozinho absorve 1 − e^−0,15 ≈ 14% da
-// luz que lhe chega, por isso 0,036 e 0,144 dão os 0,005 e 0,02 de antes.)
+// luz que lhe chega, por isso 0,036 dá os 0,005 de antes.) O modo
+// reciclador reativa com probabilidade PHOTO_YIELD·potência/food_power: a
+// mesma energia por luz nos dois modos.
 const PHOTO_YIELD: f32 = 0.036;
-const PHOTO_REACT_P: f32 = 0.144;
 // Ciclo catalítico: probabilidade por passo de hidrolisar o ligando ligado e
 // de soltar o produto (taxas globais, iguais para todos).
 const MOTOR_P_HYDROLYSIS: f32 = 0.2;
@@ -441,7 +442,10 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                 a.energy += PHOTO_YIELD * power;
             } else {
                 let q = rng_f4(a.id, params.epoch, S_PHOTOSYS + k);
-                if (q.x < clamp(PHOTO_REACT_P * power, 0.0, 1.0)) {
+                // Reativar um monómero guarda food_power de energia: custa a
+                // luz que daria essa energia no modo produtor (senão
+                // reciclar + comer criava energia do nada).
+                if (q.x < clamp(PHOTO_YIELD * power / max(params.food_power, 1e-3), 0.0, 1.0)) {
                     let ch0 = min(u32(q.y * 4.0), 3u);
                     for (var t = 0u; t < 4u; t++) {
                         if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }

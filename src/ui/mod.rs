@@ -217,6 +217,8 @@ fn world_panel(ui: &mut egui::Ui, world: &mut World) {
     egui::CollapsingHeader::new("Monómeros").default_open(true).show(ui, |ui| {
         ui.add(egui::Slider::new(seed_density, 0.05..=1.0).text("densidade inicial (na próxima semente)"));
         ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("difusão ×"));
+        ui.add(egui::Slider::new(&mut p.monomer_pressure, 0.0..=20.0).text("pressão dos monómeros"))
+            .on_hover_text("a difusão empurra das zonas cheias para as vazias");
         ui.add(
             egui::Slider::new(&mut p.activation_decay, 0.0..=0.002)
                 .logarithmic(true)

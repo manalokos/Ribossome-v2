@@ -83,7 +83,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8) -> String {
         )
     };
     match t {
-        0 => format!("boca [disco com abertura escura]: come ×{} mais depressa", 2 + p as u32),
+        0 => format!("boca [disco com abertura escura]: come monómeros ativados (só as bocas comem), força ×{}", 2 + p as u32),
         1 => format!(
             "músculo [elipse vermelha às riscas]: a junta dobra ×{:.2} mais com os sinais",
             (2.0 + 0.5 * p as f32) * g
@@ -103,7 +103,11 @@ pub fn describe(t: u8, p: u8, gain_idx: u8) -> String {
         7 => format!("armazenamento [disco com anéis]: +{} de capacidade de energia", 4 * (p as u32 + 1)),
         10 => format!(
             "fotossistema [disco verde com raios]: {}, força ×{g:.2}",
-            if p & 1 == 0 { "dá energia com a luz (produtor)" } else { "usa a luz para reativar os gastos à volta (recicla comida)" }
+            if p & 1 == 0 {
+                "dá energia com a luz (produtor)"
+            } else {
+                "usa a luz para reativar os gastos à volta (faz comida; a mesma energia que o modo produtor)"
+            }
         ),
         11 => format!(
             "protease [disco com dentes]: ao tocar noutro agente tira-lhe energia (fica com metade), força ×{:.2}; corpos ricos em prolina resistem",

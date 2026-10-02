@@ -61,10 +61,12 @@ fn organ_upkeep(slot: u32, n: u32) -> f32 {
     return u;
 }
 
-// Multiplicador da catálise de um resíduo (a boca come mais).
+// Multiplicador da catálise de um resíduo: SÓ a boca come (pedido do
+// Filipe: a energia dos monómeros ativados entra só por bocas); a força da
+// boca é a propensão catalítica do seu aminoácido × (2 + parâmetro).
 fn organ_catalysis_mult(slot: u32, k: u32) -> f32 {
     let o = organ_get(slot, k);
-    return select(1.0, 2.0 + f32(organ_param(o)), organ_type(o) == ORGAN_MOUTH);
+    return select(0.0, 2.0 + f32(organ_param(o)), organ_type(o) == ORGAN_MOUTH);
 }
 
 // Desvio da junta k pelos sinais (rad). TODAS as juntas respondem, cada
