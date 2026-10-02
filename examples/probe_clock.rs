@@ -41,6 +41,8 @@ fn main() {
         world.params.death_probability = 0.0;
         world.params.maintenance_cost = 0.0;
         world.params.sedimentation = 0.0;
+        world.params.spawn_energy = 1000.0;
+        world.params.motion_cost = std::env::var("MC").ok().and_then(|v| v.parse().ok()).unwrap_or(world.params.motion_cost);
         let s = cfg.sim_size();
         let mut rng = ribossome::life::SplitMix(5);
         let reqs: Vec<SpawnRequest> = (0..200)
@@ -48,16 +50,27 @@ fn main() {
             .collect();
         world.request_seeds(&reqs);
         run(&gpu, &mut world, 150);
+        let start = world.read_agents_blocking(&gpu);
         let p0: std::collections::HashMap<u32, (f32, f32)> =
-            world.read_agents_blocking(&gpu).iter().filter(|a| a.alive != 0).map(|a| (a.id, (a.pos_x, a.pos_y))).collect();
+            start.iter().filter(|a| a.alive != 0).map(|a| (a.id, (a.pos_x, a.pos_y))).collect();
+        let mean_e = |v: &[ribossome::params::Agent]| {
+            let a: Vec<f32> = v.iter().filter(|a| a.alive != 0).map(|a| a.energy).collect();
+            a.iter().sum::<f32>() / a.len().max(1) as f32
+        };
+        let e0 = mean_e(&start);
         run(&gpu, &mut world, 600);
-        let d: Vec<f32> = world
-            .read_agents_blocking(&gpu)
+        let end = world.read_agents_blocking(&gpu);
+        let e1 = mean_e(&end);
+        let d: Vec<f32> = end
             .iter()
             .filter(|a| a.alive != 0)
             .filter_map(|a| p0.get(&a.id).map(|&(x, y)| ((a.pos_x - x).powi(2) + (a.pos_y - y).powi(2)).sqrt()))
             .collect();
         let m = d.iter().sum::<f32>() / d.len().max(1) as f32;
-        println!("período {period:5.0}: deslocamento em 600 passos {m:7.1}");
+        println!(
+            "período {period:5.0}: deslocamento em 600 passos {m:7.1}, energia gasta {:.4}/passo (manutenção de 17 resíduos: {:.4})",
+            (e0 - e1) / 600.0,
+            0.002 * 17.0
+        );
     }
 }

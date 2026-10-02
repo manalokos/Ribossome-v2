@@ -219,6 +219,8 @@ struct JointsOut {
     phi: f32,
     // Grãos de entulho empurrados pelas juntas neste passo (custam energia).
     pushed: u32,
+    // Σ √arrasto·dθ² da parte ativa (sem ruído): a potência dissipada.
+    dissipated: f32,
 }
 
 // Um passo da dinâmica das juntas do agente `slot`. kT = agitação térmica local.
@@ -231,6 +233,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     none.flow = vec3<f32>(0.0);
     none.phi = 0.0;
     none.pushed = 0u;
+    none.dissipated = 0.0;
     let n = a.body_len;
     if (n < 2u) { return none; }
     let base = slot * MAX_BODY;
@@ -240,6 +243,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     let cr0 = cos(a.rot);
     let sr0 = sin(a.rot);
     var pushed = 0u;
+    var dissipated = 0.0;
     for (var k = 1u; k < n; k++) { // θ_0 é a orientação global (o corpo roda livre)
         let aa = body_get(slot, k);
         // No sedimento a junta dobra mais devagar: tem de empurrar os grãos.
@@ -256,8 +260,9 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
         // Ruído térmico (Langevin sobreamortecido): σ = √(2·μ·kT).
         let q = rng_f4(a.id, params.epoch, S_JOINT + k);
         let bm = sqrt(-2.0 * log(max(q.x, 1e-7))) * cos(6.2831853 * q.y);
-        let dth = clamp(JOINT_MOBILITY * tau / sqrt(drag_here), -JOINT_MAX_STEP, JOINT_MAX_STEP)
-            + bm * sqrt(2.0 * JOINT_MOBILITY * max(kt, 0.0));
+        let drive = clamp(JOINT_MOBILITY * tau / sqrt(drag_here), -JOINT_MAX_STEP, JOINT_MAX_STEP);
+        dissipated += sqrt(drag_here) * drive * drive;
+        let dth = drive + bm * sqrt(2.0 * JOINT_MOBILITY * max(kt, 0.0));
         joint_angle[base + k] = theta + dth;
 
         // ESCAVAR: o segmento seguinte, ao dobrar, empurra o grão de entulho
@@ -306,6 +311,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     rebuild_body(slot, n);
     if (params.rft_enabled == 0u && params.fluid_swim_only == 0u) {
         none.pushed = pushed;
+        none.dissipated = dissipated;
         return none;
     }
     // As posições guardadas estão num referencial preso ao 1.º segmento: cada
@@ -346,6 +352,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     // Mundo = R(rot)·R(Ω)·R(φ)·forma guardada nova  =>  rot avança Ω + φ.
     res.phi = phi;
     res.pushed = pushed;
+    res.dissipated = dissipated;
     return res;
 }
 

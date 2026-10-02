@@ -206,6 +206,13 @@ gpu_struct! {
         /// resíduo empurra a água com a sua velocidade de mudança de forma e o
         /// agente é levado pela água no centro (sem média). 0 = desligada.
         pub fluid_swim_only: u32,
+        /// Custo de DISSIPAÇÃO do movimento: energia por passo = isto ×
+        /// Σ √arrasto·dθ² das juntas (potência viscosa ξ·ω²; só a parte ativa,
+        /// o ruído térmico vem do banho). Mover depressa custa ao quadrado.
+        pub motion_cost: f32,
+        pub _pad_m0: u32,
+        pub _pad_m1: u32,
+        pub _pad_m2: u32,
     }
 }
 
@@ -278,6 +285,10 @@ impl Default for SimParams {
             agent_fluid_push: 0.25,
             swim_wobble: 1.0,
             fluid_swim_only: 0,
+            motion_cost: 0.1,
+            _pad_m0: 0,
+            _pad_m1: 0,
+            _pad_m2: 0,
         }
     }
 }

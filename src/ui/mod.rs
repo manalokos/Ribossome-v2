@@ -444,6 +444,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.swim_gain, 0.0..=50.0).text("ganho da natação"));
     ui.add(egui::Slider::new(&mut p.swim_wobble, 0.0..=1.0).text("vaivém da natação"))
         .on_hover_text("1 = balanço físico de cada batida; 0 = só o avanço médio");
+    ui.add(egui::Slider::new(&mut p.motion_cost, 0.0..=2.0).text("custo de dissipação do movimento"))
+        .on_hover_text("energia = isto × Σ √arrasto·dθ² das juntas: bater depressa custa ao quadrado");
     ui.add(egui::Slider::new(&mut p.agent_fluid_push, -1.0..=1.0).text("agentes empurram a água"))
         .on_hover_text("cada resíduo devolve ao fluido o seu arrasto (só no mundo com fluido)");
     let mut fso = p.fluid_swim_only != 0;
