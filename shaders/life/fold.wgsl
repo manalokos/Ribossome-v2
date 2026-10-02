@@ -217,6 +217,8 @@ struct JointsOut {
     swim: vec3<f32>,
     flow: vec3<f32>,
     phi: f32,
+    // Grãos de entulho empurrados pelas juntas neste passo (custam energia).
+    pushed: u32,
 }
 
 // Um passo da dinâmica das juntas do agente `slot`. kT = agitação térmica local.
@@ -228,6 +230,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     none.swim = vec3<f32>(0.0);
     none.flow = vec3<f32>(0.0);
     none.phi = 0.0;
+    none.pushed = 0u;
     let n = a.body_len;
     if (n < 2u) { return none; }
     let base = slot * MAX_BODY;
@@ -236,12 +239,15 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
 
     let cr0 = cos(a.rot);
     let sr0 = sin(a.rot);
+    var pushed = 0u;
     for (var k = 1u; k < n; k++) { // θ_0 é a orientação global (o corpo roda livre)
         let aa = body_get(slot, k);
-        // No sedimento a junta dobra mais devagar: tem de empurrar os grãos
-        // (mobilidade ÷ arrasto local).
+        // No sedimento a junta dobra mais devagar: tem de empurrar os grãos.
+        // Mobilidade ÷ √arrasto (com ÷ arrasto inteiro, ~1/50, a junta ficava
+        // praticamente imóvel e o agente preso para sempre).
         let ok = old[k];
-        let drag_here = anchor_drag(vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr0 * ok.x - sr0 * ok.y, sr0 * ok.x + cr0 * ok.y));
+        let pw_k = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr0 * ok.x - sr0 * ok.y, sr0 * ok.x + cr0 * ok.y);
+        let drag_here = anchor_drag(pw_k);
         // Alvo: forma de repouso + a deformação ATIVA da junta (estado
         // catalítico, propagado N->C com atraso) + o desvio pelos sinais.
         let goal = joint_base[base + k] + joint_active[base + k] + signal_deflection(slot, k);
@@ -250,9 +256,39 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
         // Ruído térmico (Langevin sobreamortecido): σ = √(2·μ·kT).
         let q = rng_f4(a.id, params.epoch, S_JOINT + k);
         let bm = sqrt(-2.0 * log(max(q.x, 1e-7))) * cos(6.2831853 * q.y);
-        let dth = clamp(JOINT_MOBILITY * tau / drag_here, -JOINT_MAX_STEP, JOINT_MAX_STEP)
+        let dth = clamp(JOINT_MOBILITY * tau / sqrt(drag_here), -JOINT_MAX_STEP, JOINT_MAX_STEP)
             + bm * sqrt(2.0 * JOINT_MOBILITY * max(kt, 0.0));
         joint_angle[base + k] = theta + dth;
+
+        // ESCAVAR: o segmento seguinte, ao dobrar, empurra o grão de entulho
+        // onde está para a célula vizinha (o sedimento cede e abre uma
+        // galeria). A probabilidade segue o deslocamento que a junta TENTA
+        // (o binário, sem a resistência dos grãos), não o que consegue:
+        // assim um agente preso também cava. Os grãos conservam-se.
+        if (params.bioturbation > 0.0 && k + 1u < n) {
+            let seg = old[k + 1u] - ok;
+            let want = clamp(JOINT_MOBILITY * tau, -JOINT_MAX_STEP, JOINT_MAX_STEP) * length(seg);
+            let p_push = clamp(params.bioturbation * abs(want) / f32(WORLD_UNITS_PER_CELL), 0.0, 1.0);
+            if (q.z < p_push && a.energy > params.bioturbation_cost * f32(pushed + 1u)) {
+                // Velocidade do segmento k+1 ao rodar à volta da junta k: ⊥ seg.
+                let vb = sign(want) * vec2<f32>(-seg.y, seg.x);
+                let vw = vec2<f32>(cr0 * vb.x - sr0 * vb.y, sr0 * vb.x + cr0 * vb.y);
+                let ob = old[k + 1u];
+                let src = world_to_cell(vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr0 * ob.x - sr0 * ob.y, sr0 * ob.x + cr0 * ob.y));
+                let g = gamma_count(src);
+                if (g > 0u && g < GAMMA_SOLID_THRESHOLD) {
+                    var d = vec2<i32>(select(-1, 1, vw.x > 0.0), 0);
+                    if (abs(vw.y) > abs(vw.x)) { d = vec2<i32>(0, select(-1, 1, vw.y > 0.0)); }
+                    let c = vec2<i32>(i32(src % GRID_SIZE), i32(src / GRID_SIZE)) + d;
+                    if (all(c >= vec2<i32>(0)) && all(c < vec2<i32>(i32(GRID_SIZE)))) {
+                        let dst = u32(c.y) * GRID_SIZE + u32(c.x);
+                        if (gamma_count(dst) + 1u < GAMMA_SOLID_THRESHOLD && gamma_move_one(src, dst)) {
+                            pushed += 1u;
+                        }
+                    }
+                }
+            }
+        }
     }
     // ACOPLAMENTO ATIVO (para o passo seguinte): a atividade da junta k é o
     // seu próprio motor mais uma fração da atividade da junta k−1 AGORA, que
@@ -268,7 +304,10 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
         prev_active = here;
     }
     rebuild_body(slot, n);
-    if (params.rft_enabled == 0u && params.fluid_swim_only == 0u) { return none; }
+    if (params.rft_enabled == 0u && params.fluid_swim_only == 0u) {
+        none.pushed = pushed;
+        return none;
+    }
     // As posições guardadas estão num referencial preso ao 1.º segmento: cada
     // batida aparece lá como uma rotação RÍGIDA grande do resto do corpo, que
     // o RFT linearizado (Ω×r) só cancela até 1.ª ordem; o resto (∝ Ω²) dava
@@ -306,6 +345,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     res.flow = out.flow;
     // Mundo = R(rot)·R(Ω)·R(φ)·forma guardada nova  =>  rot avança Ω + φ.
     res.phi = phi;
+    res.pushed = pushed;
     return res;
 }
 

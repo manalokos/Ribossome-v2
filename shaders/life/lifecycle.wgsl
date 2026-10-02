@@ -286,6 +286,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // muito para um lado e para o outro) e a orientação errada estragava a
     // natação; com a rotação física, um movimento recíproco não desloca nada.
     let js = joints_step(slot, a, kt_here);
+    a.energy -= params.bioturbation_cost * f32(js.pushed);
     // O ganho de natação amplifica só o AVANÇO MÉDIO da natação, não o
     // vaivém de cada batida (que se anula num ciclo; multiplicá-lo fazia os
     // agentes andar ~25× mais de lado do que em frente). O transporte pela
