@@ -383,7 +383,14 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // preferência dá o total, como antes).
         let aa_k = body_get(slot, k);
         let prk = aa_props[aa_k];
-        let aff = vec4<f32>(prk.sub_a, prk.sub_u, prk.sub_g, prk.sub_c);
+        var aff = vec4<f32>(prk.sub_a, prk.sub_u, prk.sub_g, prk.sub_c);
+        let om = organ_get(slot, k);
+        if (organ_type(om) == ORGAN_MOUTH) {
+            // Viés da boca: + prefere A/U, − prefere G/C (renormalizado).
+            let b = clamp(organ_var(om).p1, -0.95, 0.95);
+            aff *= vec4<f32>(1.0 + b, 1.0 + b, 1.0 - b, 1.0 - b);
+            aff /= max(aff.x + aff.y + aff.z + aff.w, 1e-6);
+        }
         let w_avail = aff * vec4<f32>(avail);
         let eff = 4.0 * (w_avail.x + w_avail.y + w_avail.z + w_avail.w);
         // Uma enzima real não sabe se a célula está cheia: por omissão
@@ -441,15 +448,17 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let s_abs = max(f32(atomicLoad(&shade_grid[ly * LIGHT_SIZE + lx])) / f32(SHADE_ONE), 1.0);
             let share = (1.0 - exp(-AGENT_UV_ABSORB * s_abs)) / s_abs;
             let og = organ_gain(ok);
-            let power = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og;
-            if ((organ_param(ok) & 1u) == 0u) {
-                a.energy += PHOTO_YIELD * power;
-            } else {
+            let pv = organ_var(ok);
+            let power = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0);
+            // Variante: p0 = fração da luz para reciclar, p1 = eficiência.
+            let recycle = clamp(pv.p0, 0.0, 1.0);
+            a.energy += (1.0 - recycle) * PHOTO_YIELD * power;
+            if (recycle > 0.0) {
                 let q = rng_f4(a.id, params.epoch, S_PHOTOSYS + k);
                 // Reativar um monómero guarda food_power de energia: custa a
                 // luz que daria essa energia no modo produtor (senão
                 // reciclar + comer criava energia do nada).
-                if (q.x < clamp(PHOTO_YIELD * power / max(params.food_power, 1e-3), 0.0, 1.0)) {
+                if (q.x < clamp(recycle * PHOTO_YIELD * power / max(params.food_power, 1e-3), 0.0, 1.0)) {
                     let ch0 = min(u32(q.y * 4.0), 3u);
                     for (var t = 0u; t < 4u; t++) {
                         if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }

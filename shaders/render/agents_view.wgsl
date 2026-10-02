@@ -23,6 +23,7 @@
 @group(0) @binding(7) var<storage, read> aa_props_view: array<AaProps, 20>;
 @group(0) @binding(8) var<storage, read> genomes_view: array<u32>;
 @group(0) @binding(9) var<storage, read> rna_tail_view: array<vec4<f32>>;
+@group(0) @binding(10) var<storage, read> organ_variants_view: array<OrganVariant>;
 
 // Fios de RNA nas pontas (as zonas não traduzidas): bases desenhadas por
 // agente (metade para cada ponta), distância entre bases e ondulação.
@@ -150,8 +151,9 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             organ = (oc & 0xFu) - 1u;
             r_world *= ORGAN_SCALE;
             if (organ == ORGAN_CLOCK) {
-                let p = (oc >> 4u) & 0xFu;
-                let period = CLOCK_PERIOD_BASE * f32(1u << (p >> 1u));
+                let p = min((oc >> 4u) & 0xFu, ORGAN_VARIANTS - 1u);
+                // Período da variante (o ponteiro ignora a modulação por α/β).
+                let period = max(organ_variants_view[ORGAN_CLOCK * ORGAN_VARIANTS + p].p1, 2.0);
                 phase = 6.2831853 * f32(a.age) / period;
             }
         }

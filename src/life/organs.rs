@@ -16,7 +16,9 @@
 //! Todas as juntas dobram conforme α e β (sensibilidade por aminoácido); o
 //! "músculo" amplifica a resposta local; a natação faz-se pelo RFT.
 //!
-//! Parâmetro (3 bits):
+//! As PROPRIEDADES de cada variante (o parâmetro 0..5) vêm de
+//! assets/orgaos.json (ver `ORGAN_PROPS`); o texto abaixo descreve os
+//! valores iniciais. Parâmetro (antigo, 3 bits):
 //! - sensores (comida, luz, energia): bit 0 canal α/β, bit 1 sinal +/−,
 //!   bit 2 nível ou VARIAÇÃO desde o passo anterior. Os de comida e luz
 //!   amostram as células num raio: os TOTAIS somam o disco todo; os
@@ -72,63 +74,128 @@ pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷',
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
-pub fn describe(t: u8, p: u8, gain_idx: u8) -> String {
+/// Propriedade de uma variante de órgão: nome no ficheiro e significado.
+pub struct PropDef {
+    pub name: &'static str,
+    pub desc: &'static str,
+}
+
+const fn pd(name: &'static str, desc: &'static str) -> PropDef {
+    PropDef { name, desc }
+}
+
+/// Variantes por tipo de órgão (o parâmetro do modificador, 0..5).
+pub const VARIANTS: usize = 6;
+/// Máximo de propriedades por variante (o que cabe na GPU).
+pub const MAX_PROPS: usize = 8;
+
+const SENSOR_PROPS: &[PropDef] = &[
+    pd("canal", "0 = emite em α, 1 = em β"),
+    pd("ganho", "multiplica o que sente (negativo inverte)"),
+    pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
+    pd("memoria", "0..1: na variação, quanto a referência demora a seguir o sentido (0 = passo anterior)"),
+];
+
+/// Propriedades de cada tipo de órgão, por ordem (a mesma na GPU).
+pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
+    &[pd("forca", "multiplica a catálise do promotor"), pd("vies_AU", "-1..1: prefere A/U (+) ou G/C (−)")],
+    &[pd("amplificacao", "multiplica a dobra da junta pelos sinais"), pd("canal", "0 = só α, 1 = só β, 2 = ambos")],
+    SENSOR_PROPS,
+    SENSOR_PROPS,
+    SENSOR_PROPS,
+    &[
+        pd("canal", "0 = emite em α, 1 = em β"),
+        pd("periodo", "passos por ciclo"),
+        pd("mod_alfa", "o relógio acelera (+) ou abranda (−) com o nível de α"),
+        pd("mod_beta", "o mesmo com β"),
+    ],
+    &[
+        pd("entrada", "0 = lê α, 1 = lê β"),
+        pd("saida", "0 = emite em α, 1 = em β"),
+        pd("ganho", "multiplica (negativo inverte)"),
+        pd("limiar", "só passa o que estiver acima deste nível (porta)"),
+    ],
+    &[pd("capacidade", "energia extra que guarda")],
+    SENSOR_PROPS,
+    SENSOR_PROPS,
+    &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],
+    &[pd("forca", "multiplica a mordida"), pd("alcance", "unidades do mundo além do contacto")],
+];
+
+fn fmt_canal(v: f32) -> &'static str {
+    if v < 0.5 { "α" } else { "β" }
+}
+
+/// Descrição em linguagem corrente de um órgão (tipo, variante, índice de
+/// intensidade) com os valores da tabela.
+pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) -> String {
     let g = organ_gain(gain_idx);
-    let canal = if p & 1 == 0 { "α" } else { "β" };
+    let t = t as usize;
+    let Some(row) = table.get(t) else { return format!("órgão {t}") };
+    let v = |name: &str| row.variantes.get(p as usize).and_then(|m| m.get(name)).copied().unwrap_or(0.0);
     let sensor = |o_que: &str, aspeto: &str| {
         format!(
-            "{o_que} [{aspeto}]: emite em {canal}, {}, {}, força ×{g:.2}",
-            if p & 2 == 0 { "positivo" } else { "invertido (negativo)" },
-            if p & 4 == 0 { "pelo NÍVEL" } else { "pela VARIAÇÃO desde o passo anterior" },
+            "{o_que} [{aspeto}]: emite em {}, ganho ×{:.2}, {}",
+            fmt_canal(v("canal")),
+            v("ganho") * g,
+            if v("modo") < 0.5 {
+                "pelo NÍVEL".to_string()
+            } else {
+                format!("pela VARIAÇÃO (memória {:.2})", v("memoria"))
+            }
         )
     };
     match t {
-        0 => format!("boca [disco com abertura escura]: come monómeros ativados (só as bocas comem), força ×{}", 2 + p as u32),
-        1 => format!(
-            "músculo [elipse vermelha às riscas]: a junta dobra ×{:.2} mais com os sinais",
-            (2.0 + 0.5 * p as f32) * g
-        ),
-        2 => sensor("sensor de comida TOTAL, mede os ativados num raio à volta", "coroa de 6 antenas verdes"),
-        3 => sensor("sensor de luz TOTAL, mede a luz num raio à volta", "coroa de 6 antenas amarelas"),
-        4 => sensor("sensor de energia, mede a energia interna", "disco com anel dourado"),
-        5 => format!(
-            "relógio [mostrador com ponteiro]: oscila em {canal} com período {} passos, força ×{g:.2}",
-            CLOCK_PERIOD_BASE as u32 * (1 << (p >> 1))
-        ),
-        6 => {
-            let modo = ["converte α em β", "converte β em α", "inverte α", "inverte β"][(p & 3) as usize];
-            let k = if p & 4 != 0 { 2.0 } else { 1.0 };
-            format!("relé [losango]: {modo}, força ×{:.2}", k * g)
-        }
-        7 => format!("armazenamento [disco com anéis]: +{} de capacidade de energia", 4 * (p as u32 + 1)),
-        10 => format!(
-            "fotossistema [disco verde com raios]: {}, força ×{g:.2}",
-            if p & 1 == 0 {
-                "dá energia com a luz (produtor)"
-            } else {
-                "usa a luz para reativar os gastos à volta (faz comida; a mesma energia que o modo produtor)"
+        0 => format!(
+            "boca [disco com abertura escura]: come monómeros ativados, força ×{:.2}, {}",
+            v("forca") * g,
+            match v("vies_AU") {
+                x if x > 0.05 => format!("prefere A/U ({x:+.2})"),
+                x if x < -0.05 => format!("prefere G/C ({x:+.2})"),
+                _ => "sem preferência extra".into(),
             }
         ),
-        11 => format!(
-            "protease [disco com dentes]: ao tocar noutro agente tira-lhe energia (fica com metade), força ×{:.2}; corpos ricos em prolina resistem",
-            (1.0 + 0.5 * p as f32) * g
+        1 => format!(
+            "músculo [elipse às riscas]: dobra ×{:.2} com {}",
+            v("amplificacao") * g,
+            ["α", "β", "α e β"][(v("canal").round().clamp(0.0, 2.0)) as usize]
         ),
-        8 => sensor(
-            "sensor de comida DIRECIONAL, compara o lado esquerdo com o direito",
-            "2 antenas verdes, uma de cada lado",
+        2 => sensor("sensor de comida TOTAL", "coroa de antenas verdes"),
+        3 => sensor("sensor de luz TOTAL", "coroa de antenas amarelas"),
+        4 => sensor("sensor de energia interna", "disco com anel dourado"),
+        5 => format!(
+            "relógio [mostrador]: em {}, período {:.0} passos, força ×{g:.2}{}",
+            fmt_canal(v("canal")),
+            v("periodo"),
+            if v("mod_alfa").abs() + v("mod_beta").abs() > 0.0 {
+                format!("; acelera com α ×{:+.2} e com β ×{:+.2}", v("mod_alfa"), v("mod_beta"))
+            } else {
+                String::new()
+            }
         ),
-        _ => sensor(
-            "sensor de luz DIRECIONAL, compara o lado esquerdo com o direito",
-            "2 antenas amarelas, uma de cada lado",
+        6 => format!(
+            "relé [losango]: lê {} e emite em {}, ganho ×{:.2}{}",
+            fmt_canal(v("entrada")),
+            fmt_canal(v("saida")),
+            v("ganho") * g,
+            if v("limiar") > 0.0 { format!(", só acima de {:.2}", v("limiar")) } else { String::new() }
+        ),
+        7 => format!("armazenamento [disco com anéis]: +{:.1} de capacidade de energia", v("capacidade") * g),
+        8 => sensor("sensor de comida DIRECIONAL (esquerda − direita)", "2 antenas verdes"),
+        9 => sensor("sensor de luz DIRECIONAL (esquerda − direita)", "2 antenas amarelas"),
+        10 => format!(
+            "fotossistema [disco verde com raios]: {:.0}% da luz para reativar gastos, {:.0}% para energia, eficiência ×{:.2}",
+            v("reciclar") * 100.0,
+            (1.0 - v("reciclar")) * 100.0,
+            v("eficiencia") * g
+        ),
+        _ => format!(
+            "protease [disco com dentes]: tira energia a quem toca (fica com metade), força ×{:.2}, alcance +{:.0}; a prolina protege",
+            v("forca") * g,
+            v("alcance")
         ),
     }
 }
-
-/// Custo de manutenção por passo de um órgão, em múltiplos do custo de um resíduo.
-pub const ORGAN_UPKEEP: [f32; ORGAN_TYPES] = [3.0, 4.0, 2.0, 2.0, 1.0, 2.0, 1.0, 1.0, 3.0, 3.0, 2.0, 3.0];
-
-/// Período base do relógio (passos); o parâmetro multiplica-o por 2^(bits 1–2).
-pub const CLOCK_PERIOD_BASE: f32 = 20.0;
 
 /// Aminoácidos promotores (pouco frequentes num genoma ao acaso).
 pub const PROMOTERS: [char; 3] = ['C', 'H', 'W'];
@@ -220,12 +287,9 @@ pub fn wgsl() -> String {
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");
     }
-    s += &format!("const ORGAN_TYPES: u32 = {ORGAN_TYPES}u;\n");
-    s += &format!("const CLOCK_PERIOD_BASE: f32 = {CLOCK_PERIOD_BASE:.1};\n");
+    s += &format!("const ORGAN_TYPES: u32 = {ORGAN_TYPES}u;\nconst ORGAN_VARIANTS: u32 = {VARIANTS}u;\n");
     let promo: Vec<String> = (0..20u8).map(|a| format!("{}u", is_promoter(a) as u32)).collect();
     s += &format!("const AA_IS_PROMOTER = array<u32, 20>({});\n", promo.join(", "));
-    let up: Vec<String> = ORGAN_UPKEEP.iter().map(|v| format!("{v:.3}")).collect();
-    s += &format!("const ORGAN_UPKEEP = array<f32, {ORGAN_TYPES}>({});\n", up.join(", "));
     s
 }
 

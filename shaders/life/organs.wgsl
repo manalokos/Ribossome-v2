@@ -21,8 +21,6 @@ const BEND_COST: f32 = 0.0005;
 const SENSOR_RADIUS: f32 = 90.0;
 // Ganho dos sensores de variação (diferença por passo).
 const SENSOR_CHANGE_GAIN: f32 = 20.0;
-// Capacidade de energia acrescentada pelo armazenamento, por (parâmetro + 1).
-const STORAGE_CAPACITY: f32 = 4.0;
 
 fn organ_get(slot: u32, k: u32) -> u32 {
     return (organs[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
@@ -42,12 +40,18 @@ fn organ_param(o: u32) -> u32 {
     return (o >> 4u) & 0xFu;
 }
 
+// Propriedades da variante do órgão (assets/orgaos.json; ordem em
+// organs::ORGAN_PROPS).
+fn organ_var(o: u32) -> OrganVariant {
+    return organ_variants[organ_type(o) * ORGAN_VARIANTS + min(organ_param(o), ORGAN_VARIANTS - 1u)];
+}
+
 // Capacidade extra de energia e custo de manutenção dos órgãos do agente.
 fn organ_capacity(slot: u32, n: u32) -> f32 {
     var c = 0.0;
     for (var k = 0u; k < n; k++) {
         let o = organ_get(slot, k);
-        if (organ_type(o) == ORGAN_STORAGE) { c += STORAGE_CAPACITY * f32(organ_param(o) + 1u); }
+        if (organ_type(o) == ORGAN_STORAGE) { c += max(organ_var(o).p0, 0.0) * organ_gain(o); }
     }
     return c;
 }
@@ -56,17 +60,17 @@ fn organ_upkeep(slot: u32, n: u32) -> f32 {
     var u = 0.0;
     for (var k = 0u; k < n; k++) {
         let t = organ_type(organ_get(slot, k));
-        if (t != 0xFFu) { u += ORGAN_UPKEEP[t]; }
+        if (t != 0xFFu) { u += organ_props[t].upkeep; }
     }
     return u;
 }
 
 // Multiplicador da catálise de um resíduo: SÓ a boca come (pedido do
 // Filipe: a energia dos monómeros ativados entra só por bocas); a força da
-// boca é a propensão catalítica do seu aminoácido × (2 + parâmetro).
+// boca é a da variante × ganho (× a propensão catalítica do aminoácido).
 fn organ_catalysis_mult(slot: u32, k: u32) -> f32 {
     let o = organ_get(slot, k);
-    return select(0.0, 2.0 + f32(organ_param(o)), organ_type(o) == ORGAN_MOUTH);
+    return select(0.0, max(organ_var(o).p0, 0.0) * organ_gain(o), organ_type(o) == ORGAN_MOUTH);
 }
 
 // Desvio da junta k pelos sinais (rad). TODAS as juntas respondem, cada
@@ -76,10 +80,18 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     let aa = body_get(slot, k);
     let s = signals[slot * MAX_BODY + k];
     let o = organ_get(slot, k);
-    let amp = select(1.0, (2.0 + 0.5 * f32(organ_param(o))) * organ_gain(o), organ_type(o) == ORGAN_MUSCLE);
+    // Músculo: amplifica o canal escolhido pela variante (0 α, 1 β, 2 ambos).
+    var amp_a = 1.0;
+    var amp_b = 1.0;
+    if (organ_type(o) == ORGAN_MUSCLE) {
+        let mv = organ_var(o);
+        let amp = mv.p0 * organ_gain(o);
+        if (mv.p1 < 0.5 || mv.p1 > 1.5) { amp_a = amp; }
+        if (mv.p1 > 0.5) { amp_b = amp; }
+    }
     let pr = aa_props[aa];
     let lim = max(pr.max_bend, 1e-3);
-    return lim * tanh(SIGNAL_GAIN * amp * (s.x * pr.sens_alpha + s.y * pr.sens_beta) / lim);
+    return lim * tanh(SIGNAL_GAIN * (s.x * pr.sens_alpha * amp_a + s.y * pr.sens_beta * amp_b) / lim);
 }
 
 // Amostra as células num disco de raio SENSOR_RADIUS à volta de `pos`:
@@ -166,34 +178,41 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             }
             default: { is_sensor = false; }
         }
+        let ov = organ_var(o);
         if (is_sensor) {
+            // Variante: p0 canal, p1 ganho (com sinal), p2 modo (0 nível, 1
+            // variação), p3 memória da referência na variação.
             let mi = base + k;
             var v = sensed;
-            if ((p & 4u) != 0u) {
-                // Variação, amplificada (as mudanças por passo são pequenas).
+            if (ov.p2 >= 0.5) {
+                // Variação, amplificada (as mudanças por passo são pequenas);
+                // a referência segue o sentido com a memória da variante.
                 v = (sensed - sensor_mem[mi]) * SENSOR_CHANGE_GAIN;
+                sensor_mem[mi] = mix(sensed, sensor_mem[mi], clamp(ov.p3, 0.0, 0.999));
+            } else {
+                sensor_mem[mi] = sensed;
             }
-            sensor_mem[mi] = sensed;
-            v = select(v, -v, (p & 2u) != 0u) * organ_gain(o);
-            if ((p & 1u) == 0u) { emit[k].x = v; } else { emit[k].y = v; }
+            v *= ov.p1 * organ_gain(o);
+            if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }
             continue;
         }
         switch t {
             case ORGAN_CLOCK: {
-                // bit 0 = canal; bits 1–2 = período (20, 40, 80 ou 160 passos).
-                let period = CLOCK_PERIOD_BASE * f32(1u << (p >> 1u));
-                let v = sin(6.2831853 * f32(a.age) / period) * organ_gain(o);
-                if ((p & 1u) == 0u) { emit[k].x = v; } else { emit[k].y = v; }
+                // p0 canal, p1 período, p2/p3: o relógio acelera com α/β (um
+                // oscilador controlado). A fase vive em sensor_mem.
+                let mi = base + k;
+                let rate = max(0.05, 1.0 + ov.p2 * s.x + ov.p3 * s.y);
+                var phase = sensor_mem[mi] + 6.2831853 * rate / max(ov.p1, 2.0);
+                phase = phase - 6.2831853 * floor(phase / 6.2831853);
+                sensor_mem[mi] = phase;
+                let v = sin(phase) * organ_gain(o);
+                if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }
             }
             case ORGAN_RELAY: {
-                // bits 0–1: 0 α->β, 1 β->α, 2 inverte α, 3 inverte β; bit 2 = ganho ×2.
-                let g = select(1.0, 2.0, (p & 4u) != 0u) * organ_gain(o);
-                switch (p & 3u) {
-                    case 0u: { emit[k].y = g * s.x; }
-                    case 1u: { emit[k].x = g * s.y; }
-                    case 2u: { emit[k].x = -g * 2.0 * s.x; }
-                    default: { emit[k].y = -g * 2.0 * s.y; }
-                }
+                // p0 entrada, p1 saída, p2 ganho, p3 limiar (porta).
+                let x = select(s.x, s.y, ov.p0 >= 0.5);
+                let y = sign(x) * max(abs(x) - max(ov.p3, 0.0), 0.0) * ov.p2 * organ_gain(o);
+                if (ov.p1 < 0.5) { emit[k].x = y; } else { emit[k].y = y; }
             }
             default: {}
         }

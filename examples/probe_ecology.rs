@@ -51,7 +51,11 @@ fn main() {
                     let p = (o >> 4) & 0xF;
                     assert!(ty < ORGAN_TYPES);
                     match ty {
-                        10 => { if p & 1 == 0 { pe = true } else { pr = true } }
+                        10 => {
+                            // Reciclador se a variante usar mais de metade da luz para reativar.
+                            let rec = world.organ_table[10].variantes[(p as usize).min(5)].get("reciclar").copied().unwrap_or(0.0);
+                            if rec > 0.5 { pr = true } else { pe = true }
+                        }
                         11 => pt = true,
                         0 => mo = true,
                         _ => {}

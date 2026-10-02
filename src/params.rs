@@ -406,8 +406,24 @@ gpu_struct! {
     pub struct OrganProps {
         pub len_mult: f32,
         pub mass_mult: f32,
-        pub _pad0: u32,
+        /// Manutenção por passo (múltiplos da de um resíduo).
+        pub upkeep: f32,
         pub _pad1: u32,
+    }
+}
+
+gpu_struct! {
+    /// Propriedades de uma variante de órgão (tipo·6 + parâmetro), pela
+    /// ordem de `organs::ORGAN_PROPS` do tipo.
+    pub struct OrganVariant {
+        pub p0: f32,
+        pub p1: f32,
+        pub p2: f32,
+        pub p3: f32,
+        pub p4: f32,
+        pub p5: f32,
+        pub p6: f32,
+        pub p7: f32,
     }
 }
 

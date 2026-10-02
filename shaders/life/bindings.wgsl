@@ -46,6 +46,8 @@
 // Fios de RNA das pontas (só visual), 2 por slot: (ponta N anterior, ponta C
 // anterior) no mundo; (curvatura do fio N, curvatura do fio C, _, _).
 @group(3) @binding(22) var<storage, read_write> rna_tail: array<vec4<f32>>;
+// Variantes dos órgãos: tipo·ORGAN_VARIANTS + parâmetro (assets/orgaos.json).
+@group(3) @binding(23) var<storage, read> organ_variants: array<OrganVariant>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

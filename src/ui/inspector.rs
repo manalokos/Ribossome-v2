@@ -197,7 +197,7 @@ fn colored_seq(ui: &mut egui::Ui, items: impl Iterator<Item = (char, egui::Color
     });
 }
 
-pub fn draw(ctx: &egui::Context, ins: &mut Inspector) {
+pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life::table::OrganRow]) {
     if !ins.open {
         return;
     }
@@ -260,7 +260,7 @@ pub fn draw(ctx: &egui::Context, ins: &mut Inspector) {
                     format!(
                         "{}  posição {k}: {}",
                         ORGAN_SYMBOLS[t as usize],
-                        describe(t, ((o >> 4) & 0xF) as u8, (o >> 8) as u8)
+                        describe(t, ((o >> 4) & 0xF) as u8, (o >> 8) as u8, organ_table)
                     )
                 })
                 .collect();

@@ -42,11 +42,8 @@
 <main>
   <p class="note">Cada alteração é aplicada à simulação no passo seguinte. "Gravar" escreve <code>assets/aminoacidos.json</code> e <code>assets/orgaos.json</code> (as fontes dos valores ao arrancar). Passa o rato pelos cabeçalhos para ver o que cada coluna faz.</p>
   <div class="scroll"><table id="t"></table></div>
-  <h2>Órgãos: física</h2>
-  <p class="note">Um órgão tem o comprimento e a massa do seu aminoácido promotor (C, H ou W) multiplicados por estes valores.</p>
-  <div class="scroll" style="max-width:520px"><table id="ot"></table></div>
-  <h2>Órgãos e variantes</h2>
-  <p class="note">Um órgão = promotor (C, H ou W) + codão modificador: tipo = índice % 12, parâmetro = índice / 12; um segundo codão dá a intensidade (×1 por omissão). Só consulta, por agora.</p>
+  <h2>Órgãos</h2>
+  <p class="note">Um órgão = promotor (C, H ou W) + codão modificador: tipo = índice % 12, <b>variante</b> = índice / 12 (0–5). Um segundo codão dá a intensidade (×0,06 a ×15, ×1 por omissão), que multiplica a força. Cada variante tem as suas propriedades; o comprimento e a massa multiplicam os do aminoácido promotor.</p>
   <div id="organs"></div>
 </main>
 <script>
@@ -108,28 +105,50 @@ async function load() {
   render();
 }
 
-function renderOrgans() {
-  const t = document.getElementById("ot");
-  let h = "<thead><tr><th>tipo</th><th style='text-align:left'>órgão</th><th title='multiplica o comprimento do promotor'>× comprimento</th><th title='multiplica a massa do promotor'>× massa</th></tr></thead><tbody>";
-  organRows.forEach((r, i) => {
-    h += `<tr><td>${r.tipo}</td><td style="text-align:left">${r.nome}</td>` +
-      ["comprimento_mult", "massa_mult"].map(k => `<td><input type="number" step="0.1" data-i="${i}" data-k="${k}" value="${+r[k].toFixed(3)}"></td>`).join("") + "</tr>";
+let organInfo = [];
+
+function organCard(r, info) {
+  const props = info.props.map(p => p.nome);
+  let h = `<div class="organ"><h3>${info.simbolo} ${info.nome} <span style="color:var(--dim);font-weight:400">(tipo ${r.tipo})</span></h3>`;
+  h += `<div style="margin:4px 0 8px">` + [["comprimento_mult", "× comprimento"], ["massa_mult", "× massa"], ["manutencao", "manutenção"]]
+    .map(([k, l]) => `<label style="margin-right:14px;color:var(--dim)">${l} <input type="number" step="0.1" data-t="${r.tipo}" data-k="${k}" value="${+r[k].toFixed(3)}"></label>`).join("") + `</div>`;
+  h += `<div class="scroll"><table><thead><tr><th>variante</th>` +
+    info.props.map(p => `<th title="${p.desc}">${p.nome}</th>`).join("") + `<th style="text-align:left">o que faz</th></tr></thead><tbody>`;
+  r.variantes.forEach((v, vi) => {
+    h += `<tr><td>${vi}</td>` + props.map(k => `<td><input type="number" step="0.05" data-t="${r.tipo}" data-v="${vi}" data-k="${k}" value="${+(v[k] ?? 0).toFixed(3)}"></td>`).join("") +
+      `<td class="txt" data-t="${r.tipo}" data-v="${vi}" style="text-align:left;white-space:normal;color:var(--dim);min-width:320px">${info.textos[vi]}</td></tr>`;
   });
-  t.innerHTML = h + "</tbody>";
-  t.querySelectorAll("input").forEach(inp => inp.addEventListener("input", e => {
-    const v = parseFloat(e.target.value);
-    if (Number.isNaN(v)) return;
-    organRows[+e.target.dataset.i][e.target.dataset.k] = v;
+  return h + `</tbody></table></div></div>`;
+}
+
+function renderOrgans() {
+  const el = document.getElementById("organs");
+  el.innerHTML = organRows.map(r => organCard(r, organInfo[r.tipo])).join("");
+  el.querySelectorAll("input").forEach(inp => inp.addEventListener("input", e => {
+    const val = parseFloat(e.target.value);
+    if (Number.isNaN(val)) return;
+    const r = organRows[+e.target.dataset.t];
+    if (e.target.dataset.v !== undefined) r.variantes[+e.target.dataset.v][e.target.dataset.k] = val;
+    else r[e.target.dataset.k] = val;
     e.target.classList.add("changed");
     clearTimeout(otimer);
-    otimer = setTimeout(async () => {
-      const r = await fetch("/api/organ_table", { method: "POST", body: JSON.stringify(organRows) });
-      status(r.ok ? "aplicado à simulação (não gravado)" : await r.text(), r.ok ? "ok" : "err");
-    }, 150);
+    otimer = setTimeout(pushOrgans, 150);
   }));
 }
 
+async function pushOrgans() {
+  const r = await fetch("/api/organ_table", { method: "POST", body: JSON.stringify(organRows) });
+  status(r.ok ? "aplicado à simulação (não gravado)" : await r.text(), r.ok ? "ok" : "err");
+  if (!r.ok) return;
+  // Atualiza as descrições sem redesenhar (para não perder o foco).
+  organInfo = await (await fetch("/api/organs")).json();
+  document.querySelectorAll("#organs td.txt").forEach(td => {
+    td.textContent = organInfo[+td.dataset.t].textos[+td.dataset.v];
+  });
+}
+
 async function loadOrgans() {
+  organInfo = await (await fetch("/api/organs")).json();
   organRows = await (await fetch("/api/organ_table")).json();
   renderOrgans();
 }
@@ -150,10 +169,6 @@ document.getElementById("reload").onclick = async () => {
   await load();
   await loadOrgans();
   status("pronto", "ok");
-  const organs = await (await fetch("/api/organs")).json();
-  document.getElementById("organs").innerHTML = organs.map(o =>
-    `<div class="organ"><h3>${o.simbolo} ${o.nome} <span style="color:var(--dim);font-weight:400">(tipo ${o.tipo})</span></h3><ol start="0">` +
-    o.variantes.map(v => `<li><b>parâmetro ${v.param}:</b> ${v.texto}</li>`).join("") + "</ol></div>").join("");
 })();
 </script>
 </body>

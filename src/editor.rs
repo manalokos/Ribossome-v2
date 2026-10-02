@@ -7,7 +7,7 @@
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
-use crate::life::organs::{GAIN_DEFAULT, ORGAN_NAMES, ORGAN_SYMBOLS, ORGAN_TYPES, describe};
+use crate::life::organs::{GAIN_DEFAULT, ORGAN_NAMES, ORGAN_PROPS, ORGAN_SYMBOLS, ORGAN_TYPES, VARIANTS, describe};
 use crate::life::table::{self, AminoRow, OrganRow};
 
 /// O que a página mudou.
@@ -24,20 +24,19 @@ pub struct Editor {
     pub url: String,
 }
 
-/// Variantes de cada órgão (tipo × parâmetro), para a página.
-fn organs_json() -> String {
+/// Esquema e descrição das variantes de cada órgão, com a tabela atual.
+fn organs_json(table: &[OrganRow]) -> String {
     let mut out = Vec::new();
     for t in 0..ORGAN_TYPES {
-        // O parâmetro vai de 0 a 63 / ORGAN_TYPES (ver translate_organs).
-        let max_p = (63 / ORGAN_TYPES) as u8;
-        let variants: Vec<serde_json::Value> = (0..=max_p)
-            .map(|p| serde_json::json!({ "param": p, "texto": describe(t as u8, p, GAIN_DEFAULT) }))
-            .collect();
+        let props: Vec<serde_json::Value> =
+            ORGAN_PROPS[t].iter().map(|p| serde_json::json!({ "nome": p.name, "desc": p.desc })).collect();
+        let textos: Vec<String> = (0..VARIANTS as u8).map(|p| describe(t as u8, p, GAIN_DEFAULT, table)).collect();
         out.push(serde_json::json!({
             "tipo": t,
             "nome": ORGAN_NAMES[t],
             "simbolo": ORGAN_SYMBOLS[t].to_string(),
-            "variantes": variants,
+            "props": props,
+            "textos": textos,
         }));
     }
     serde_json::Value::Array(out).to_string()
@@ -56,7 +55,6 @@ impl Editor {
         let (tx, rx) = channel();
         let shared = Arc::new(Mutex::new(initial));
         let shared_org = Arc::new(Mutex::new(initial_organs));
-        let organs = organs_json();
         std::thread::spawn(move || {
             let header = |ct: &str| tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap();
             for mut req in server.incoming_requests() {
@@ -89,7 +87,8 @@ impl Editor {
                         }
                     }
                     (tiny_http::Method::Get, "/api/organs") => {
-                        tiny_http::Response::from_string(organs.clone()).with_header(header("application/json"))
+                        let rows = shared_org.lock().unwrap().clone();
+                        tiny_http::Response::from_string(organs_json(&rows)).with_header(header("application/json"))
                     }
                     (tiny_http::Method::Post, "/api/table") => {
                         let mut body = String::new();

@@ -50,11 +50,16 @@ const PRED_PROLINE_DEFENSE: f32 = 0.9;
 const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 1000.0;
 
-fn protease_power(slot: u32, n: u32) -> f32 {
-    var pw = 0.0;
+// (força total, alcance máximo) das proteases do agente (variantes).
+fn protease_power(slot: u32, n: u32) -> vec2<f32> {
+    var pw = vec2<f32>(0.0);
     for (var k = 0u; k < n; k++) {
         let o = organ_get(slot, k);
-        if (organ_type(o) == ORGAN_PROTEASE) { pw += (1.0 + 0.5 * f32(organ_param(o))) * organ_gain(o); }
+        if (organ_type(o) == ORGAN_PROTEASE) {
+            let v = organ_var(o);
+            pw.x += max(v.p0, 0.0) * organ_gain(o);
+            pw.y = max(pw.y, v.p1);
+        }
     }
     return pw;
 }
@@ -77,7 +82,8 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p = vec2<f32>(a.pos_x, a.pos_y);
     let c = contact_cell_xy(p);
     var push = vec2<f32>(0.0);
-    let power = protease_power(slot, a.body_len);
+    let prot = protease_power(slot, a.body_len);
+    let power = prot.x;
     var gained = 0.0;
     for (var dy = -1; dy <= 1; dy++) {
         for (var dx = -1; dx <= 1; dx++) {
@@ -99,6 +105,9 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         var dir = select(vec2<f32>(-1.0, 0.0), vec2<f32>(1.0, 0.0), slot < e);
                         if (dist > 1e-4) { dir = d / dist; }
                         push += dir * overlap;
+                    }
+                    // Mordida: em contacto, ou até ao alcance da protease.
+                    if (overlap + prot.y > 0.0) {
                         if (power > 0.0 && b.energy > 0.0) {
                             let resist = 1.0 - PRED_PROLINE_DEFENSE * contact_disp[e].w;
                             let bite = min(PRED_BITE * power * resist, b.energy);

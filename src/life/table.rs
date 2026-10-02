@@ -56,6 +56,11 @@ pub struct OrganRow {
     pub comprimento_mult: f32,
     /// Massa = a do aminoácido promotor × isto.
     pub massa_mult: f32,
+    /// Custo de manutenção por passo, em múltiplos do de um resíduo.
+    pub manutencao: f32,
+    /// As 6 variantes (parâmetro do modificador 0..5): propriedade -> valor
+    /// (as propriedades de cada tipo estão em `organs::ORGAN_PROPS`).
+    pub variantes: Vec<std::collections::BTreeMap<String, f32>>,
 }
 
 pub const ORGANS_PATH: &str = "assets/orgaos.json";
@@ -68,6 +73,18 @@ pub fn parse_organs(text: &str) -> Result<Vec<OrganRow>, String> {
     let n = super::organs::ORGAN_TYPES;
     if rows.len() != n || rows.iter().enumerate().any(|(i, r)| r.tipo as usize != i) {
         return Err(format!("são precisas {n} linhas, tipos 0..{}", n - 1));
+    }
+    for r in &rows {
+        if r.variantes.len() != super::organs::VARIANTS {
+            return Err(format!("{}: {} variantes (devem ser {})", r.nome, r.variantes.len(), super::organs::VARIANTS));
+        }
+        for (vi, v) in r.variantes.iter().enumerate() {
+            for p in super::organs::ORGAN_PROPS[r.tipo as usize] {
+                if !v.contains_key(p.name) {
+                    return Err(format!("{} variante {vi}: falta \"{}\"", r.nome, p.name));
+                }
+            }
+        }
     }
     Ok(rows)
 }
@@ -97,8 +114,24 @@ pub fn save_organs(rows: &[OrganRow]) -> Result<(), String> {
 
 pub fn organs_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganProps> {
     rows.iter()
-        .map(|r| crate::params::OrganProps { len_mult: r.comprimento_mult, mass_mult: r.massa_mult, _pad0: 0, _pad1: 0 })
+        .map(|r| crate::params::OrganProps { len_mult: r.comprimento_mult, mass_mult: r.massa_mult, upkeep: r.manutencao, _pad1: 0 })
         .collect()
+}
+
+/// Variantes para a GPU: tipo·VARIANTS + parâmetro, propriedades pela ordem
+/// de `ORGAN_PROPS` (as que faltam ficam a 0).
+pub fn variants_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganVariant> {
+    let mut out = Vec::new();
+    for r in rows {
+        for v in &r.variantes {
+            let mut p = [0f32; super::organs::MAX_PROPS];
+            for (i, d) in super::organs::ORGAN_PROPS[r.tipo as usize].iter().enumerate() {
+                p[i] = v.get(d.name).copied().unwrap_or(0.0);
+            }
+            out.push(crate::params::OrganVariant { p0: p[0], p1: p[1], p2: p[2], p3: p[3], p4: p[4], p5: p[5], p6: p[6], p7: p[7] });
+        }
+    }
+    out
 }
 
 /// Lê e valida: 20 linhas, uma por aminoácido; devolve-as na ordem de `AMINO`.

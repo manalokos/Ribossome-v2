@@ -236,6 +236,8 @@ pub struct World {
     /// Tabela dos órgãos em uso.
     pub organ_table: Vec<crate::life::table::OrganRow>,
     organ_buf: wgpu::Buffer,
+    /// Variantes dos órgãos (também lidas pelo desenho).
+    pub variant_buf: wgpu::Buffer,
     /// Calor por píxel do terreno carregado (grelha; None = só as pontuais).
     pub heat_image: Option<Vec<f32>>,
     /// Multiplicador de todo o calor das fumarolas.
@@ -375,6 +377,13 @@ impl World {
             mapped_at_creation: false,
         });
         gpu.queue.write_buffer(&organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&organ_table)));
+        let variant_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("organ variants"),
+            size: (crate::life::organs::ORGAN_TYPES * crate::life::organs::VARIANTS * size_of::<crate::params::OrganVariant>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue.write_buffer(&variant_buf, 0, bytemuck::cast_slice(&crate::life::table::variants_to_gpu(&organ_table)));
         // Fios de RNA das pontas (só visual): posição anterior das pontas e curvatura.
         let tail_buf = storage_buffer(device, "rna tails", max_agents * 32);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -417,7 +426,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..23).map(|b| storage_entry(b, b == 4 || b == 20 || b == 21)).collect();
+        let life_entries: Vec<_> = (0..24).map(|b| storage_entry(b, b == 4 || b == 20 || b == 21 || b == 23)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -563,6 +572,7 @@ impl World {
                 &aa_buf,
                 &organ_buf,
                 &tail_buf,
+                &variant_buf,
             ],
         );
 
@@ -695,6 +705,7 @@ impl World {
             tail_buf,
             organ_table,
             organ_buf,
+            variant_buf,
             heat_image: None,
             fumarole_gain: 1.0,
             heat_key: Vec::new(),
@@ -798,6 +809,7 @@ impl World {
     /// Troca a tabela dos órgãos (efeito no passo seguinte).
     pub fn set_organ_table(&mut self, queue: &wgpu::Queue, rows: Vec<crate::life::table::OrganRow>) {
         queue.write_buffer(&self.organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&rows)));
+        queue.write_buffer(&self.variant_buf, 0, bytemuck::cast_slice(&crate::life::table::variants_to_gpu(&rows)));
         self.organ_table = rows;
     }
 

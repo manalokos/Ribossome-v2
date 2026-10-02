@@ -200,6 +200,7 @@ impl WorldView {
                 vertex_storage(7),
                 vertex_storage(8),
                 vertex_storage(9),
+                vertex_storage(10),
             ],
         });
         let agents_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -216,6 +217,7 @@ impl WorldView {
                 wgpu::BindGroupEntry { binding: 7, resource: world.aa_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 8, resource: world.genomes_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 9, resource: world.tail_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 10, resource: world.variant_buf.as_entire_binding() },
             ],
         });
         let agents_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
