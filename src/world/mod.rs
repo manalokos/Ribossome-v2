@@ -206,6 +206,9 @@ pub struct World {
     /// Densidade da matéria semeada no mundo completo (fração do máximo
     /// histórico de ~20 por célula). Só conta na próxima sementeira.
     pub seed_density: f32,
+    /// Terreno carregado de uma imagem (grãos por célula, fumarolas): usado
+    /// nas próximas sementeiras em vez do gerado. None = gerado.
+    pub custom_terrain: Option<(Vec<u32>, Vec<Fumarole>)>,
 }
 
 /// Contadores do ciclo de vida (life_counters na GPU).
@@ -617,6 +620,7 @@ impl World {
             pipelines,
             last_counters: None,
             seed_density: SEED_DENSITY_DEFAULT,
+            custom_terrain: None,
         }
     }
 
@@ -641,7 +645,13 @@ impl World {
     /// As células com gamma ficam sem monómeros. Devolve a contagem exata
     /// dos monómeros escritos.
     pub fn seed_matter(&mut self, gpu: &Gpu, seed: u64) -> Ledger {
-        let gamma = terrain::generate(&self.cfg, seed as u32, &self.fumaroles);
+        let gamma = match &self.custom_terrain {
+            Some((g, f)) => {
+                self.fumaroles = f.iter().copied().take(MAX_FUMAROLES).collect();
+                g.clone()
+            }
+            None => terrain::generate(&self.cfg, seed as u32, &self.fumaroles),
+        };
         let mut cells = seed_cells(&self.cfg, seed, self.seed_density);
         for (i, &g) in gamma.iter().enumerate() {
             if g > 0 {
@@ -666,7 +676,17 @@ impl World {
         for v in cells.iter_mut() {
             *v = ((per_channel + rng.f32()) as u32).min(CHEM_CELL_CAP / 4);
         }
-        gpu.queue.write_buffer(&self.gamma_buf, 0, &vec![0u8; n * 4]);
+        // Terreno carregado (opcional): obstáculos fixos na piscina.
+        let gamma = match &self.custom_terrain {
+            Some((g, _)) => g.clone(),
+            None => vec![0u32; n],
+        };
+        for (i, &g) in gamma.iter().enumerate() {
+            if g > 0 {
+                cells[i * 4..i * 4 + 4].fill(0);
+            }
+        }
+        gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
         gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
         self.clear_agents(gpu);
         self.light_dirty = true;
@@ -694,6 +714,27 @@ impl World {
         gpu.queue.write_buffer(&self.free_buf, 0, bytemuck::cast_slice(&free_slots));
         gpu.queue.write_buffer(&self.life_counters_buf, 0, bytemuck::cast_slice(&[max, 0, 0, 0, 0, 0, 0, 0u32]));
         self.pending_spawns.clear();
+    }
+
+    /// Carrega um terreno de um PNG (ver `terrain::load_png`); entra na
+    /// próxima sementeira. Devolve o número de fumarolas encontradas.
+    pub fn load_terrain_png(&mut self, path: &std::path::Path) -> Result<usize, String> {
+        let (g, f) = terrain::load_png(path, &self.cfg)?;
+        let nf = f.len();
+        self.custom_terrain = Some((g, f));
+        Ok(nf)
+    }
+
+    /// Volta ao terreno gerado (com a fumarola por omissão) na próxima sementeira.
+    pub fn use_generated_terrain(&mut self) {
+        self.custom_terrain = None;
+        self.fumaroles = vec![Fumarole::v3_default()];
+    }
+
+    /// Grava o terreno ATUAL (lido da GPU) e as fumarolas num PNG.
+    pub fn save_terrain_png(&self, gpu: &Gpu, path: &std::path::Path) -> Result<(), String> {
+        let g = self.read_gamma_blocking(gpu);
+        terrain::save_png(path, &self.cfg, &g, &self.fumaroles)
     }
 
     /// Lê o terreno inteiro de forma síncrona (testes).

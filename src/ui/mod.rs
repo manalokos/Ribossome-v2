@@ -25,8 +25,22 @@ pub struct UiState {
     pub seed_len: [u32; 2],
     pub seed_aug: bool,
     pub seed_now: bool,
+    /// Terreno em imagem: caminho, ação pedida e resultado da última.
+    pub terrain_path: String,
+    pub terrain_action: Option<TerrainAction>,
+    pub terrain_msg: String,
     /// Velocidade e população (atualizadas ~2×/s em `update_stats`).
     pub stats: Stats,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerrainAction {
+    /// Carrega o PNG e semeia de novo (mesma semente).
+    Load,
+    /// Grava o terreno atual em PNG.
+    Save,
+    /// Volta ao terreno gerado e semeia de novo.
+    Generated,
 }
 
 #[derive(Default)]
@@ -77,6 +91,9 @@ impl UiState {
             monomer_brightness: 0.5,
             signal_view: 0,
             stats: Stats::default(),
+            terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "terreno.png".into()),
+            terrain_action: None,
+            terrain_msg: String::new(),
             seed_count: 500,
             seed_len: [12, 120],
             seed_aug: true,
@@ -144,6 +161,27 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
                 }
             },
         );
+        egui::CollapsingHeader::new("Terreno (imagem)").default_open(false).show(ui, |ui| {
+            ui.small("PNG em cinzentos: preto água, cinzento escuro entulho, claro rocha, branco rocha maciça; vermelho = fumarola");
+            ui.horizontal(|ui| {
+                ui.label("ficheiro");
+                ui.text_edit_singleline(&mut st.terrain_path);
+            });
+            ui.horizontal(|ui| {
+                if ui.button("carregar (semeia de novo)").clicked() {
+                    st.terrain_action = Some(TerrainAction::Load);
+                }
+                if ui.button("gravar o atual").clicked() {
+                    st.terrain_action = Some(TerrainAction::Save);
+                }
+                if ui.button("terreno gerado").clicked() {
+                    st.terrain_action = Some(TerrainAction::Generated);
+                }
+            });
+            if !st.terrain_msg.is_empty() {
+                ui.label(&st.terrain_msg);
+            }
+        });
         world_panel(ui, world);
         life_panel(ui, st, world);
 

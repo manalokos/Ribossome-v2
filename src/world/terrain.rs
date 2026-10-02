@@ -92,3 +92,123 @@ pub fn generate(cfg: &WorldConfig, seed: u32, fumaroles: &[Fumarole]) -> Vec<u32
     }
     g
 }
+
+// ---- Terreno de/para imagem PNG -------------------------------------------
+//
+// Tons de cinzento: preto = água (0 grãos), branco = rocha maciça (ROCK
+// grãos), linear entre os dois (cinzento escuro = entulho, 1–2; cinzento
+// médio para cima = rocha, >= 3). Píxeis VERMELHOS puros marcam fumarolas
+// (uma por mancha contígua, no centro dela; contam como água). A imagem pode
+// ter qualquer tamanho: é reamostrada (vizinho mais próximo) para a grelha.
+// A linha de cima da imagem é o cimo do mundo (+y no mundo = cima no ecrã).
+
+fn is_fumarole_px(r: u8, g: u8, b: u8) -> bool {
+    r >= 200 && g <= 60 && b <= 60
+}
+
+/// Lê um PNG e devolve (grãos por célula, fumarolas).
+pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<(Vec<u32>, Vec<Fumarole>), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut dec = png::Decoder::new(std::io::BufReader::new(file));
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = dec.read_info().map_err(|e| format!("PNG inválido: {e}"))?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).map_err(|e| format!("PNG inválido: {e}"))?;
+    let (w, h) = (info.width as usize, info.height as usize);
+    let ch = match info.color_type {
+        png::ColorType::Grayscale => 1,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        png::ColorType::Indexed => return Err("PNG indexado não suportado (grava em cinzento ou RGB)".into()),
+    };
+    let px = |x: usize, y: usize| -> (u8, u8, u8) {
+        let i = (y * w + x) * ch;
+        if ch < 3 { (buf[i], buf[i], buf[i]) } else { (buf[i], buf[i + 1], buf[i + 2]) }
+    };
+
+    // Fumarolas: manchas vermelhas contíguas na imagem original.
+    let mut seen = vec![false; w * h];
+    let mut fumaroles = Vec::new();
+    for y0 in 0..h {
+        for x0 in 0..w {
+            let (r, g, b) = px(x0, y0);
+            if seen[y0 * w + x0] || !is_fumarole_px(r, g, b) {
+                continue;
+            }
+            let (mut sx, mut sy, mut n) = (0f64, 0f64, 0f64);
+            let mut stack = vec![(x0, y0)];
+            seen[y0 * w + x0] = true;
+            while let Some((x, y)) = stack.pop() {
+                sx += x as f64;
+                sy += y as f64;
+                n += 1.0;
+                let nb = [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)];
+                for (nx, ny) in nb {
+                    if nx < w && ny < h && !seen[ny * w + nx] {
+                        let (r, g, b) = px(nx, ny);
+                        if is_fumarole_px(r, g, b) {
+                            seen[ny * w + nx] = true;
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+            }
+            let d = Fumarole::v3_default();
+            fumaroles.push(Fumarole::new(
+                ((sx / n + 0.5) / w as f64) as f32,
+                (1.0 - (sy / n + 0.5) / h as f64) as f32,
+                d.strength,
+                d.spread,
+            ));
+        }
+    }
+
+    let n = cfg.grid_size as usize;
+    let mut g = vec![0u32; n * n];
+    for y in 0..n {
+        // Linha 0 da imagem = cimo do mundo.
+        let iy = ((n - 1 - y) * h) / n;
+        for x in 0..n {
+            let ix = (x * w) / n;
+            let (r, gg, b) = px(ix, iy);
+            if is_fumarole_px(r, gg, b) {
+                continue;
+            }
+            let lum = (0.299 * r as f32 + 0.587 * gg as f32 + 0.114 * b as f32) / 255.0;
+            g[y * n + x] = (lum * ROCK as f32).round() as u32;
+        }
+    }
+    Ok((g, fumaroles))
+}
+
+/// Grava o terreno em PNG (mesmo mapeamento; fumarolas a vermelho).
+pub fn save_png(path: &std::path::Path, cfg: &WorldConfig, gamma: &[u32], fumaroles: &[Fumarole]) -> Result<(), String> {
+    let n = cfg.grid_size as usize;
+    let mut rgb = vec![0u8; n * n * 3];
+    for y in 0..n {
+        for x in 0..n {
+            let v = ((gamma[y * n + x].min(ROCK) * 255) / ROCK) as u8;
+            let o = ((n - 1 - y) * n + x) * 3;
+            rgb[o..o + 3].fill(v);
+        }
+    }
+    for f in fumaroles.iter().filter(|f| f.enabled != 0) {
+        let cx = (f.x_frac * n as f32) as i64;
+        let cy = ((1.0 - f.y_frac) * n as f32) as i64;
+        for dy in -2..=2 {
+            for dx in -2..=2 {
+                let (x, y) = (cx + dx, cy + dy);
+                if x >= 0 && y >= 0 && (x as usize) < n && (y as usize) < n {
+                    let o = (y as usize * n + x as usize) * 3;
+                    rgb[o..o + 3].copy_from_slice(&[255, 0, 0]);
+                }
+            }
+        }
+    }
+    let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), n as u32, n as u32);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header().and_then(|mut w| w.write_image_data(&rgb)).map_err(|e| e.to_string())
+}

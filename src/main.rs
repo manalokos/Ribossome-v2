@@ -106,6 +106,13 @@ impl Running {
         log::info!("mundo {}² células, {} unidades", cfg.grid_size, cfg.sim_size());
         let seed = 1;
         let mut world = World::new(&gpu, cfg, seed as u32);
+        // Terreno de uma imagem (RIBO_TERRAIN=caminho.png).
+        if let Ok(path) = std::env::var("RIBO_TERRAIN") {
+            match world.load_terrain_png(std::path::Path::new(&path)) {
+                Ok(nf) => log::info!("terreno de {path} ({nf} fumarolas)"),
+                Err(e) => log::error!("RIBO_TERRAIN: {e}; uso o terreno gerado"),
+            }
+        }
         let baseline = if lab_mode() {
             world.configure_lab();
             world.seed_lab(&gpu, seed, LAB_PER_CHANNEL)
@@ -194,6 +201,39 @@ impl Running {
                 &mut self.seed_rng,
             );
             self.world.request_seeds(&reqs);
+        }
+        if let Some(action) = self.ui.terrain_action.take() {
+            use ribossome::ui::TerrainAction;
+            let path = std::path::PathBuf::from(self.ui.terrain_path.trim());
+            let resow = match action {
+                TerrainAction::Load => match self.world.load_terrain_png(&path) {
+                    Ok(nf) => {
+                        self.ui.terrain_msg = format!("carregado {} ({nf} fumarolas); mundo semeado de novo", path.display());
+                        true
+                    }
+                    Err(e) => {
+                        self.ui.terrain_msg = format!("erro: {e}");
+                        false
+                    }
+                },
+                TerrainAction::Save => {
+                    self.ui.terrain_msg = match self.world.save_terrain_png(&self.gpu, &path) {
+                        Ok(()) => format!("gravado em {}", path.display()),
+                        Err(e) => format!("erro: {e}"),
+                    };
+                    false
+                }
+                TerrainAction::Generated => {
+                    self.world.use_generated_terrain();
+                    self.ui.terrain_msg = "terreno gerado; mundo semeado de novo".into();
+                    true
+                }
+            };
+            if resow {
+                // Mesma semente: só o terreno muda.
+                self.seed -= 1;
+                self.ui.reseed = true;
+            }
         }
         if self.ui.reseed {
             self.ui.reseed = false;
