@@ -102,7 +102,8 @@ impl Default for WorldSettings {
             multigrid: true,
             mg_cycles: 1,
             jacobi_iters: 128,
-            light_interval: 100,
+            // 10: a sombra dos agentes acompanha-os (a luz custa ~0,5 ms).
+            light_interval: 10,
             terrain_enabled: true,
             contact_enabled: true,
         }
@@ -115,6 +116,9 @@ struct Pipelines {
     thermal_activation: wgpu::ComputePipeline,
     ledger: wgpu::ComputePipeline,
     uv_light: wgpu::ComputePipeline,
+    clear_shade: wgpu::ComputePipeline,
+    light_transmit: wgpu::ComputePipeline,
+    agents_shade: wgpu::ComputePipeline,
     clear_force_vectors: wgpu::ComputePipeline,
     update_temperature: wgpu::ComputePipeline,
     copy_temperature: wgpu::ComputePipeline,
@@ -293,6 +297,8 @@ impl World {
         let ledger_buf = storage_buffer(device, "ledger", LEDGER_WORDS * 4);
         let gamma_buf = storage_buffer(device, "gamma grid", cells * 4);
         let light_buf = storage_buffer(device, "uv light", cells * 4);
+        let lcells = (cfg.grid_size / shaders::LIGHT_DIV) as u64 * (cfg.grid_size / shaders::LIGHT_DIV) as u64;
+        let shade_buf = storage_buffer(device, "agent shade", lcells * 4);
         let slope_buf = storage_buffer(device, "gamma slope", cells * 8);
         let ledger_staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ledger staging"),
@@ -359,7 +365,7 @@ impl World {
         // Grupo 1 — mundo (resolução do ambiente).
         let world_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("world layout"),
-            entries: &(0..6).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
+            entries: &(0..7).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
         });
         // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
         let fluid_entries: Vec<_> = (0..10).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
@@ -397,7 +403,7 @@ impl World {
         let world_bg = bind_all(
             "world bg",
             &world_layout,
-            &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf, &chem_next],
+            &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf, &chem_next, &shade_buf],
         );
         // Ping-pong: "ab" lê a e escreve b (velocidade e pressão em simultâneo).
         let fluid_ab = bind_all(
@@ -556,6 +562,9 @@ impl World {
             thermal_activation: compute("thermal_activation"),
             ledger: compute("ledger_reduce"),
             uv_light: compute("compute_uv_light"),
+            clear_shade: compute("clear_shade"),
+            light_transmit: compute("light_transmit_pass"),
+            agents_shade: compute("agents_shade"),
             clear_force_vectors: compute("clear_force_vectors"),
             update_temperature: compute("update_temperature"),
             copy_temperature: compute("copy_temperature"),
@@ -867,6 +876,11 @@ impl World {
 
             if self.light_dirty || epoch % st.light_interval.max(1) == 0 {
                 self.light_dirty = false;
+                // Sombra dos agentes: limpa e marca os resíduos, depois varre.
+                let lcells = (self.cfg.grid_size / shaders::LIGHT_DIV).pow(2);
+                run(&mut pass, &pl.clear_shade, ab, [groups(lcells, 256), 1]);
+                run(&mut pass, &pl.agents_shade, ab, [groups(self.cfg.max_agents, 64), 1]);
+                run(&mut pass, &pl.light_transmit, ab, [groups(lcells, 256), 1]);
                 run(&mut pass, &pl.uv_light, ab, [1, 1]);
             }
 

@@ -253,7 +253,7 @@ fn update_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     let env = env_cell_for_fluid(x, y);
     let g = f32(gamma_count(env));
     let absorb = SUN_WATER_ABSORB + (1.0 - exp(-0.6 * g));
-    t += SUN_HEAT_RATE * max(light_grid[env], 0.0) * absorb * dt;
+    t += SUN_HEAT_RATE * max(uv_light_at_idx(env), 0.0) * absorb * dt;
 
     let amb = temp_ambient_at(y);
     t = amb + (t - amb) * exp(-TEMP_COOL_RATE * dt);

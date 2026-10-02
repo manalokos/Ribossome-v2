@@ -78,12 +78,16 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     // SOMBRA do terreno: a luz da célula a dividir pela que teria em água
     // aberta à mesma profundidade (assim só o terreno faz sombra; a água
     // sozinha não escurece o fundo). 1 = iluminado, 0 = sombra total.
-    let depth_t = f32(GRID_SIZE - u32(cell_f.y)) / f32(GRID_SIZE);
+    // A luz está a 1/LIGHT_DIV da resolução.
+    let ly = u32(cell_f.y) / LIGHT_DIV;
+    let lidx = ly * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV;
+    let light_here = light_view[lidx];
+    let depth_t = f32((LIGHT_SIZE - ly) * LIGHT_DIV) / f32(GRID_SIZE);
     let open_light = exp(-max(view.uv_depth, 0.5) * depth_t);
-    let lit = clamp(light_view[idx] / max(open_light, 1e-12), 0.0, 1.0);
+    let lit = clamp(light_here / max(open_light, 1e-12), 0.0, 1.0);
     let shade = mix(SHADOW_FLOOR, 1.0, lit);
     // Água: preta, com um brilho quente onde chega a luz UV (com as sombras).
-    let water = WATER + vec3<f32>(0.06, 0.05, 0.035) * clamp(light_view[idx] * 3.0, 0.0, 2.0);
+    let water = WATER + vec3<f32>(0.06, 0.05, 0.035) * clamp(light_here * 3.0, 0.0, 2.0);
     // Contagens em unidades de 3 quanta, com tone map de Reinhard (como no v3).
     let act_lin = act / 3.0 * DYE_VIS_GAIN;
     let act_tm = act_lin / (vec4<f32>(1.0) + act_lin);
@@ -107,7 +111,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     }
     // 8: luz UV (raiz quadrada, para ver o fundo).
     if (view.view_mode == 8u) {
-        let l = sqrt(clamp(light_view[idx], 0.0, 1.0));
+        let l = sqrt(clamp(light_here, 0.0, 1.0));
         return vec4<f32>(vec3<f32>(0.75, 0.6, 1.0) * l, 1.0);
     }
     // 9: velocidade do fluido (|v| em células/s; escala 0..50) e direção no tom.
@@ -130,9 +134,9 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         let rubble = vec3<f32>(0.22, 0.20, 0.18);
         // A rocha mostra a luz que lhe CHEGA (a da célula de cima): a
         // superfície fica iluminada e o interior escuro.
-        let iy_up = min(u32(cell_f.y) + 1u, GRID_SIZE - 1u);
-        let depth_up = f32(GRID_SIZE - iy_up) / f32(GRID_SIZE);
-        let lit_up = clamp(light_view[iy_up * GRID_SIZE + u32(cell_f.x)] / max(exp(-max(view.uv_depth, 0.5) * depth_up), 1e-12), 0.0, 1.0);
+        let ly_up = min(ly + 1u, LIGHT_SIZE - 1u);
+        let depth_up = f32((LIGHT_SIZE - ly_up) * LIGHT_DIV) / f32(GRID_SIZE);
+        let lit_up = clamp(light_view[ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV] / max(exp(-max(view.uv_depth, 0.5) * depth_up), 1e-12), 0.0, 1.0);
         return vec4<f32>(select(rubble, rock, g >= 3u) * mix(SHADOW_FLOOR, 1.0, lit_up), 1.0);
     }
 

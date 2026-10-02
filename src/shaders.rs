@@ -54,6 +54,9 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("thermal_activation", Stage::Compute),
         ("ledger_reduce", Stage::Compute),
         ("compute_uv_light", Stage::Compute),
+        ("clear_shade", Stage::Compute),
+        ("light_transmit_pass", Stage::Compute),
+        ("agents_shade", Stage::Compute),
         ("clear_force_vectors", Stage::Compute),
         ("update_temperature", Stage::Compute),
         ("copy_temperature", Stage::Compute),
@@ -105,6 +108,8 @@ pub const MODULES: &[&ModuleDef] = &[&WORLD, &WORLD_VIEW, &AGENTS_VIEW];
 
 /// Constantes do mundo e da química partilhadas por todos os módulos.
 pub const CHEM_CELL_CAP: u32 = 48;
+/// A luz UV é calculada a 1/LIGHT_DIV da resolução da grelha.
+pub const LIGHT_DIV: u32 = 2;
 
 pub fn preamble(cfg: &WorldConfig) -> String {
     let mut s = String::new();
@@ -114,6 +119,8 @@ pub fn preamble(cfg: &WorldConfig) -> String {
     s += &format!("const WORLD_UNITS_PER_CELL: u32 = {}u;\n", cfg.world_units_per_cell);
     s += &format!("const SIM_SIZE: f32 = {:.1};\n", cfg.sim_size());
     s += &format!("const CHEM_CELL_CAP: u32 = {}u;\n", CHEM_CELL_CAP);
+    // Luz UV a 1/LIGHT_DIV da resolução da grelha (a varredura é sequencial).
+    s += &format!("const LIGHT_DIV: u32 = {LIGHT_DIV}u;\nconst LIGHT_SIZE: u32 = {}u;\n", cfg.grid_size / LIGHT_DIV);
     s += &SimParams::wgsl();
     s += &ViewParams::wgsl();
     s += &Fumarole::wgsl();

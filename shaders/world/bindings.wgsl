@@ -10,6 +10,7 @@
 // Terreno: quanta inteiros de gamma por célula (rocha >= GAMMA_SOLID_THRESHOLD).
 @group(1) @binding(2) var<storage, read_write> gamma_grid: array<atomic<u32>>;
 // Luz UV por célula (0..1), recalculada de tempos a tempos.
+// Luz UV a LIGHT_SIZE² (1/LIGHT_DIV da grelha): ler com uv_light_at_cell.
 @group(1) @binding(3) var<storage, read_write> light_grid: array<f32>;
 // Declive do terreno por unidade do mundo (recalculado a cada passo).
 @group(1) @binding(4) var<storage, read_write> slope_grid: array<vec2<f32>>;
@@ -30,3 +31,7 @@
 @group(2) @binding(8) var<storage, read_write> fluid_forces: array<vec2<f32>>;
 // Fonte de calor por célula do fluido (fumarolas pontuais + píxeis da imagem).
 @group(2) @binding(9) var<storage, read> heat_src: array<f32>;
+
+// Sombra dos agentes: resíduos por célula da luz (LIGHT_SIZE²), refeita antes
+// de cada cálculo da luz.
+@group(1) @binding(6) var<storage, read_write> shade_grid: array<atomic<u32>>;

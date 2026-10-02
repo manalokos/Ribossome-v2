@@ -95,7 +95,8 @@ fn fluid_and_light_are_sane() {
     }
 
     let light = world.read_f32_blocking(&gpu, &world.light_buf);
-    let g = cfg.grid_size as usize;
+    // A luz está a 1/LIGHT_DIV da resolução da grelha.
+    let g = (cfg.grid_size / ribossome::shaders::LIGHT_DIV) as usize;
     let top = light[(g - 1) * g + g / 2];
     let bottom = light[g / 2];
     eprintln!("luz: topo {top:.3}, fundo {bottom:.5}");

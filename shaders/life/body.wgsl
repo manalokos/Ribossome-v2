@@ -107,3 +107,20 @@ fn rotate(v: vec2<f32>, a: f32) -> vec2<f32> {
 fn residue_world(slot: u32, a: Agent, k: u32) -> vec2<f32> {
     return vec2<f32>(a.pos_x, a.pos_y) + rotate(body_pos[slot * MAX_BODY + k], a.rot);
 }
+
+// SOMBRA DOS AGENTES: cada resíduo conta na célula da luz onde está (antes
+// de cada cálculo da luz; clear_shade limpa a grelha).
+@compute @workgroup_size(64)
+fn agents_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let slot = gid.x;
+    if (slot >= params.max_agents) { return; }
+    let a = agents[slot];
+    if (a.alive == 0u) { return; }
+    let lw = f32(WORLD_UNITS_PER_CELL * LIGHT_DIV);
+    for (var k = 0u; k < max(a.body_len, 1u); k++) {
+        var p = vec2<f32>(a.pos_x, a.pos_y);
+        if (a.body_len > 0u) { p = residue_world(slot, a, k); }
+        let c = clamp(vec2<i32>(floor(p / lw)), vec2<i32>(0), vec2<i32>(i32(LIGHT_SIZE) - 1));
+        atomicAdd(&shade_grid[u32(c.y) * LIGHT_SIZE + u32(c.x)], 1u);
+    }
+}
