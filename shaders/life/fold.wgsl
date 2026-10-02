@@ -69,6 +69,12 @@ struct RftCtx {
     soft: u32,
 }
 
+// Multiplicador de arrasto do resíduo k (órgãos volumosos arrastam mais).
+fn residue_drag_mult(slot: u32, k: u32) -> f32 {
+    let t = organ_type(organ_get(slot, k));
+    return select(1.0, max(organ_props[t].drag_mult, 0.05), t != 0xFFu);
+}
+
 // Posição nova (alinhada) do resíduo k.
 fn cur_at(c: RftCtx, k: u32) -> vec2<f32> {
     let q = body_pos[c.base + k];
@@ -163,7 +169,7 @@ fn rft_solve(slot: u32, c: RftCtx, old: ptr<function, array<vec2<f32>, 64>>) -> 
         // anisotrópico (⊥ = 2 × ∥, o que permite nadar); o dos GRÃOS do
         // entulho é igual em todas as direções (env.z − 1), por isso dilui a
         // anisotropia e a propulsão perde eficiência no sedimento.
-        let lw = residue_len(slot, k) / SEGMENT_LEN;
+        let lw = residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k);
         let rr = (tt + RFT_PERP_RATIO * (id - tt) + (env.z - 1.0) * id) * lw;
         // Colunas de D: ∂v/∂Vx = (1,0), ∂v/∂Vy = (0,1), ∂v/∂Ω = (−r.y, r.x).
         let d0 = vec2<f32>(1.0, 0.0);
@@ -328,7 +334,7 @@ fn push_fluid(slot: u32, a: Agent, c: RftCtx, old: ptr<function, array<vec2<f32>
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
         // Só o arrasto com a ÁGUA a empurra (o dos grãos fica no entulho);
         // a água real no resíduo é uf × drag (ver joints_step).
-        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN);
+        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k));
         // Velocidade do resíduo RELATIVA à água (quem só é levado não empurra).
         let v = s.xy + s.z * vec2<f32>(-r.y, r.x) + u - env.xy * env.z;
         let f_body = rr * v;

@@ -110,7 +110,7 @@ let organInfo = [];
 function organCard(r, info) {
   const props = info.props.map(p => p.nome);
   let h = `<div class="organ"><h3>${info.simbolo} ${info.nome} <span style="color:var(--dim);font-weight:400">(tipo ${r.tipo})</span></h3>`;
-  h += `<div style="margin:4px 0 8px">` + [["comprimento_mult", "× comprimento"], ["massa_mult", "× massa"], ["manutencao", "manutenção"]]
+  h += `<div style="margin:4px 0 8px">` + [["comprimento_mult", "× comprimento"], ["massa_mult", "× massa"], ["arrasto_mult", "× arrasto"], ["manutencao", "manutenção"]]
     .map(([k, l]) => `<label style="margin-right:14px;color:var(--dim)">${l} <input type="number" step="0.1" data-t="${r.tipo}" data-k="${k}" value="${+r[k].toFixed(3)}"></label>`).join("") + `</div>`;
   h += `<div class="scroll"><table><thead><tr><th>variante</th>` +
     info.props.map(p => `<th title="${p.desc}">${p.nome}</th>`).join("") + `<th style="text-align:left">o que faz</th></tr></thead><tbody>`;

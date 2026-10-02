@@ -416,7 +416,8 @@ gpu_struct! {
         pub mass_mult: f32,
         /// Manutenção por passo (múltiplos da de um resíduo).
         pub upkeep: f32,
-        pub _pad1: u32,
+        /// Arrasto do segmento × isto.
+        pub drag_mult: f32,
     }
 }
 

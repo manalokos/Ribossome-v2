@@ -58,9 +58,17 @@ pub struct OrganRow {
     pub massa_mult: f32,
     /// Custo de manutenção por passo, em múltiplos do de um resíduo.
     pub manutencao: f32,
+    /// Arrasto do segmento (na água e no entulho) × isto: órgãos volumosos
+    /// (armazenamento) são mais "pesados" a nadar.
+    #[serde(default = "one")]
+    pub arrasto_mult: f32,
     /// As 6 variantes (parâmetro do modificador 0..5): propriedade -> valor
     /// (as propriedades de cada tipo estão em `organs::ORGAN_PROPS`).
     pub variantes: Vec<std::collections::BTreeMap<String, f32>>,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 pub const ORGANS_PATH: &str = "assets/orgaos.json";
@@ -114,7 +122,7 @@ pub fn save_organs(rows: &[OrganRow]) -> Result<(), String> {
 
 pub fn organs_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganProps> {
     rows.iter()
-        .map(|r| crate::params::OrganProps { len_mult: r.comprimento_mult, mass_mult: r.massa_mult, upkeep: r.manutencao, _pad1: 0 })
+        .map(|r| crate::params::OrganProps { len_mult: r.comprimento_mult, mass_mult: r.massa_mult, upkeep: r.manutencao, drag_mult: r.arrasto_mult })
         .collect()
 }
 
