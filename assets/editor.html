@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ribossome · Aminoácidos</title>
+<style>
+  :root { --bg: #111418; --panel: #1a1f25; --line: #2c333b; --text: #dde3ea; --dim: #8b96a3; --accent: #e8b84a; --ok: #6fcf7f; --err: #ef6b6b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0 12px 0 0; }
+  button { background: #2a323b; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit; }
+  button:hover { border-color: var(--accent); }
+  #status { color: var(--dim); }
+  #status.ok { color: var(--ok); } #status.err { color: var(--err); }
+  main { padding: 12px 16px 40px; }
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--panel); color: var(--dim); font-weight: 600; font-size: 12px; cursor: help; }
+  th.grp { text-align: center; color: var(--accent); }
+  td.aa { text-align: center; font-weight: 700; font-size: 16px; color: var(--accent); }
+  input { width: 64px; background: #0d1014; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; text-align: right; font: 13px ui-monospace, monospace; }
+  input:focus { outline: none; border-color: var(--accent); }
+  input.changed { border-color: var(--accent); }
+  h2 { font-size: 15px; margin: 28px 0 8px; }
+  p.note { color: var(--dim); margin: 4px 0 12px; max-width: 900px; }
+  .organ { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+  .organ h3 { margin: 0 0 6px; font-size: 14px; }
+  .organ ol { margin: 0; padding-left: 22px; color: var(--dim); }
+  .organ li b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Aminoácidos</h1>
+  <button id="save">gravar no ficheiro</button>
+  <button id="reload">recarregar do ficheiro</button>
+  <span id="status">a carregar…</span>
+</header>
+<main>
+  <p class="note">Cada alteração é aplicada à simulação no passo seguinte. "Gravar" escreve <code>assets/aminoacidos.json</code> (a fonte dos valores ao arrancar). Passa o rato pelos cabeçalhos para ver o que cada coluna faz.</p>
+  <div class="scroll"><table id="t"></table></div>
+  <h2>Órgãos e variantes</h2>
+  <p class="note">Um órgão = promotor (C, H ou W) + codão modificador: tipo = índice % 12, parâmetro = índice / 12; um segundo codão dá a intensidade (×1 por omissão). Só consulta, por agora.</p>
+  <div id="organs"></div>
+</main>
+<script>
+const COLS = [
+  ["massa", "massa", "Massa do resíduo (Da): pesa no centro de massa e na sedimentação."],
+  ["volume", "volume", "Volume da cadeia lateral (Å³): espessura com que é desenhado."],
+  ["catalise", "catálise", "Propensão catalítica (M-CSA): quanto come quando é a boca."],
+  ["flexibilidade", "flex", "Flexibilidade (Vihinen 1994): rigidez da junta = 1/flex²."],
+  ["angulo_repouso", "repouso", "Ângulo de repouso da junta (rad, com sinal): a forma do corpo."],
+  ["dobra_max", "dobra máx", "Desvio máximo que os sinais conseguem impor à junta (rad)."],
+  ["sens_alfa", "sens α", "Dobra da junta por unidade de sinal α."],
+  ["sens_beta", "sens β", "Dobra da junta por unidade de sinal β."],
+  ["cond_alfa_N", "α do N", "Fração do sinal α vinda do vizinho N (início) que passa; negativo inverte."],
+  ["cond_alfa_C", "α do C", "Fração do sinal α vinda do vizinho C (fim) que passa; negativo inverte."],
+  ["cond_beta_N", "β do N", "Fração do sinal β vinda do vizinho N que passa."],
+  ["cond_beta_C", "β do C", "Fração do sinal β vinda do vizinho C que passa."],
+  ["substrato_A", "A", "Preferência por comer monómeros A (as quatro devem somar 1)."],
+  ["substrato_U", "U", "Preferência por U."],
+  ["substrato_G", "G", "Preferência por G."],
+  ["substrato_C", "C", "Preferência por C."],
+  ["absorcao_uv", "UV", "Absorção de luz UV (sombra): triptofano = 1."],
+];
+const GROUPS = [["", 1], ["física", 4], ["forma e sinais", 4], ["condutividade", 4], ["substrato", 4], ["luz", 1]];
+let rows = [];
+let timer = null;
+const status = (msg, cls) => { const s = document.getElementById("status"); s.textContent = msg; s.className = cls || ""; };
+
+function render() {
+  const t = document.getElementById("t");
+  let h = "<thead><tr>" + GROUPS.map(([g, n]) => `<th class="grp" colspan="${n}">${g}</th>`).join("") + "</tr><tr><th>aa</th>";
+  h += COLS.map(([k, label, tip]) => `<th title="${tip}">${label}</th>`).join("") + "</tr></thead><tbody>";
+  rows.forEach((r, i) => {
+    h += `<tr><td class="aa">${r.letra}</td>`;
+    h += COLS.map(([k]) => `<td><input type="number" step="0.01" data-i="${i}" data-k="${k}" value="${+r[k].toFixed(4)}"></td>`).join("");
+    h += "</tr>";
+  });
+  t.innerHTML = h + "</tbody>";
+  t.querySelectorAll("input").forEach(inp => inp.addEventListener("input", e => {
+    const v = parseFloat(e.target.value);
+    if (Number.isNaN(v)) return;
+    rows[+e.target.dataset.i][e.target.dataset.k] = v;
+    e.target.classList.add("changed");
+    clearTimeout(timer);
+    timer = setTimeout(push, 150);
+  }));
+}
+
+async function push() {
+  const r = await fetch("/api/table", { method: "POST", body: JSON.stringify(rows) });
+  const txt = await r.text();
+  status(r.ok ? "aplicado à simulação (não gravado)" : txt, r.ok ? "ok" : "err");
+}
+
+async function load() {
+  rows = await (await fetch("/api/table")).json();
+  render();
+}
+
+document.getElementById("save").onclick = async () => {
+  const r = await fetch("/api/save", { method: "POST" });
+  status(await r.text(), r.ok ? "ok" : "err");
+  if (r.ok) document.querySelectorAll("input.changed").forEach(i => i.classList.remove("changed"));
+};
+document.getElementById("reload").onclick = async () => {
+  const r = await fetch("/api/reload", { method: "POST" });
+  status(await r.text(), r.ok ? "ok" : "err");
+  await load();
+};
+
+(async () => {
+  await load();
+  status("pronto", "ok");
+  const organs = await (await fetch("/api/organs")).json();
+  document.getElementById("organs").innerHTML = organs.map(o =>
+    `<div class="organ"><h3>${o.simbolo} ${o.nome} <span style="color:var(--dim);font-weight:400">(tipo ${o.tipo})</span></h3><ol start="0">` +
+    o.variantes.map(v => `<li><b>parâmetro ${v.param}:</b> ${v.texto}</li>`).join("") + "</ol></div>").join("");
+})();
+</script>
+</body>
+</html>

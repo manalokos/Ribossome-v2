@@ -1,6 +1,7 @@
 //! Ribossome v4: simulador de vida artificial (mundo de RNA) em GPU.
 //! Ver `docs/ARQUITETURA_V4.md`.
 
+pub mod editor;
 pub mod gpu;
 pub mod life;
 pub mod params;

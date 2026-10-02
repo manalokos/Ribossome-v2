@@ -29,6 +29,8 @@ pub struct UiState {
     pub terrain_path: String,
     pub terrain_action: Option<TerrainAction>,
     pub terrain_msg: String,
+    /// Pedido para abrir o editor dos aminoácidos no browser.
+    pub open_editor: bool,
     /// Velocidade e população (atualizadas ~2×/s em `update_stats`).
     pub stats: Stats,
 }
@@ -94,6 +96,7 @@ impl UiState {
             terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "assets/terreno.png".into()),
             terrain_action: None,
             terrain_msg: String::new(),
+            open_editor: false,
             seed_count: 500,
             seed_len: [12, 120],
             seed_aug: true,
@@ -161,6 +164,13 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
                 }
             },
         );
+        if ui
+            .button("editor dos aminoácidos e órgãos (browser)")
+            .on_hover_text("http://127.0.0.1:8787 — mudanças aplicadas ao vivo")
+            .clicked()
+        {
+            st.open_editor = true;
+        }
         egui::CollapsingHeader::new("Terreno (imagem)").default_open(false).show(ui, |ui| {
             ui.small("PNG: AZUL = terreno (0 água, fraco entulho, forte rocha, 255 rocha maciça); VERMELHO = calor por píxel (vermelho − verde). Cinzentos também servem.");
             ui.horizontal(|ui| {

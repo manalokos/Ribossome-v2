@@ -35,6 +35,8 @@ struct Running {
     seed: u64,
     seed_rng: ribossome::life::SplitMix,
     runlog: ribossome::runlog::RunLog,
+    /// Editor local da tabela dos aminoácidos (http://127.0.0.1:8787).
+    editor: Option<ribossome::editor::Editor>,
 }
 
 #[derive(Default)]
@@ -150,6 +152,7 @@ impl Running {
             info.driver_info,
             if cfg!(debug_assertions) { "debug" } else { "release" }
         ));
+        let editor = ribossome::editor::Editor::start(world.amino.clone());
         let mut inspector = ui::inspector::Inspector::new(&gpu, &world);
         inspector.register(&gpu.device, &mut egui_renderer);
 
@@ -173,6 +176,7 @@ impl Running {
             seed,
             seed_rng: ribossome::life::SplitMix(seed ^ 0x5EED),
             runlog,
+            editor,
         }
     }
 
@@ -242,6 +246,14 @@ impl Running {
 
     fn redraw(&mut self) {
         self.runlog.before_frame(&mut self.profiler);
+        if let Some(ed) = &self.editor {
+            if let Some(rows) = ed.poll() {
+                self.world.set_amino(&self.gpu.queue, rows);
+            }
+            if std::mem::take(&mut self.ui.open_editor) {
+                ed.open_browser();
+            }
+        }
         self.inspector.poll(&self.gpu.device);
         if self.inspector.follow
             && let Some(d) = &self.inspector.data
