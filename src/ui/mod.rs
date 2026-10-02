@@ -230,13 +230,41 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
         Tab::Terreno => tab_terrain(ui, st, world),
         Tab::Vida => tab_life(ui, st, world),
         Tab::Movimento => tab_motion(ui, world),
-        Tab::Cena => tab_scene(ui, st),
+        Tab::Cena => tab_scene(ui, st, world),
         Tab::Graficos => crate::stats::draw(ui, &mut st.history),
         Tab::Info => tab_info(ui, st, prof),
     });
 }
 
-fn tab_scene(ui: &mut egui::Ui, st: &mut UiState) {
+/// Parâmetros diferentes dos valores do código, com botões para os repor
+/// (o autosave retoma-os: um slider esquecido fica preso entre arranques).
+fn changed_params(ui: &mut egui::Ui, world: &mut World) {
+    let diff = world.params.changed_from_default();
+    let title = if diff.is_empty() {
+        "parâmetros: todos com os valores do código".to_string()
+    } else {
+        format!("parâmetros diferentes do código: {}", diff.len())
+    };
+    egui::CollapsingHeader::new(title).id_salt("changed_params").show(ui, |ui| {
+        for &(k, a, b) in &diff {
+            ui.horizontal(|ui| {
+                ui.label(format!("{k}: {a:.6} (código {b:.6})"));
+                if ui.small_button("repor").clicked() {
+                    world.params.set_named(k, b);
+                }
+            });
+        }
+        if !diff.is_empty() && ui.button("repor todos (mantém o mundo)").clicked() {
+            for &(k, _, b) in &diff {
+                world.params.set_named(k, b);
+            }
+        }
+    });
+}
+
+fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
+    changed_params(ui, world);
+    ui.separator();
     ui.label("Uma cena = o mundo inteiro (matéria, terreno, água, agentes) e todos os parâmetros.");
     ui.label("As tabelas dos aminoácidos e órgãos vêm sempre de assets/ (não da cena).");
     ui.horizontal(|ui| {
@@ -432,7 +460,10 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.death_probability, 0.0..=0.2).text("mortalidade base"));
     ui.add(egui::Slider::new(&mut p.spawn_energy, 0.1..=50.0).text("energia inicial"));
     ui.add(egui::Slider::new(&mut p.food_power, 0.0..=20.0).text("energia por monómero"));
-    ui.add(egui::Slider::new(&mut p.uptake_rate, 0.0..=0.01).text("taxa de hidrólise"));
+    ui.add(
+        egui::Slider::new(&mut p.uptake_rate, 0.0..=0.01).logarithmic(true).smallest_positive(1e-5).text("taxa de hidrólise"),
+    )
+    .on_hover_text("quanto os agentes comem; a 0 ninguém come");
     let mut hunger = p.hunger_regulation != 0;
     ui.checkbox(&mut hunger, "regulação pela carga energética (cheio não come)");
     p.hunger_regulation = hunger as u32;

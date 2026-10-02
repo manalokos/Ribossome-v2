@@ -220,6 +220,24 @@ gpu_struct! {
     }
 }
 
+/// Parâmetros que o passo escreve sozinho (não contam como "mudados").
+const DERIVED_PARAMS: [&str; 7] = ["epoch", "seed", "fluid_dt", "fluid_enabled", "max_agents", "fumarole_count", "spawn_count"];
+
+impl SimParams {
+    /// Os parâmetros diferentes dos valores do código: (nome, atual, código).
+    pub fn changed_from_default(&self) -> Vec<(&'static str, f64, f64)> {
+        let d = SimParams { seed: self.seed, ..Default::default() }.to_named();
+        self.to_named()
+            .into_iter()
+            .zip(d)
+            .filter(|((k, a), (_, b))| {
+                !k.starts_with('_') && !DERIVED_PARAMS.contains(k) && (a - b).abs() > 1e-9 * b.abs().max(1.0)
+            })
+            .map(|((k, a), (_, b))| (k, a, b))
+            .collect()
+    }
+}
+
 impl Default for SimParams {
     fn default() -> Self {
         Self {

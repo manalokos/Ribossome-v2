@@ -208,6 +208,11 @@ impl Running {
                     for n in notes {
                         log::warn!("autosave: {n}");
                     }
+                    let changed = world.params.changed_from_default();
+                    if !changed.is_empty() {
+                        let list: Vec<String> = changed.iter().map(|(k, a, b)| format!("{k} {a} (código {b})")).collect();
+                        log::warn!("autosave: parâmetros diferentes do código: {}", list.join(", "));
+                    }
                     if let Some(b) = ribossome::world::ledger_from_json(&extra["baseline"]) {
                         baseline = b;
                     }
