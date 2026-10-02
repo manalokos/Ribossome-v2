@@ -20,6 +20,7 @@ fn main() {
     world.params.pairing_rate = 0.0;
     world.params.spawn_energy = 1000.0;
     world.params.rft_enabled = env("RFT", 1u32);
+    world.params.monomer_pressure = env("PRESS", world.params.monomer_pressure);
     world.params.sedimentation = env("SED", world.params.sedimentation);
     world.params.uptake_rate = env("UPTAKE", world.params.uptake_rate);
     world.settings.fluid_enabled = env("FLUID", 1u32) != 0;
