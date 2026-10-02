@@ -19,6 +19,10 @@ fn main() {
     world.params.maintenance_cost = 0.0;
     world.params.pairing_rate = 0.0;
     world.params.spawn_energy = 1000.0;
+    world.params.rft_enabled = env("RFT", 1u32);
+    world.params.sedimentation = env("SED", world.params.sedimentation);
+    world.params.uptake_rate = env("UPTAKE", world.params.uptake_rate);
+    world.settings.fluid_enabled = env("FLUID", 1u32) != 0;
     let text = format!("AUG UGU UCU {} UAA", "GGU GCU CUG ".repeat(15));
     let g: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
     let s = cfg.sim_size();

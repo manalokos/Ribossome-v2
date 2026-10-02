@@ -54,11 +54,53 @@ const RFT_PERP_RATIO: f32 = 2.0;
 
 // Tangente da cadeia no resíduo k, a MEIO do passo (média das posições
 // antigas e novas alinhadas).
-fn rft_tangent(n: u32, k: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: ptr<function, array<vec2<f32>, 64>>) -> vec2<f32> {
+// Contexto do RFT de um agente. As posições NOVAS (alinhadas), a água e o
+// arrasto de cada resíduo calculam-se na hora a partir da memória global:
+// tabelas locais de 64 posições por agente (eram 4) não cabem nos registos
+// e iam para memória lenta (o RFT era ~75% do custo dos agentes).
+struct RftCtx {
+    base: u32,
+    n: u32,
+    cp: f32,  // cos/sin de φ (forma nova -> alinhada)
+    sp: f32,
+    cr: f32,  // cos/sin da orientação (corpo -> mundo)
+    sr: f32,
+    pos: vec2<f32>,
+    soft: u32,
+}
+
+// Posição nova (alinhada) do resíduo k.
+fn cur_at(c: RftCtx, k: u32) -> vec2<f32> {
+    let q = body_pos[c.base + k];
+    return vec2<f32>(c.cp * q.x - c.sp * q.y, c.sp * q.x + c.cp * q.y);
+}
+
+// Água (referencial do corpo, por passo, já ÷ arrasto) e arrasto do resíduo
+// k, no ponto médio do passo.
+fn env_at(c: RftCtx, old: ptr<function, array<vec2<f32>, 64>>, k: u32) -> vec3<f32> {
+    let r = 0.5 * (cur_at(c, k) + (*old)[k]);
+    let rw = c.pos + vec2<f32>(c.cr * r.x - c.sr * r.y, c.sr * r.x + c.cr * r.y);
+    let drag = anchor_drag(rw);
+    var uf = vec2<f32>(0.0);
+    if (params.fluid_enabled != 0u) {
+        let w = water_at(rw, c.soft != 0u);
+        // Dois arrastos: o da água (relativo à água) e o dos GRÃOS do
+        // entulho (relativo a zero: os grãos estão parados). Somados dão
+        // arrasto total `drag` com velocidade de referência água / drag:
+        // um resíduo bem preso fica parado mesmo com a água dos poros a
+        // mexer (antes seguia-a e vibrava com ela).
+        let wb = vec2<f32>(c.cr * w.x + c.sr * w.y, -c.sr * w.x + c.cr * w.y); // mundo -> corpo
+        uf = wb / drag;
+    }
+    return vec3<f32>(uf, drag);
+}
+
+fn rft_tangent(c: RftCtx, k: u32, old: ptr<function, array<vec2<f32>, 64>>) -> vec2<f32> {
+    let n = c.n;
     let ka = select(k - 1u, k, k == 0u);
     let kb = select(k + 1u, k, k + 1u >= n);
-    let a = 0.5 * ((*cur)[ka] + (*old)[ka]);
-    let b = 0.5 * ((*cur)[kb] + (*old)[kb]);
+    let a = 0.5 * (cur_at(c, ka) + (*old)[ka]);
+    let b = 0.5 * (cur_at(c, kb) + (*old)[kb]);
     let t = b - a;
     let l = length(t);
     return select(vec2<f32>(1.0, 0.0), t / l, l > 1e-5);
@@ -100,14 +142,8 @@ fn anchor_drag(world_pos: vec2<f32>) -> f32 {
 
 // Força-livre e binário-livre: M·x = −Σ Dᵀ·R·(u − u_f), com M = Σ Dᵀ·R·D.
 // A parte de u (forma) é a natação; a de u_f (água) é o transporte.
-fn rft_solve(
-    slot: u32,
-    n: u32,
-    old: ptr<function, array<vec2<f32>, 64>>,
-    cur: ptr<function, array<vec2<f32>, 64>>,
-    uf: ptr<function, array<vec2<f32>, 64>>,
-    drag: ptr<function, array<f32, 64>>,
-) -> RftOut {
+fn rft_solve(slot: u32, c: RftCtx, old: ptr<function, array<vec2<f32>, 64>>) -> RftOut {
+    let n = c.n;
     var m = mat3x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
     var cs = vec3<f32>(0.0);
     var cf = vec3<f32>(0.0);
@@ -115,14 +151,16 @@ fn rft_solve(
         // Regra do PONTO MÉDIO: geometria avaliada a meio do passo. Com a
         // geometria do fim do passo, o ruído das juntas era retificado numa
         // deriva espúria (∝ ruído²) que fazia "nadar" sem motor nenhum.
-        let r = 0.5 * ((*cur)[k] + (*old)[k]);
-        let u = (*cur)[k] - (*old)[k];
-        let t = rft_tangent(n, k, old, cur);
+        let ck = cur_at(c, k);
+        let r = 0.5 * (ck + (*old)[k]);
+        let u = ck - (*old)[k];
+        let t = rft_tangent(c, k, old);
+        let env = env_at(c, old, k);
         // R = ξ∥·t·tᵀ + ξ⊥·(I − t·tᵀ), com ξ∥ = 1.
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
         let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
         // Arrasto ∝ comprimento do segmento (corpo esbelto) × ancoragem.
-        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * (*drag)[k]);
+        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * env.z);
         // Colunas de D: ∂v/∂Vx = (1,0), ∂v/∂Vy = (0,1), ∂v/∂Ω = (−r.y, r.x).
         let d0 = vec2<f32>(1.0, 0.0);
         let d1 = vec2<f32>(0.0, 1.0);
@@ -135,7 +173,7 @@ fn rft_solve(
         m[2] += vec3<f32>(dot(d0, rd2), dot(d1, rd2), dot(d2, rd2));
         let ru = rr * u;
         cs += vec3<f32>(dot(d0, ru), dot(d1, ru), dot(d2, ru));
-        let rf = rr * (*uf)[k];
+        let rf = rr * env.xy;
         cf += vec3<f32>(dot(d0, rf), dot(d1, rf), dot(d2, rf));
     }
     var out: RftOut;
@@ -220,7 +258,6 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     // a forma nova à antiga (Procrustes 2D, à volta do centro de massa): o
     // RFT vê só a deformação verdadeira e a rotação do referencial (φ) é
     // contabilizada de forma exata.
-    var cur: array<vec2<f32>, 64>;
     var sc = 0.0;
     var sd = 0.0;
     for (var k = 0u; k < n; k++) {
@@ -230,41 +267,22 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
         sc += q.x * o.y - q.y * o.x;
     }
     let phi = atan2(sc, sd); // roda a forma nova para a antiga
-    let cp = cos(phi);
-    let sp = sin(phi);
-    for (var k = 0u; k < n; k++) {
-        let q = body_pos[base + k];
-        cur[k] = vec2<f32>(cp * q.x - sp * q.y, sp * q.x + cp * q.y);
-    }
-    // Água em cada resíduo (referencial alinhado, por passo) e ancoragem.
-    var uf: array<vec2<f32>, 64>;
-    var drag: array<f32, 64>;
-    let cr = cos(a.rot);
-    let sr = sin(a.rot);
-    let soft = params.fluid_swim_only == 0u;
-    for (var k = 0u; k < n; k++) {
-        let r = 0.5 * (cur[k] + old[k]);
-        let rw = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * r.x - sr * r.y, sr * r.x + cr * r.y);
-        drag[k] = anchor_drag(rw);
-        uf[k] = vec2<f32>(0.0);
-        if (params.fluid_enabled != 0u) {
-            let w = water_at(rw, soft);
-            // Dois arrastos: o da água (relativo à água) e o dos GRÃOS do
-            // entulho (relativo a zero: os grãos estão parados). Somados dão
-            // arrasto total `drag` com velocidade de referência água / drag:
-            // um resíduo bem preso fica parado mesmo com a água dos poros a
-            // mexer (antes seguia-a e vibrava com ela).
-            let wb = vec2<f32>(cr * w.x + sr * w.y, -sr * w.x + cr * w.y); // mundo -> corpo
-            uf[k] = wb / drag[k];
-        }
-    }
-    var out = rft_solve(slot, n, &old, &cur, &uf, &drag);
+    var c: RftCtx;
+    c.base = base;
+    c.n = n;
+    c.cp = cos(phi);
+    c.sp = sin(phi);
+    c.cr = cos(a.rot);
+    c.sr = sin(a.rot);
+    c.pos = vec2<f32>(a.pos_x, a.pos_y);
+    c.soft = select(0u, 1u, params.fluid_swim_only == 0u);
+    var out = rft_solve(slot, c, &old);
     if (params.fluid_swim_only != 0u || params.rft_enabled == 0u) {
         // EXPERIÊNCIA "só pelo fluido": a forma empurra a água, que leva o
         // corpo (o transporte); sem a natação do RFT.
         out.swim = vec3<f32>(0.0);
     }
-    push_fluid(slot, a, n, &old, &cur, out.swim + out.flow, &uf, &drag);
+    push_fluid(slot, a, c, &old, out.swim + out.flow);
     var res: JointsOut;
     res.swim = out.swim;
     res.flow = out.flow;
@@ -279,16 +297,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
 // um DIPOLO, não impulso líquido. Acumula-se em force_vectors entre dois
 // passos do fluido. (A deriva do próprio agente usa a água à sua volta, onde
 // o seu dipolo é ~simétrico; não se desconta à parte.)
-fn push_fluid(
-    slot: u32,
-    a: Agent,
-    n: u32,
-    old: ptr<function, array<vec2<f32>, 64>>,
-    cur: ptr<function, array<vec2<f32>, 64>>,
-    s: vec3<f32>,
-    uf: ptr<function, array<vec2<f32>, 64>>,
-    drag: ptr<function, array<f32, 64>>,
-) {
+fn push_fluid(slot: u32, a: Agent, c: RftCtx, old: ptr<function, array<vec2<f32>, 64>>, s: vec3<f32>) {
     if (params.fluid_enabled == 0u || (params.agent_fluid_push == 0.0 && params.fluid_swim_only == 0u)) { return; }
     let rot_mid = a.rot + 0.5 * s.z;
     let cr = cos(rot_mid);
@@ -299,16 +308,19 @@ fn push_fluid(
     let push = select(params.agent_fluid_push, 1.0, params.fluid_swim_only != 0u);
     let scale = push / (world_per_fluid * max(params.dt, 1e-4) * max(params.dt, 1e-4));
     let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
+    let n = c.n;
     for (var k = 0u; k < n; k++) {
-        let r = 0.5 * ((*cur)[k] + (*old)[k]);
-        let u = (*cur)[k] - (*old)[k];
-        let t = rft_tangent(n, k, old, cur);
+        let ck = cur_at(c, k);
+        let r = 0.5 * (ck + (*old)[k]);
+        let u = ck - (*old)[k];
+        let t = rft_tangent(c, k, old);
+        let env = env_at(c, old, k);
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
         // Só o arrasto com a ÁGUA a empurra (o dos grãos fica no entulho);
         // a água real no resíduo é uf × drag (ver joints_step).
         let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN);
         // Velocidade do resíduo RELATIVA à água (quem só é levado não empurra).
-        let v = s.xy + s.z * vec2<f32>(-r.y, r.x) + u - (*uf)[k] * (*drag)[k];
+        let v = s.xy + s.z * vec2<f32>(-r.y, r.x) + u - env.xy * env.z;
         let f_body = rr * v;
         let f = vec2<f32>(cr * f_body.x - sr * f_body.y, sr * f_body.x + cr * f_body.y) * scale;
         let rw = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * r.x - sr * r.y, sr * r.x + cr * r.y);

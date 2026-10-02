@@ -275,7 +275,9 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (a.alive == 0u) { return; }
 
     // ---- SINAIS INTERNOS (sensores, relógio, relé) e custo dos músculos ----
-    a.energy -= signals_step(slot, a, energy_capacity(slot, a));
+    // Capacidade de energia: depende só dos órgãos; calcula-se uma vez.
+    let cap = energy_capacity(slot, a);
+    a.energy -= signals_step(slot, a, cap);
 
     // ---- JUNTAS: dobragem ao nascer, depois agitação térmica e músculos ----
     let kt_here = params.thermal_kt * (1.0 + temp_in[fluid_index_at_world(vec2<f32>(a.pos_x, a.pos_y))] / 12.0);
@@ -349,28 +351,6 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     // (A deriva pela água entra no RFT, resíduo a resíduo: ver joints_step.)
-    // Fração do corpo em água livre (para a sedimentação).
-    var p = vec2<f32>(a.pos_x, a.pos_y);
-    var free_frac = 1.0;
-    if (params.sedimentation > 0.0) {
-        var in_water = 0u;
-        let nres = max(a.body_len, 1u);
-        for (var k = 0u; k < nres; k++) {
-            var rp = p;
-            if (a.body_len > 0u) { rp = residue_world(slot, a, k); }
-            if (gamma_count(world_to_cell(rp)) == 0u) { in_water += 1u; }
-        }
-        free_frac = f32(in_water) / f32(nres);
-    }
-    // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n, só a parte em água livre. ----
-    if (params.sedimentation > 0.0) {
-        let fall = params.sedimentation * sqrt(f32(max(a.body_len, 1u))) * free_frac;
-        let ns = vec2<f32>(p.x, max(p.y - fall, 0.0));
-        if (gamma_count(world_to_cell(ns)) < GAMMA_SOLID_THRESHOLD) { p = ns; }
-    }
-    a.pos_x = p.x;
-    a.pos_y = p.y;
-    let cap = energy_capacity(slot, a);
 
     // ---- COMER = CICLO CATALÍTICO de cada resíduo ----
     // livre --liga um ativado--> ligado --hidrolisa--> produto --solta--> livre
@@ -381,9 +361,17 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Fluxo de consumo por direção (difusioforese): soma de taxa × direção
     // do resíduo a partir do centro de massa. Consumo simétrico cancela.
     var phoretic = vec2<f32>(0.0);
+    var p = vec2<f32>(a.pos_x, a.pos_y);
+    // Seno e cosseno da orientação, uma vez; e contagem dos resíduos em água
+    // livre (para a sedimentação, mais abaixo) aproveitando a célula de cada um.
+    let cr_e = cos(a.rot);
+    let sr_e = sin(a.rot);
+    var in_water = 0u;
     for (var k = 0u; k < a.body_len; k++) {
-        let rw = residue_world(slot, a, k);
+        let lp = body_pos[slot * MAX_BODY + k];
+        let rw = p + vec2<f32>(cr_e * lp.x - sr_e * lp.y, sr_e * lp.x + cr_e * lp.y);
         let cell = world_to_cell(rw);
+        if (gamma_count(cell) == 0u) { in_water += 1u; }
         var avail = vec4<u32>(0u);
         for (var ch = 0u; ch < 4u; ch++) { avail[ch] = chem_act_count(cell, ch); }
         let tot = avail.x + avail.y + avail.z + avail.w;
@@ -477,6 +465,18 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * (f32(a.body_len) + organ_upkeep(slot, a.body_len));
+
+    // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n, só a parte em água livre. ----
+    if (params.sedimentation > 0.0) {
+        let free_frac = select(1.0, f32(in_water) / f32(max(a.body_len, 1u)), a.body_len > 0u);
+        let fall = params.sedimentation * sqrt(f32(max(a.body_len, 1u))) * free_frac;
+        let ns = vec2<f32>(p.x, max(p.y - fall, 0.0));
+        if (gamma_count(world_to_cell(ns)) < GAMMA_SOLID_THRESHOLD) {
+            p = ns;
+            a.pos_x = p.x;
+            a.pos_y = p.y;
+        }
+    }
 
     // ---- DIFUSIOFORESE (v3): consumo assimétrico empurra o corpo para o
     // lado onde consome. (O sentido real depende de a superfície atrair ou
