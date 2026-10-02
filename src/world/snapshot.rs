@@ -223,8 +223,9 @@ impl World {
             per_res("joint_state", &self.joint_state_buf, 1),
             per_res("joint_active", &s.joint_active, 1),
             per_res("sensor_mem", &s.sensor_mem, 1),
-            // Ligações entre agentes (cenas antigas não as têm: ver load_scene).
-            per_slot("bonds", &self.bonds_buf, super::BOND_STRIDE * 4),
+            // Ligações entre agentes por âncoras ("bonds2": o formato de
+            // antes, por cargas, é ignorado; ver load_scene).
+            per_slot("bonds2", &self.bonds_buf, super::BOND_STRIDE * 4),
         ]
     }
 
@@ -446,8 +447,8 @@ impl World {
         // Sem ligações por omissão (todas livres: 0xFFFFFFFF).
         q.write_buffer(&self.bonds_buf, 0, &vec![0xFFu8; self.bonds_buf.size() as usize]);
         for b in self.slot_bufs() {
-            if b.name == "bonds" && !scene.blocks.contains_key("bonds") {
-                notes.push("cena sem ligações entre agentes (gravada antes de existirem)".into());
+            if b.name == "bonds2" && !scene.blocks.contains_key("bonds2") {
+                notes.push("cena sem ligações por âncoras (gravada antes de existirem): agentes soltos".into());
                 continue;
             }
             let data = scene.block(b.name)?;

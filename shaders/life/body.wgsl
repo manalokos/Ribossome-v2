@@ -86,7 +86,14 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
                         step = 9u;
                     }
                 }
-                let ob = ((m % ORGAN_TYPES) + 1u) | ((m / ORGAN_TYPES) << 4u) | (gain << 8u);
+                // Promotores da âncora (Y) e do bias (Q): o modificador escolhe a variante;
+                // nos outros (C, H, W) escolhe o tipo e a variante.
+                var ob = ((m % CODED_ORGAN_TYPES) + 1u) | ((m / CODED_ORGAN_TYPES) << 4u) | (gain << 8u);
+                if (AA_IS_PROMOTER[aa] == 2u) {
+                    ob = (ORGAN_ANCHOR + 1u) | ((m % ORGAN_VARIANTS) << 4u) | (gain << 8u);
+                } else if (AA_IS_PROMOTER[aa] == 3u) {
+                    ob = (ORGAN_BIAS + 1u) | ((m % ORGAN_VARIANTS) << 4u) | (gain << 8u);
+                }
                 organs[slot * 32u + n / 2u] |= ob << ((n % 2u) * 16u);
             }
         }

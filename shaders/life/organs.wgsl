@@ -205,6 +205,11 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             continue;
         }
         switch t {
+            case ORGAN_BIAS: {
+                // p0 canal, p1 valor: emite sempre o mesmo (um "bias").
+                let v = ov.p1 * organ_gain(o);
+                if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }
+            }
             case ORGAN_CLOCK: {
                 // p0 canal, p1 período, p2/p3: o relógio acelera com α/β (um
                 // oscilador controlado). A fase vive em sensor_mem.
@@ -230,8 +235,8 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         for (var i = 0u; i < MAX_BONDS; i++) {
             let b = bond_at(slot, i);
             if (b.x == BOND_NONE || !bond_partner_ok(b)) { continue; }
-            let k = b.z & 0xFFFFu;
-            if (k < n) { emit[k] += params.bond_signal * SIGNAL_DECAY * signals[b.x * MAX_BODY + (b.z >> 16u)]; }
+            let k = bond_mine(b);
+            if (k < n) { emit[k] += params.bond_signal * SIGNAL_DECAY * signals[b.x * MAX_BODY + bond_theirs(b)]; }
         }
     }
     // Condução com um passo de atraso: o resíduo k recebe o que os vizinhos

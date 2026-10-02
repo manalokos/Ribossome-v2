@@ -434,31 +434,12 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.checkbox(&mut aug, "tradução começa no AUG (nascimentos novos)");
     p.require_start = aug as u32;
     ui.separator();
-    ui.strong("Ligações entre agentes (pontes salinas: K, R + com D, E −)");
+    ui.strong("Ligações entre agentes (órgão âncora: + liga a −)");
     ui.add(egui::Slider::new(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formação"))
-        .on_hover_text("probabilidade por passo de um agente tentar ligar um resíduo carregado a um vizinho de carga oposta");
-    ui.add(
-        egui::Slider::new(&mut p.bond_break, 0.0..=0.01).logarithmic(true).smallest_positive(1e-5).text("quebra (por passo)"),
-    );
-    if p.bond_break > 0.0 {
-        ui.label(format!("  vida média de uma ligação: {:.0} passos", 1.0 / p.bond_break));
-    }
+        .on_hover_text("probabilidade por passo de um agente com uma âncora livre a tentar ligar a uma âncora oposta de um vizinho; a duração vem da variante da âncora (editor)");
     ui.add(egui::Slider::new(&mut p.bond_energy_share, 0.0..=0.2).text("energia partilhada"))
         .on_hover_text("fração da diferença de energia que passa por cada ligação, por passo");
     ui.add(egui::Slider::new(&mut p.bond_signal, 0.0..=1.0).text("sinais pela ligação"));
-    ui.add(
-        egui::Slider::new(&mut p.birth_bond_break, 1e-5..=1.0)
-            .logarithmic(true)
-            .text("nascimento: separação da cópia (por passo)"),
-    )
-    .on_hover_text("a cópia fica presa ao pai pelas pontas hibridadas; cada G/C nas pontas (12 bases) divide isto por √2; 1 = separam-se logo");
-    if p.birth_bond_break < 1.0 {
-        ui.label(format!(
-            "  vida média: {:.0} passos sem G/C nas pontas, {:.0} com 12",
-            1.0 / p.birth_bond_break,
-            64.0 / p.birth_bond_break
-        ));
-    }
 }
 
 fn tab_motion(ui: &mut egui::Ui, world: &mut World) {

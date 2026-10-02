@@ -1,6 +1,7 @@
-//! Ligações entre agentes: nadadores com resíduos carregados (K e E
-//! alternados) na piscina do laboratório. Conta as ligações e confirma que
-//! são simétricas (A->B com os resíduos (i, j) <=> B->A com (j, i)).
+//! Ligações entre agentes por âncoras: cada agente tem uma âncora +
+//! permanente numa ponta e uma − na outra (filamentos possíveis), na piscina
+//! do laboratório. Conta as ligações (e as de nascimento, com PAIR > 0) e
+//! confirma que são simétricas (A->B com (i, j) <=> B->A com (j, i)).
 use ribossome::gpu::Gpu;
 use ribossome::params::{SpawnRequest, WorldConfig};
 use ribossome::world::{BOND_STRIDE, MAX_STEPS_PER_FRAME, World};
@@ -18,7 +19,8 @@ fn main() {
     world.params.pairing_cost = 0.0;
     // Genoma = X + complementar invertido de X: o filho (lido da cadeia
     // complementar) tem o mesmo corpo que o pai.
-    let text = format!("AUG {} UAA", "AAA GAA ".repeat(4));
+    // UAU (Y) + AAA = âncora variante 0 (+, permanente); UAU + AAU = variante 1 (−).
+    let text = format!("AUG UAU AAA {} UAU AAU UAA", "GGU ".repeat(6));
     let x: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
     let mut g = x.clone();
     g.extend(x.iter().rev().map(|b| b ^ 1));
@@ -57,8 +59,8 @@ fn main() {
                 }
                 has = true;
                 total += 1;
-                birth += (b[3] >= 1) as u32;
-                let swapped = (b[2] >> 16) | ((b[2] & 0xFFFF) << 16);
+                birth += (b[2] >> 16 != 0) as u32;
+                let swapped = ((b[2] >> 8) & 0xFF) | ((b[2] & 0xFF) << 8) | (b[2] & 0xFFFF_0000);
                 let back = (0..4).any(|j| {
                     let c = bond(b[0] as usize, j);
                     c[0] == slot as u32 && c[1] == a.id && c[2] == swapped

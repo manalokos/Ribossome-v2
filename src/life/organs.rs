@@ -34,7 +34,10 @@
 
 use super::amino::{AA_LETTERS, STOP, codon};
 
-pub const ORGAN_TYPES: usize = 12;
+pub const ORGAN_TYPES: usize = 14;
+/// Tipos escolhidos pelo modificador dos promotores C, H, W (índice % 12);
+/// a âncora (Y) e o bias (Q) têm promotores próprios.
+pub const CODED_ORGAN_TYPES: usize = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -50,6 +53,8 @@ pub enum Organ {
     LightSensorDirectional = 9,
     Photosystem = 10,
     Protease = 11,
+    Anchor = 12,
+    Bias = 13,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -67,10 +72,12 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "sensor de luz direcional",
     "fotossistema",
     "protease",
+    "âncora",
+    "bias",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -120,6 +127,11 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     SENSOR_PROPS,
     &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],
     &[pd("forca", "multiplica a mordida"), pd("alcance", "unidades do mundo além do contacto")],
+    &[
+        pd("polaridade", "+1 ou −1: liga-se a âncoras de polaridade oposta de outros agentes"),
+        pd("quebra", "probabilidade por passo de se soltar (0 = permanente)"),
+    ],
+    &[pd("canal", "0 = emite em α, 1 = em β"), pd("valor", "sinal constante emitido (× intensidade)")],
 ];
 
 fn fmt_canal(v: f32) -> &'static str {
@@ -189,6 +201,23 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             (1.0 - v("reciclar")) * 100.0,
             v("eficiencia") * g
         ),
+        12 => format!(
+            "âncora {} [anel {}]: liga-se a uma âncora {} de outro agente que toque ou de um filho; {}",
+            if v("polaridade") >= 0.0 { "+" } else { "−" },
+            if v("polaridade") >= 0.0 { "vermelho" } else { "azul" },
+            if v("polaridade") >= 0.0 { "−" } else { "+" },
+            if v("quebra") <= 0.0 {
+                "permanente (só se solta se esticar demais)".to_string()
+            } else {
+                format!("solta-se em média ao fim de {:.0} passos", 1.0 / v("quebra"))
+            }
+        ),
+        13 => format!(
+            "bias [ponto {}]: emite sempre {:+.2} em {}",
+            if v("canal") < 0.5 { "laranja" } else { "verde" },
+            v("valor") * g,
+            fmt_canal(v("canal"))
+        ),
         _ => format!(
             "protease [disco com dentes]: tira energia a quem toca (fica com metade), força ×{:.2}, alcance +{:.0}; a prolina protege",
             v("forca") * g,
@@ -199,13 +228,19 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
 
 /// Aminoácidos promotores (pouco frequentes num genoma ao acaso).
 pub const PROMOTERS: [char; 3] = ['C', 'H', 'W'];
+/// Promotor da âncora: tirosina (as colas dos mexilhões são proteínas ricas
+/// em DOPA, que vem da tirosina). O modificador escolhe a variante (% 6).
+pub const ANCHOR_PROMOTER: char = 'Y';
+/// Promotor do bias (emissor constante de α ou β): glutamina. O modificador
+/// escolhe a variante (% 6).
+pub const BIAS_PROMOTER: char = 'Q';
 
 fn aa_index(l: char) -> u8 {
     AA_LETTERS.iter().position(|&x| x == l).unwrap() as u8
 }
 
 pub fn is_promoter(aa: u8) -> bool {
-    PROMOTERS.iter().any(|&l| aa_index(l) == aa)
+    PROMOTERS.iter().any(|&l| aa_index(l) == aa) || aa == aa_index(ANCHOR_PROMOTER) || aa == aa_index(BIAS_PROMOTER)
 }
 
 /// Índice de intensidade por omissão (ganho 1).
@@ -256,7 +291,14 @@ pub fn translate_organs(genome: &[u8], require_start: bool) -> Vec<Residue> {
                     } else {
                         (GAIN_DEFAULT, 6)
                     };
-                body.push(Residue { aa, organ: Some((idx % ORGAN_TYPES as u8, idx / ORGAN_TYPES as u8, gain)) });
+                let organ = if aa == aa_index(ANCHOR_PROMOTER) {
+                    (Organ::Anchor as u8, idx % VARIANTS as u8, gain)
+                } else if aa == aa_index(BIAS_PROMOTER) {
+                    (Organ::Bias as u8, idx % VARIANTS as u8, gain)
+                } else {
+                    (idx % CODED_ORGAN_TYPES as u8, idx / CODED_ORGAN_TYPES as u8, gain)
+                };
+                body.push(Residue { aa, organ: Some(organ) });
                 i += used;
                 continue;
             }
@@ -283,12 +325,28 @@ pub fn wgsl() -> String {
         "LIGHT_SENSOR_DIR",
         "PHOTOSYSTEM",
         "PROTEASE",
+        "ANCHOR",
+        "BIAS",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");
     }
-    s += &format!("const ORGAN_TYPES: u32 = {ORGAN_TYPES}u;\nconst ORGAN_VARIANTS: u32 = {VARIANTS}u;\n");
-    let promo: Vec<String> = (0..20u8).map(|a| format!("{}u", is_promoter(a) as u32)).collect();
+    s += &format!(
+        "const ORGAN_TYPES: u32 = {ORGAN_TYPES}u;\nconst CODED_ORGAN_TYPES: u32 = {CODED_ORGAN_TYPES}u;\nconst ORGAN_VARIANTS: u32 = {VARIANTS}u;\n"
+    );
+    // 1 = promotor dos órgãos codificados (C, H, W), 2 = da âncora (Y), 3 = do bias (Q).
+    let promo: Vec<String> = (0..20u8)
+        .map(|a| {
+            let v = if a == aa_index(ANCHOR_PROMOTER) {
+                2
+            } else if a == aa_index(BIAS_PROMOTER) {
+                3
+            } else {
+                is_promoter(a) as u32
+            };
+            format!("{v}u")
+        })
+        .collect();
     s += &format!("const AA_IS_PROMOTER = array<u32, 20>({});\n", promo.join(", "));
     s
 }
@@ -316,6 +374,22 @@ mod tests {
         let b2 = translate_organs(&g2, true);
         assert_eq!(b2[1].organ, Some((8, 3, GAIN_DEFAULT)));
         assert!((organ_gain(GAIN_DEFAULT) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tyrosine_makes_an_anchor() {
+        // AUG | UAU (Y) + AAU (modificador 1 -> variante 1) | UAA
+        let g = bases("AUGUAUAAUUAA");
+        let body = translate_organs(&g, true);
+        assert_eq!(body[1].organ, Some((Organ::Anchor as u8, 1, GAIN_DEFAULT)));
+    }
+
+    #[test]
+    fn glutamine_makes_a_bias() {
+        // AUG | CAA (Q) + AAG (modificador 2 -> variante 2) | UAA
+        let g = bases("AUGCAAAAGUAA");
+        let body = translate_organs(&g, true);
+        assert_eq!(body[1].organ, Some((Organ::Bias as u8, 2, GAIN_DEFAULT)));
     }
 
     #[test]

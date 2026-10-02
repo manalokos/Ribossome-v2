@@ -102,6 +102,8 @@ fn organ_extent(t: u32) -> f32 {
         case ORGAN_STORAGE: { return 1.9; }
         case ORGAN_PHOTOSYSTEM: { return 1.8; }
         case ORGAN_PROTEASE: { return 1.7; }
+        case ORGAN_ANCHOR: { return 1.5; }
+        case ORGAN_BIAS: { return 1.0; }
         case NO_ORGAN: { return 1.0; }
         default: { return 1.3; }
     }
@@ -160,6 +162,16 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         if (oc != 0u) {
             organ = (oc & 0xFu) - 1u;
             r_world *= ORGAN_SCALE;
+            if (organ == ORGAN_BIAS) {
+                let p = min((oc >> 4u) & 0xFu, ORGAN_VARIANTS - 1u);
+                let beta = organ_variants_view[ORGAN_BIAS * ORGAN_VARIANTS + p].p0 >= 0.5;
+                col = select(vec3<f32>(1.0, 0.55, 0.15), vec3<f32>(0.35, 0.95, 0.35), beta);
+            }
+            if (organ == ORGAN_ANCHOR) {
+                let p = min((oc >> 4u) & 0xFu, ORGAN_VARIANTS - 1u);
+                let plus = organ_variants_view[ORGAN_ANCHOR * ORGAN_VARIANTS + p].p0 >= 0.0;
+                col = select(vec3<f32>(0.25, 0.5, 1.0), vec3<f32>(1.0, 0.3, 0.25), plus);
+            }
             if (organ == ORGAN_CLOCK) {
                 let p = min((oc >> 4u) & 0xFu, ORGAN_VARIANTS - 1u);
                 // Período da variante (o ponteiro ignora a modulação por α/β).
@@ -274,9 +286,11 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
     let other = agents_view[b.x];
     if (other.alive == 0u || other.id != b.y) { return o; }
     let hidden = view.focus_slot != 0xFFFFFFFFu && slot != view.focus_slot && b.x != view.focus_slot;
-    if (hidden || (b.z & 0xFFFFu) >= a.body_len || (b.z >> 16u) >= other.body_len) { return o; }
-    let p0 = residue_world_v(slot, a, b.z & 0xFFFFu);
-    let p1 = residue_world_v(b.x, other, b.z >> 16u);
+    let mine = b.z & 0xFFu;
+    let theirs = (b.z >> 8u) & 0xFFu;
+    if (hidden || mine >= a.body_len || theirs >= other.body_len) { return o; }
+    let p0 = residue_world_v(slot, a, mine);
+    let p1 = residue_world_v(b.x, other, theirs);
     var corners = array<vec2<f32>, 6>(
         vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
         vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
@@ -295,8 +309,8 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
     o.tangent = seg;
     o.core_phase = vec2<f32>(r_tube, 0.0);
     o.organ = NO_ORGAN;
-    // Dourado = ponte salina; azul-claro = ligação de nascimento (cópia presa).
-    o.color = select(vec3<f32>(1.0, 0.82, 0.35), vec3<f32>(0.45, 0.85, 1.0), b.w >= 1u);
+    // Dourado = ligada ao tocar; azul-claro = de nascimento (pai e filho).
+    o.color = select(vec3<f32>(1.0, 0.82, 0.35), vec3<f32>(0.45, 0.85, 1.0), (b.z >> 16u) != 0u);
     return o;
 }
 
@@ -450,6 +464,17 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             if (d > core && !ray) { discard; }
             let leaf = vec3<f32>(0.35, 0.95, 0.35);
             return vec4<f32>(select(mix(leaf * 0.7, leaf, 1.0 - d / core), vec3<f32>(0.85, 1.0, 0.4), ray), 1.0);
+        }
+        case ORGAN_BIAS: {
+            // Ponto cheio (laranja = α, verde = β) com um contorno claro.
+            if (d > core) { discard; }
+            return vec4<f32>(mix(in.color, vec3<f32>(1.0), smoothstep(core * 0.75, core, d)), 1.0);
+        }
+        case ORGAN_ANCHOR: {
+            // Anel grosso (vermelho = +, azul = −) com o centro escuro.
+            if (d > core * 1.15 || d < core * 0.5) { discard; }
+            let edge = smoothstep(core * 0.95, core * 1.15, d);
+            return vec4<f32>(mix(in.color, in.color * 0.4, edge), 1.0);
         }
         case ORGAN_PROTEASE: {
             // Disco com dentes (6 triângulos à volta).

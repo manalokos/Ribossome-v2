@@ -1,67 +1,100 @@
-// LIGAÇÕES ENTRE AGENTES (pontes salinas): um resíduo com carga + de um
-// agente que toca num resíduo com carga − de outro pode ligar-se a ele
-// (carga = propriedade do aminoácido: K, R +; D, E −). Nenhuma regra olha
-// para o genoma: a sequência só decide onde ficam as cargas. Um filho nasce
-// sobreposto ao pai; se as cargas forem complementares, ficam colados e
-// formam colónias.
+// LIGAÇÕES ENTRE AGENTES POR ÂNCORAS: o órgão "âncora" (promotor tirosina,
+// como as colas DOPA dos mexilhões) tem polaridade + ou − e uma força (a
+// variante). Uma âncora livre que toca numa âncora livre de polaridade
+// oposta de outro agente liga-se a ela; cada âncora segura UMA ligação.
+// A força da variante decide quanto dura (as permanentes só se soltam se a
+// ligação esticar demais ou o outro morrer). Nenhuma regra olha para o
+// genoma: só para os órgãos que o corpo tem.
 //
-// A ligação é uma mola sobreamortecida entre os dois resíduos (sem
-// inércia), não leva matéria, e por ela passam energia (por gradiente) e os
-// sinais α/β (o resíduo do outro conta como mais um vizinho da cadeia).
+// Nascimento: se o pai tiver uma âncora livre e o filho uma de polaridade
+// oposta, nascem ligados (colónias, filamentos).
 //
-// Cada agente guarda as suas ligações (até MAX_BONDS) e o outro lado guarda
-// a mesma, ao contrário. Para os dois lados concordarem sempre:
+// A ligação é uma mola sobreamortecida entre os dois resíduos, com binário,
+// não leva matéria, e por ela passam energia (por gradiente) e os sinais
+// α/β (o resíduo do outro conta como mais um vizinho da cadeia).
+//
+// Cada agente guarda as suas ligações (até MAX_BONDS) e o outro lado a
+// mesma, ao contrário. Para os dois lados concordarem sempre:
 //   bond_maintain: valida, calcula forças/energia e decide quebras com um
 //                  sorteio SIMÉTRICO pelo par (os dois lados tiram o mesmo);
-//   bond_propose:  cada agente com 2+ lugares livres propõe-se a UM vizinho
-//                  (atomicMin: o vizinho escolhe o proponente de slot menor);
-//   bond_accept:   o escolhido regista a ligação e o proponente também, se
-//                  foi ele o escolhido. As forças entram em contact_apply.
+//   bond_propose:  cada agente com um lugar livre propõe UMA ligação a um
+//                  vizinho (atomicMin: o vizinho escolhe o de slot menor);
+//   bond_accept:   quem não propôs aceita o escolhido; o proponente sabe
+//                  que foi aceite pelas mesmas regras. Forças em contact_apply.
 
 const MAX_BONDS: u32 = 4u;
 // Por slot: MAX_BONDS ligações + a proposta deste passo.
 const BOND_STRIDE: u32 = MAX_BONDS + 1u;
 const BOND_NONE: u32 = 0xFFFFFFFFu;
-// Distância máxima entre os dois resíduos para se ligarem (mundo).
-const BOND_RANGE: f32 = 12.0;
+// Distância máxima entre as duas âncoras para se ligarem (mundo).
+const BOND_RANGE: f32 = 16.0;
 // Comprimento de repouso da mola.
-const BOND_LEN: f32 = 8.0;
-// Esticada além disto, parte-se.
-const BOND_BREAK_LEN: f32 = 40.0;
-// Fração do desvio corrigida por passo (cada lado faz metade) e limite.
-const BOND_RELAX: f32 = 0.25;
-const BOND_MAX_STEP: f32 = 4.0;
-const BOND_MAX_TURN: f32 = 0.1;
-// Carga mínima (em módulo) para um resíduo poder ligar.
-const BOND_MIN_CHARGE: f32 = 0.5;
+const BOND_LEN: f32 = 6.0;
+// Esticada além disto, parte-se mesmo sendo permanente.
+const BOND_BREAK_LEN: f32 = 80.0;
+// Fração do desvio corrigida por passo (cada lado faz metade) e limites:
+// forte, quase como a ligação da própria cadeia.
+const BOND_RELAX: f32 = 0.6;
+const BOND_MAX_STEP: f32 = 6.0;
+const BOND_MAX_TURN: f32 = 0.15;
 const S_BOND: u32 = 8u << 16u;      // + 16 bits do id maior do par
 const S_BOND_PROP: u32 = 11u;
+// Tipo da ligação (bit 16 de z): 0 = por contacto, 1 = de nascimento.
+const BOND_KIND_BIRTH: u32 = 1u << 16u;
 
 // Ligação: x = slot do outro (BOND_NONE = livre), y = id do outro,
-// z = o meu resíduo | (o resíduo do outro << 16), w = tipo: 0 = ponte
-// salina, 1 + n = ligação de nascimento com n G/C nas pontas do genoma (na
-// proposta, w = lugares livres depois da manutenção).
+// z = o meu resíduo | (o resíduo do outro << 8) | (tipo << 16),
+// w = probabilidade de quebra por passo (bits de f32). Na proposta (índice
+// MAX_BONDS): w = lugares livres depois da manutenção.
 fn bond_at(slot: u32, i: u32) -> vec4<u32> {
     return bonds[slot * BOND_STRIDE + i];
 }
 
-fn residue_charge(slot: u32, k: u32) -> f32 {
-    return aa_props[body_get(slot, k)].charge;
+fn bond_mine(b: vec4<u32>) -> u32 {
+    return b.z & 0xFFu;
 }
 
-// A ligação i de `slot` ainda é válida (o outro vive e é o mesmo agente)?
+fn bond_theirs(b: vec4<u32>) -> u32 {
+    return (b.z >> 8u) & 0xFFu;
+}
+
+// Polaridade da âncora no resíduo k (+1, −1) ou 0 se não for âncora.
+fn anchor_polarity(slot: u32, k: u32) -> f32 {
+    let o = organ_get(slot, k);
+    if (organ_type(o) != ORGAN_ANCHOR) { return 0.0; }
+    return select(-1.0, 1.0, organ_var(o).p0 >= 0.0);
+}
+
+// Probabilidade de quebra por passo da âncora no resíduo k.
+fn anchor_break(slot: u32, k: u32) -> f32 {
+    return max(organ_var(organ_get(slot, k)).p1, 0.0);
+}
+
+// A ligação ainda é válida (o outro vive e é o mesmo agente)?
 fn bond_partner_ok(b: vec4<u32>) -> bool {
     if (b.x == BOND_NONE || b.x >= params.max_agents) { return false; }
     let o = agents[b.x];
-    return o.alive != 0u && o.id == b.y && (b.z >> 16u) < o.body_len;
+    return o.alive != 0u && o.id == b.y && bond_theirs(b) < o.body_len;
 }
 
+// A âncora k deste agente já segura uma ligação?
+fn anchor_busy(slot: u32, k: u32) -> bool {
+    for (var i = 0u; i < MAX_BONDS; i++) {
+        let b = bond_at(slot, i);
+        if (b.x != BOND_NONE && bond_mine(b) == k) { return true; }
+    }
+    return false;
+}
 
 // Marca as ligações de um slot novo como livres.
 fn bonds_clear(slot: u32) {
     for (var i = 0u; i < BOND_STRIDE; i++) {
         bonds[slot * BOND_STRIDE + i] = vec4<u32>(BOND_NONE, 0u, 0u, 0u);
     }
+}
+
+fn bond_write(slot: u32, i: u32, partner: u32, partner_id: u32, mine: u32, theirs: u32, kind: u32, p_break: f32) {
+    bonds[slot * BOND_STRIDE + i] = vec4<u32>(partner, partner_id, mine | (theirs << 8u) | kind, bitcast<u32>(p_break));
 }
 
 @compute @workgroup_size(64)
@@ -85,23 +118,19 @@ fn bond_maintain(@builtin(global_invocation_id) gid: vec3<u32>) {
             free += 1u;
             continue;
         }
-        var keep = bond_partner_ok(b) && (b.z & 0xFFFFu) < a.body_len;
+        var keep = bond_partner_ok(b) && bond_mine(b) < a.body_len;
         if (keep) {
             let o = agents[b.x];
-            let ra = residue_world(slot, a, b.z & 0xFFFFu);
-            let rb = residue_world(b.x, o, b.z >> 16u);
+            let ra = residue_world(slot, a, bond_mine(b));
+            let rb = residue_world(b.x, o, bond_theirs(b));
             let d = rb - ra;
             let dist = length(d);
             // Sorteio simétrico: os dois lados usam o mesmo par (id menor,
-            // id maior) e a mesma distância, por isso decidem o mesmo.
+            // id maior), a mesma distância e a mesma probabilidade.
             let lo = min(a.id, o.id);
             let hi = max(a.id, o.id);
             let q = rng_f4(lo, params.epoch, S_BOND + (hi & 0xFFFFu));
-            // Ponte salina: quebra uniforme. Nascimento: o duplex das pontas
-            // segura mais com mais G/C (3 pontes de hidrogénio contra 2).
-            var p_break = params.bond_break;
-            if (b.w >= 1u) { p_break = params.birth_bond_break * exp2(-0.5 * f32(b.w - 1u)); }
-            if (dist > BOND_BREAK_LEN || q.x < p_break) {
+            if (dist > BOND_BREAK_LEN || q.x < bitcast<f32>(b.w)) {
                 keep = false;
             } else {
                 // Mola: cada lado corrige metade do desvio.
@@ -141,13 +170,22 @@ fn bond_propose(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (a.alive == 0u || a.body_len == 0u || params.bond_rate <= 0.0) { return; }
     let prop_i = slot * BOND_STRIDE + MAX_BONDS;
     let free = bonds[prop_i].w;
-    if (free < 2u) { return; }
+    if (free < 1u) { return; }
     let q = rng_f4(a.id, params.epoch, S_BOND_PROP);
     if (q.x >= params.bond_rate) { return; }
-    // Um resíduo ao acaso: só os carregados ligam.
-    let k = min(u32(q.y * f32(a.body_len)), a.body_len - 1u);
-    let ca = residue_charge(slot, k);
-    if (abs(ca) < BOND_MIN_CHARGE) { return; }
+    // Uma âncora livre, a começar num resíduo ao acaso.
+    let n = a.body_len;
+    let k0 = min(u32(q.y * f32(n)), n - 1u);
+    var k = BOND_NONE;
+    for (var t = 0u; t < n; t++) {
+        let kk = (k0 + t) % n;
+        if (anchor_polarity(slot, kk) != 0.0 && !anchor_busy(slot, kk)) {
+            k = kk;
+            break;
+        }
+    }
+    if (k == BOND_NONE) { return; }
+    let pol = anchor_polarity(slot, k);
     let ra = residue_world(slot, a, k);
     let c = contact_cell_xy(ra);
     for (var dy = -1; dy <= 1; dy++) {
@@ -165,9 +203,9 @@ fn bond_propose(@builtin(global_invocation_id) gid: vec3<u32>) {
                     let far = length(vec2<f32>(b.pos_x, b.pos_y) - ra) > b.radius + BOND_RANGE + 20.0;
                     if (!far && b.body_len > 0u && !bonded_to(slot, e)) {
                         for (var j = 0u; j < b.body_len; j++) {
-                            if (ca * residue_charge(e, j) > -BOND_MIN_CHARGE * BOND_MIN_CHARGE) { continue; }
+                            if (anchor_polarity(e, j) != -pol || anchor_busy(e, j)) { continue; }
                             if (length(residue_world(e, b, j) - ra) > BOND_RANGE) { continue; }
-                            bonds[prop_i] = vec4<u32>(e, b.id, k | (j << 16u), free);
+                            bonds[prop_i] = vec4<u32>(e, b.id, k | (j << 8u), free);
                             atomicMin(&bond_accept[e], slot);
                             return;
                         }
@@ -179,40 +217,21 @@ fn bond_propose(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }
 
-// Bases das pontas do genoma (cada ponta) que seguram a cópia ao pai.
-const BIRTH_BOND_ENDS: u32 = 6u;
-
-// LIGAÇÃO DE NASCIMENTO (chamada em agents_birth): a cópia foi feita por
-// emparelhamento com o genoma do pai e fica presa pelas pontas hibridadas
-// até se separar. A última posição do corpo do pai liga à primeira do filho
-// (cadeias cabeça-cauda: filamentos). Sem lugar livre no pai, separam-se.
-fn birth_bond(parent: u32, pa: Agent, child: u32) {
-    if (params.birth_bond_break >= 1.0 || pa.body_len == 0u) { return; }
-    let ca = agents[child];
-    if (ca.body_len == 0u) { return; }
-    let L = pa.gene_len;
-    var gc = 0u;
-    for (var i = 0u; i < min(BIRTH_BOND_ENDS, L); i++) {
-        gc += select(0u, 1u, genome_get(parent, i) >= 2u) + select(0u, 1u, genome_get(parent, L - 1u - i) >= 2u);
-    }
+fn bond_add(slot: u32, partner: u32, partner_id: u32, mine: u32, theirs: u32, p_break: f32) {
     for (var i = 0u; i < MAX_BONDS; i++) {
-        if (bond_at(parent, i).x == BOND_NONE) {
-            let kp = pa.body_len - 1u;
-            bonds[parent * BOND_STRIDE + i] = vec4<u32>(child, ca.id, kp, 1u + gc);
-            bonds[child * BOND_STRIDE] = vec4<u32>(parent, pa.id, kp << 16u, 1u + gc);
+        if (bond_at(slot, i).x == BOND_NONE) {
+            bond_write(slot, i, partner, partner_id, mine, theirs, 0u, p_break);
             return;
         }
     }
 }
 
-// Regista a ligação no primeiro lugar livre.
-fn bond_add(slot: u32, partner: u32, partner_id: u32, mine: u32, theirs: u32) {
-    for (var i = 0u; i < MAX_BONDS; i++) {
-        if (bond_at(slot, i).x == BOND_NONE) {
-            bonds[slot * BOND_STRIDE + i] = vec4<u32>(partner, partner_id, mine | (theirs << 16u), 0u);
-            return;
-        }
-    }
+// Um agente aceita o proponente escolhido se não propôs ele próprio neste
+// passo (a sua âncora podia ser a mesma) e tem lugar. Os dois lados avaliam
+// exatamente esta condição.
+fn accepts(target_slot: u32, proposer: u32) -> bool {
+    let t = bonds[target_slot * BOND_STRIDE + MAX_BONDS];
+    return atomicLoad(&bond_accept[target_slot]) == proposer && t.x == BOND_NONE && t.w >= 1u;
 }
 
 @compute @workgroup_size(64)
@@ -222,19 +241,50 @@ fn bond_accept_pass(@builtin(global_invocation_id) gid: vec3<u32>) {
     let a = agents[slot];
     if (a.alive == 0u) { return; }
     let mine = bonds[slot * BOND_STRIDE + MAX_BONDS];
-    // Como escolhido: aceita o proponente de slot menor (se houver lugar).
-    let w = atomicLoad(&bond_accept[slot]);
-    if (w != BOND_NONE && mine.w >= 1u) {
-        let p = bonds[w * BOND_STRIDE + MAX_BONDS];
-        if (p.x == slot) {
-            bond_add(slot, w, agents[w].id, p.z >> 16u, p.z & 0xFFFFu);
+    // A ligação dura o que dura a âncora mais fraca das duas.
+    if (mine.x == BOND_NONE) {
+        // Como escolhido.
+        let w = atomicLoad(&bond_accept[slot]);
+        if (w != BOND_NONE && accepts(slot, w)) {
+            let p = bonds[w * BOND_STRIDE + MAX_BONDS];
+            let k = (p.z >> 8u) & 0xFFu;
+            let kp = p.z & 0xFFu;
+            let pb = max(anchor_break(slot, k), anchor_break(w, kp));
+            bond_add(slot, w, agents[w].id, k, kp, pb);
+        }
+    } else if (mine.x < params.max_agents && accepts(mine.x, slot)) {
+        // Como proponente aceite.
+        let k = mine.z & 0xFFu;
+        let j = (mine.z >> 8u) & 0xFFu;
+        let pb = max(anchor_break(slot, k), anchor_break(mine.x, j));
+        bond_add(slot, mine.x, mine.y, k, j, pb);
+    }
+}
+
+// LIGAÇÃO DE NASCIMENTO (chamada em agents_birth): uma âncora livre do pai
+// e uma de polaridade oposta do filho ligam-se logo (sem lugar livre no
+// pai, ou sem âncoras compatíveis, separam-se).
+fn birth_bond(parent: u32, pa: Agent, child: u32) {
+    if (pa.body_len == 0u) { return; }
+    let ca = agents[child];
+    if (ca.body_len == 0u) { return; }
+    var slot_i = BOND_NONE;
+    for (var i = 0u; i < MAX_BONDS; i++) {
+        if (bond_at(parent, i).x == BOND_NONE) {
+            slot_i = i;
+            break;
         }
     }
-    // Como proponente: fica ligado se o outro me escolheu e tinha lugar.
-    if (mine.x != BOND_NONE && mine.x < params.max_agents) {
-        let other = bonds[mine.x * BOND_STRIDE + MAX_BONDS];
-        if (atomicLoad(&bond_accept[mine.x]) == slot && other.w >= 1u) {
-            bond_add(slot, mine.x, mine.y, mine.z & 0xFFFFu, mine.z >> 16u);
+    if (slot_i == BOND_NONE) { return; }
+    for (var k = 0u; k < pa.body_len; k++) {
+        let pol = anchor_polarity(parent, k);
+        if (pol == 0.0 || anchor_busy(parent, k)) { continue; }
+        for (var j = 0u; j < ca.body_len; j++) {
+            if (anchor_polarity(child, j) != -pol) { continue; }
+            let pb = max(anchor_break(parent, k), anchor_break(child, j));
+            bond_write(parent, slot_i, child, ca.id, k, j, BOND_KIND_BIRTH, pb);
+            bond_write(child, 0u, parent, pa.id, j, k, BOND_KIND_BIRTH, pb);
+            return;
         }
     }
 }

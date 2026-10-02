@@ -210,21 +210,13 @@ gpu_struct! {
         /// Σ √arrasto·dθ² das juntas (potência viscosa ξ·ω²; só a parte ativa,
         /// o ruído térmico vem do banho). Mover depressa custa ao quadrado.
         pub motion_cost: f32,
-        /// LIGAÇÕES (pontes salinas): probabilidade por passo de um agente
-        /// tentar ligar um resíduo carregado a um vizinho de carga oposta.
+        /// LIGAÇÕES por âncoras: probabilidade por passo de um agente com uma
+        /// âncora livre tentar ligá-la a uma âncora oposta de um vizinho.
         pub bond_rate: f32,
-        /// Probabilidade por passo de uma ligação se soltar (agitação).
-        pub bond_break: f32,
         /// Fração da diferença de energia que passa por cada ligação, por passo.
         pub bond_energy_share: f32,
         /// Condutância dos sinais α/β pela ligação.
         pub bond_signal: f32,
-        /// LIGAÇÃO DE NASCIMENTO (separação incompleta da cópia): probabilidade
-        /// base por passo de a cópia se soltar do pai; cada G/C nas pontas
-        /// do genoma (12 bases) divide-a por √2. ≥ 1 = soltam-se sempre.
-        pub birth_bond_break: f32,
-        pub _pad_b1: u32,
-        pub _pad_b2: u32,
     }
 }
 
@@ -298,13 +290,9 @@ impl Default for SimParams {
             swim_wobble: 1.0,
             fluid_swim_only: 0,
             motion_cost: 0.1,
-            bond_rate: 0.05,
-            bond_break: 0.0002,
+            bond_rate: 0.2,
             bond_energy_share: 0.01,
             bond_signal: 0.5,
-            birth_bond_break: 0.002,
-            _pad_b1: 0,
-            _pad_b2: 0,
         }
     }
 }
@@ -466,8 +454,7 @@ gpu_struct! {
         pub uv_absorb: f32,
         /// Comprimento do segmento (unidades do mundo).
         pub seg_len: f32,
-        /// Carga a pH ~7 (K, R +1; D, E −1): pontes salinas entre agentes.
-        pub charge: f32,
+        pub _pad1: u32,
         pub _pad2: u32,
     }
 }
