@@ -21,6 +21,28 @@
 @group(0) @binding(5) var<storage, read> organs_view: array<u32>;
 @group(0) @binding(6) var<storage, read> signals_view: array<vec2<f32>>;
 @group(0) @binding(7) var<storage, read> aa_props_view: array<AaProps, 20>;
+@group(0) @binding(8) var<storage, read> genomes_view: array<u32>;
+@group(0) @binding(9) var<storage, read> rna_tail_view: array<vec4<f32>>;
+
+// Fios de RNA nas pontas (as zonas não traduzidas): bases desenhadas por
+// agente (metade para cada ponta), distância entre bases e ondulação.
+const RNA_PER_END: u32 = 32u;
+const RNA_SPACING: f32 = 5.0;
+const RNA_RADIUS: f32 = 1.6;
+const RNA_WIGGLE: f32 = 0.35;
+
+fn base_color(b: u32) -> vec3<f32> {
+    switch b {
+        case 0u: { return vec3<f32>(1.0, 0.25, 0.2); }   // A
+        case 1u: { return vec3<f32>(1.0, 0.85, 0.2); }   // U
+        case 2u: { return vec3<f32>(0.25, 0.9, 0.3); }   // G
+        default: { return vec3<f32>(0.3, 0.55, 1.0); }   // C
+    }
+}
+
+fn genome_base(slot: u32, i: u32) -> u32 {
+    return (genomes_view[slot * 16u + i / 16u] >> ((i % 16u) * 2u)) & 3u;
+}
 
 const MAX_BODY_V: u32 = 64u;
 const NO_ORGAN: u32 = 0xFFu;
@@ -80,12 +102,16 @@ fn organ_extent(t: u32) -> f32 {
 @vertex
 fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) -> AgentVsOut {
     var o: AgentVsOut;
-    // Instâncias por agente: 0..63 tubos, 64..127 órgãos (por cima).
-    let slot = draw_list_view[inst / (2u * MAX_BODY_V)];
-    let local_i = inst % (2u * MAX_BODY_V);
+    // Instâncias por agente: 0..63 tubos, 64..127 órgãos (por cima),
+    // 128..191 bases de RNA não traduzidas nas pontas.
+    let slot = draw_list_view[inst / (3u * MAX_BODY_V)];
+    let local_i = inst % (3u * MAX_BODY_V);
+    let a = agents_view[slot];
+    if (local_i >= 2u * MAX_BODY_V) {
+        return rna_vertex(vi, slot, a, local_i - 2u * MAX_BODY_V);
+    }
     let glyph = local_i >= MAX_BODY_V;
     let k = local_i % MAX_BODY_V;
-    let a = agents_view[slot];
     let naked = a.body_len == 0u;
     let hidden = view.focus_slot != 0xFFFFFFFFu && slot != view.focus_slot;
     if (a.alive == 0u || hidden || (k >= a.body_len && !(naked && k == 0u))) {
@@ -190,6 +216,83 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     o.core_phase = vec2<f32>(1.0 / ext, phase);
     o.mode = 1u;
     return o;
+}
+
+// Quadrado (vi) que cobre a cápsula a–b de raio r, em modo tubo.
+fn capsule_vertex(vi: u32, a_w: vec2<f32>, b_w: vec2<f32>, r: f32, col: vec3<f32>) -> AgentVsOut {
+    var o: AgentVsOut;
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
+        vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
+    let c = corners[vi];
+    let seg = b_w - a_w;
+    let l = length(seg);
+    let e = select(vec2<f32>(1.0, 0.0), seg / l, l > 1e-4);
+    let nn = vec2<f32>(-e.y, e.x);
+    let along = select(-r, l + r, c.x > 0.0);
+    let w = a_w + e * along + nn * (c.y * r);
+    let px = vec2<f32>((w.x - view.center_x) * view.zoom, (w.y - view.center_y) * view.zoom);
+    o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);
+    o.mode = 0u;
+    o.local = w - a_w;
+    o.tangent = seg;
+    o.core_phase = vec2<f32>(r, 0.0);
+    o.organ = NO_ORGAN;
+    o.color = col;
+    return o;
+}
+
+// Base j das pontas: j < RNA_PER_END = 5' UTR (antes do AUG, a sair da
+// ponta N); senão 3' UTR (depois do stop, a sair da ponta C). RNA nu: o
+// genoma todo, a partir do centro. O fio ondula devagar com a idade.
+fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
+    var o: AgentVsOut;
+    o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    let hidden = view.focus_slot != 0xFFFFFFFFu && slot != view.focus_slot;
+    if (a.alive == 0u || hidden) { return o; }
+    let trailer = j >= RNA_PER_END;
+    let m = j % RNA_PER_END;
+    let start = a.coding_span & 0xFFFFu;
+    let after = a.coding_span >> 16u;
+    let n = a.body_len;
+    var base_i = 0u;
+    var anchor = vec2<f32>(0.0);
+    var dir = vec2<f32>(select(-1.0, 1.0, trailer), 0.0);
+    if (n == 0u) {
+        // RNA nu: as duas metades do genoma, em sentidos opostos.
+        base_i = select(m, RNA_PER_END + m, trailer);
+        if (base_i >= a.gene_len) { return o; }
+    } else if (!trailer) {
+        if (m >= start) { return o; }
+        base_i = start - 1u - m;
+        anchor = body_pos_view[slot * MAX_BODY_V];
+        if (n > 1u) { dir = normalize(anchor - body_pos_view[slot * MAX_BODY_V + 1u] + vec2<f32>(1e-6, 0.0)); }
+    } else {
+        base_i = after + m;
+        if (base_i >= a.gene_len) { return o; }
+        anchor = body_pos_view[slot * MAX_BODY_V + n - 1u];
+        if (n > 1u) { dir = normalize(anchor - body_pos_view[slot * MAX_BODY_V + n - 2u] + vec2<f32>(1e-6, 0.0)); }
+    }
+    // Caminha base a base até m: ondula devagar (a flutuar) e curva com a
+    // curvatura do fio, que vem do movimento da ponta (fica para trás).
+    var ang = atan2(dir.y, dir.x);
+    let bend_state = rna_tail_view[slot * 2u + 1u];
+    let bend = select(bend_state.x, bend_state.y, trailer) / f32(RNA_PER_END);
+    var p = anchor;
+    var prev = anchor;
+    let seed = f32(a.id % 977u) * 0.37 + select(0.0, 2.1, trailer);
+    for (var t = 0u; t <= m; t++) {
+        ang += RNA_WIGGLE * sin(f32(t) * 0.7 + f32(a.age) * 0.03 + seed) + bend;
+        prev = p;
+        p += vec2<f32>(cos(ang), sin(ang)) * RNA_SPACING;
+    }
+    // Para o mundo.
+    let cr = cos(a.rot);
+    let sr = sin(a.rot);
+    let c0 = vec2<f32>(a.pos_x, a.pos_y);
+    let pw = c0 + vec2<f32>(cr * p.x - sr * p.y, sr * p.x + cr * p.y);
+    let qw = c0 + vec2<f32>(cr * prev.x - sr * prev.y, sr * prev.x + cr * prev.y);
+    return capsule_vertex(vi, qw, pw, max(RNA_RADIUS, 1.0 / view.zoom), base_color(genome_base(slot, base_i)) * 0.85);
 }
 
 // Distância de p ao segmento a–b.

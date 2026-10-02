@@ -126,7 +126,9 @@ fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, ge
     a.age = 0u;
     a.parent = parent;
     a.id = atomicAdd(&life_counters[LC_NEXT_ID], 1u);
-    a.body_len = translate_agent(slot, gene_len);
+    var span = 0u;
+    a.body_len = translate_agent(slot, gene_len, &span);
+    a.coding_span = span;
     a.radius = contact_radius(slot, a.body_len);
     agents[slot] = a;
 }
@@ -296,6 +298,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         a.rot += swim.z + swim_raw.w;
     }
     a.age += 1u;
+    update_rna_tails(slot, a);
 
     // ---- BIOTURBAÇÃO: um resíduo (ao acaso) que atravessa ENTULHO empurra
     // um grão para a célula seguinte, na direção em que se move (translação
@@ -624,4 +627,38 @@ fn agents_ledger(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var ch = 0u; ch < 4u; ch++) {
         if (m[ch] > 0u) { atomicAdd(&ledger[8u + ch], m[ch]); }
     }
+}
+
+// FIOS DE RNA DAS PONTAS (só visual): cada fio é passivo e mole. Quando a
+// ponta do corpo se mexe de lado, o fio fica para trás e curva no sentido
+// oposto; parado, endireita aos poucos (relaxação sobreamortecida).
+const TAIL_DRAG: f32 = 0.08;
+const TAIL_RELAX: f32 = 0.96;
+const TAIL_MAX_BEND: f32 = 2.5;
+
+fn update_rna_tails(slot: u32, a: Agent) {
+    let n = a.body_len;
+    if (n == 0u) { return; }
+    let s0 = rna_tail[slot * 2u];
+    var bend = rna_tail[slot * 2u + 1u];
+    let pn = residue_world(slot, a, 0u);
+    let pc = residue_world(slot, a, n - 1u);
+    if (a.age > 1u) {
+        // Direção para fora de cada ponta e o seu perpendicular.
+        var dn = vec2<f32>(-1.0, 0.0);
+        var dc = vec2<f32>(1.0, 0.0);
+        if (n > 1u) {
+            dn = normalize(pn - residue_world(slot, a, 1u) + vec2<f32>(1e-6, 0.0));
+            dc = normalize(pc - residue_world(slot, a, n - 2u) + vec2<f32>(1e-6, 0.0));
+        }
+        let vn = pn - s0.xy;
+        let vc = pc - s0.zw;
+        // Movimento de lado (no perpendicular esquerdo) curva o fio para o outro lado.
+        bend.x = clamp(bend.x * TAIL_RELAX - TAIL_DRAG * dot(vn, vec2<f32>(-dn.y, dn.x)), -TAIL_MAX_BEND, TAIL_MAX_BEND);
+        bend.y = clamp(bend.y * TAIL_RELAX - TAIL_DRAG * dot(vc, vec2<f32>(-dc.y, dc.x)), -TAIL_MAX_BEND, TAIL_MAX_BEND);
+    } else {
+        bend = vec4<f32>(0.0);
+    }
+    rna_tail[slot * 2u] = vec4<f32>(pn, pc);
+    rna_tail[slot * 2u + 1u] = bend;
 }

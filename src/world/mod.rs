@@ -231,6 +231,8 @@ pub struct World {
     pub amino: Vec<crate::life::table::AminoRow>,
     pub amino_source: String,
     pub aa_buf: wgpu::Buffer,
+    /// Estado dos fios de RNA das pontas (só para o desenho).
+    pub tail_buf: wgpu::Buffer,
     /// Tabela dos órgãos em uso.
     pub organ_table: Vec<crate::life::table::OrganRow>,
     organ_buf: wgpu::Buffer,
@@ -373,6 +375,8 @@ impl World {
             mapped_at_creation: false,
         });
         gpu.queue.write_buffer(&organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&organ_table)));
+        // Fios de RNA das pontas (só visual): posição anterior das pontas e curvatura.
+        let tail_buf = storage_buffer(device, "rna tails", max_agents * 32);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
             size: 16,
@@ -413,7 +417,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..22).map(|b| storage_entry(b, b == 4 || b >= 20)).collect();
+        let life_entries: Vec<_> = (0..23).map(|b| storage_entry(b, b == 4 || b == 20 || b == 21)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -558,6 +562,7 @@ impl World {
                 &bitten,
                 &aa_buf,
                 &organ_buf,
+                &tail_buf,
             ],
         );
 
@@ -687,6 +692,7 @@ impl World {
             amino,
             amino_source,
             aa_buf,
+            tail_buf,
             organ_table,
             organ_buf,
             heat_image: None,

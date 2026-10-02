@@ -267,7 +267,10 @@ gpu_struct! {
         pub radius: f32,
         /// `id` do pai (0xFFFFFFFF na geração 0).
         pub parent: u32,
-        pub _pad2: u32,
+        /// Zona traduzida do genoma: base do AUG (16 bits baixos) e primeira
+        /// base depois do codão stop (16 bits altos). Antes = 5' UTR, depois =
+        /// 3' UTR (desenhadas como fios de RNA nas pontas).
+        pub coding_span: u32,
     }
 }
 

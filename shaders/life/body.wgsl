@@ -41,8 +41,10 @@ fn residue_bend(aa: u32) -> f32 {
     return aa_props[aa].rest_angle;
 }
 
-// Traduz o genoma do slot, escreve bodies e body_pos e devolve o nº de resíduos.
-fn translate_agent(slot: u32, gene_len: u32) -> u32 {
+// Traduz o genoma do slot, escreve bodies e body_pos e devolve o nº de
+// resíduos. Em `span` escreve a zona traduzida: início (AUG) | (primeira
+// base depois do stop) << 16.
+fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
     // Sem AUG obrigatório (por omissão), lê-se a partir da primeira base.
     var start = select(0xFFFFFFFFu, 0u, params.require_start == 0u);
     for (var i = 0u; i + 2u < gene_len && start == 0xFFFFFFFFu; i++) {
@@ -53,14 +55,21 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
     }
     for (var w = 0u; w < 16u; w++) { bodies[slot * 16u + w] = 0u; }
     for (var w = 0u; w < 32u; w++) { organs[slot * 32u + w] = 0u; }
-    if (start == 0xFFFFFFFFu) { return 0u; }
+    if (start == 0xFFFFFFFFu) {
+        // Sem AUG: o genoma todo fica por traduzir.
+        *span = gene_len | (gene_len << 16u);
+        return 0u;
+    }
     var n = 0u;
     var i = start;
     loop {
         if (i + 2u >= gene_len || n >= MAX_BODY) { break; }
         let c = genome_get(slot, i) * 16u + genome_get(slot, i + 1u) * 4u + genome_get(slot, i + 2u);
         let aa = CODON_TABLE[c];
-        if (aa == AA_STOP) { break; }
+        if (aa == AA_STOP) {
+            i += 3u; // o stop faz parte da zona lida
+            break;
+        }
         bodies[slot * 16u + n / 4u] |= aa << ((n % 4u) * 8u);
         // ÓRGÃO: promotor seguido de um modificador que não é stop (6 bases).
         var step = 3u;
@@ -84,6 +93,7 @@ fn translate_agent(slot: u32, gene_len: u32) -> u32 {
         n += 1u;
         i += step;
     }
+    *span = start | (min(i, gene_len) << 16u);
     // Geometria inicial: dobras homoquirais pela tendência local; a
     // dobragem (fold.wgsl) parte daqui nos primeiros passos de vida.
     for (var k = 0u; k < n; k++) {
