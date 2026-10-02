@@ -26,6 +26,8 @@ const DIFF_AGITATION_SPEED: f32 = 0.5;   // células do fluido / s
 // Monómeros dentro de gamma rastejam à taxa base, atenuada pela ocupação.
 const BURIED_DIFF_FACTOR: f32 = 1.0;
 const GAMMA_POROSITY_K: f32 = 0.3;
+// Dispersão mecânica no entulho: desvio aleatório / deslocamento médio.
+const RUBBLE_DISPERSION: f32 = 1.0;
 // Célula acima da capacidade expulsa o excesso depressa (em todo o lado).
 const CHEM_SQUEEZE_P: f32 = 0.25;
 // Assentamento por passo (× slider "settle").
@@ -176,6 +178,13 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
             // 4 números: ponto de partida (x, y), evento, direção do salto.
             let rf = rng_f4(slot, params.epoch, S_MOVE + k);
             var p = rf.xy + disp;
+            if (g_src > 0u && any(disp != vec2<f32>(0.0))) {
+                // DISPERSÃO MECÂNICA no entulho: caminhos tortuosos entre os
+                // grãos; cada monómero desvia-se ao acaso ∝ à velocidade.
+                let rj = rng_f4(slot, params.epoch, S_DISPERSE + k);
+                let jitter = (rj.xy * 2.0 - 1.0) * length(disp) * RUBBLE_DISPERSION;
+                p += clamp(jitter, vec2<f32>(-0.9), vec2<f32>(0.9));
+            }
             let r = rf.z;
             if (r < p_diff) {
                 var d = min(u32(rf.w * 4.0), 3u);

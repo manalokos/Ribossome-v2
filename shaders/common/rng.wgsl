@@ -30,6 +30,7 @@ const S_RELAX: u32 = 16u;           // + fase
 const S_SAND: u32 = 32u;            // + fase
 const S_MOVE: u32 = 1u << 16u;      // + índice do monómero
 const S_BLOCK: u32 = 2u << 16u;     // + destino (0..15)
+const S_DISPERSE: u32 = 6u << 16u;  // + índice do monómero (dispersão no entulho)
 
 // 4 números independentes de 32 bits para (chave, passo, fluxo).
 fn rng_u4(key: u32, epoch: u32, stream: u32) -> vec4<u32> {
