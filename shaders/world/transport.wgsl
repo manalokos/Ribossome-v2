@@ -67,7 +67,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     let cell_w = f32(WORLD_UNITS_PER_CELL);
     let g_src = gamma_count(idx);
     var v = vec2<f32>(0.0);
-    if (params.fluid_enabled != 0u && g_src == 0u) {
+    if (params.fluid_enabled != 0u && g_src < GAMMA_SOLID_THRESHOLD) {
         // PONTO MÉDIO (Runge-Kutta 2): usa a velocidade a meio do caminho.
         // Com a velocidade só no início (Euler), cada passo segue a tangente
         // e atira os monómeros para fora dos remoinhos: os núcleos esvaziavam
@@ -76,13 +76,33 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         let v0 = fluid_velocity_at_world(c);
         let world_per_fluid = SIM_SIZE / f32(FLUID_SIZE);
         v = fluid_velocity_at_world(c + v0 * world_per_fluid * max(params.dt, 0.0) * 0.5);
+        // No ENTULHO (poroso) os monómeros andam com a água: o fluido já o
+        // trava por atrito (rubble_drag), por isso esta é a velocidade real
+        // da água nos poros. (Sem corrente no entulho ele era um filtro: a
+        // água saía limpa e abria caudas vazias atrás; com v/φ esvaziava-se.)
+    }
+    // SEM PENETRAÇÃO nas paredes à resolução da química (o fluido corre a
+    // metade dela: junto à rocha a velocidade interpolada ainda aponta para
+    // dentro ou para fora da parede). Contra a rocha: a componente normal é
+    // zero (o monómero desliza ao longo da parede em vez de se amontoar).
+    // A afastar-se da rocha: metade (a velocidade média a meia célula de uma
+    // parede), senão abria-se uma cauda vazia no lado de trás.
+    if (any(v != vec2<f32>(0.0))) {
+        let rock_r = x + 1u < GRID_SIZE && gamma_count(idx + 1u) >= GAMMA_SOLID_THRESHOLD;
+        let rock_l = x > 0u && gamma_count(idx - 1u) >= GAMMA_SOLID_THRESHOLD;
+        let rock_u = y + 1u < GRID_SIZE && gamma_count(idx + GRID_SIZE) >= GAMMA_SOLID_THRESHOLD;
+        let rock_d = y > 0u && gamma_count(idx - GRID_SIZE) >= GAMMA_SOLID_THRESHOLD;
+        if ((v.x > 0.0 && rock_r) || (v.x < 0.0 && rock_l)) { v.x = 0.0; }
+        else if ((v.x > 0.0 && rock_l) || (v.x < 0.0 && rock_r)) { v.x *= 0.5; }
+        if ((v.y > 0.0 && rock_u) || (v.y < 0.0 && rock_d)) { v.y = 0.0; }
+        else if ((v.y > 0.0 && rock_d) || (v.y < 0.0 && rock_u)) { v.y *= 0.5; }
     }
     // Deslocamento por passo, em células do ambiente.
     let disp = v * (f32(GRID_SIZE) / f32(FLUID_SIZE)) * max(params.dt, 0.0);
     let agitation = clamp(length(v) / DIFF_AGITATION_SPEED, 0.0, 1.0);
     var p_diff = clamp(DIFF_HOP_P * mix(DIFF_HOP_FLOOR, 1.0, agitation) * max(params.diffusion, 0.0), 0.0, 0.5);
     if (g_src > 0u) {
-        // Dentro do terreno não há correntes; só difusão lenta.
+        // Difusão no terreno: mais lenta (tortuosidade dos poros).
         p_diff = DIFF_HOP_P * BURIED_DIFF_FACTOR / (1.0 + GAMMA_POROSITY_K * f32(g_src));
     }
     if (src_total > chem_capacity(idx)) {
@@ -198,12 +218,9 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
                     // ficar matéria presa para sempre.
                     blocked = g_src < GAMMA_SOLID_THRESHOLD;
                 } else {
-                    if (g_tgt > 0u) {
-                        // Entulho poroso: entra-se com a permeabilidade.
-                        let gperm = 1.0 / (1.0 + GAMMA_POROSITY_K * f32(g_tgt));
-                        blocked = rng_f4(slot, params.epoch, S_BLOCK + b).x >= gperm;
-                    }
-                    if (!blocked && chem_cell_total(t_idx) > chem_capacity(t_idx)) {
+                    // Entulho: entra-se como na água (a água dos poros leva o
+                    // soluto); só a capacidade, mais pequena, limita.
+                    if (chem_cell_total(t_idx) > chem_capacity(t_idx)) {
                         // Volume excluído: uma célula CHEIA não aceita mais
                         // (o monómero fica, como contra a rocha). Sem isto,
                         // um beco de uma célula no terreno, mais fino que a

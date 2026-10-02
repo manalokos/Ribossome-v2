@@ -84,12 +84,31 @@ fn gamma_solidity_at_fluid_cell(x: u32, y: u32) -> f32 {
 // 1 = água livre, 0 = sólido. Maioria sólida = parede (penínsulas finas
 // também bloqueiam); declives fortes são pouco permeáveis:
 // perm = 1 / (1 + k·|declive|).
+// Só a ROCHA é parede. (O v3 também fazia parede dos declives fortes do
+// terreno; com o entulho poroso isso punha "paredes salpicadas" no meio do
+// entulho irregular e, à resolução da química, acumulava monómeros de um
+// lado e abria caudas vazias do outro. O entulho agora trava por atrito:
+// rubble_drag.)
 fn permeability(x: u32, y: u32) -> f32 {
     let solidity = gamma_solidity_at_fluid_cell(x, y);
     if (solidity >= 0.5) { return 0.0; }
-    let slope = sanitize_vec2(slope_grid[env_cell_for_fluid(x, y)]);
-    let slope_perm = clamp(1.0 / (1.0 + max(params.fluid_obstacle_strength, 0.0) * length(slope)), 0.0, 1.0);
-    return min(slope_perm, clamp(1.0 - solidity * 2.0, 0.0, 1.0));
+    return clamp(1.0 - solidity * 2.0, 0.0, 1.0);
+}
+
+// ENTULHO POROSO (Brinkman): a água atravessa-o com atrito proporcional aos
+// grãos (média das células do ambiente cobertas). Fator por passo.
+const RUBBLE_DRAG: f32 = 40.0;
+fn rubble_drag(x: u32, y: u32, dt: f32) -> f32 {
+    let scale = GRID_SIZE / FLUID_SIZE;
+    var g = 0.0;
+    for (var dy = 0u; dy < scale; dy++) {
+        for (var dx = 0u; dx < scale; dx++) {
+            let c = gamma_count((y * scale + dy) * GRID_SIZE + x * scale + dx);
+            if (c < GAMMA_SOLID_THRESHOLD) { g += f32(c); }
+        }
+    }
+    g /= f32(scale * scale) * f32(GAMMA_SOLID_THRESHOLD);
+    return 1.0 / (1.0 + RUBBLE_DRAG * g * dt);
 }
 
 // DESVIO PELO DECLIVE: mantém |v| e roda a direção para "declive abaixo",
@@ -322,6 +341,7 @@ fn add_forces(@builtin(global_invocation_id) gid: vec3<u32>) {
     let f_user = clamp_vec2_len(mix(f_c, f_avg, FORCE_SMOOTH_MIX), MAX_FORCE);
     var v = sanitize_vec2(sanitize_vec2(velocity_in[idx]) + f_user * dt);
     v = slope_steer_velocity(x, y, v, dt);
+    v *= rubble_drag(x, y, dt);
     v = reflect_if_into_solid(x, y, v);
     velocity_out[idx] = clamp_vec2_len(v, MAX_VEL);
 }
