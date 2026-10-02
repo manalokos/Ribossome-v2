@@ -253,7 +253,13 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
         uf[k] = vec2<f32>(0.0);
         if (params.fluid_enabled != 0u) {
             let w = water_at(rw, soft);
-            uf[k] = vec2<f32>(cr * w.x + sr * w.y, -sr * w.x + cr * w.y); // mundo -> corpo
+            // Dois arrastos: o da água (relativo à água) e o dos GRÃOS do
+            // entulho (relativo a zero: os grãos estão parados). Somados dão
+            // arrasto total `drag` com velocidade de referência água / drag:
+            // um resíduo bem preso fica parado mesmo com a água dos poros a
+            // mexer (antes seguia-a e vibrava com ela).
+            let wb = vec2<f32>(cr * w.x + sr * w.y, -sr * w.x + cr * w.y); // mundo -> corpo
+            uf[k] = wb / drag[k];
         }
     }
     var out = rft_solve(slot, n, &old, &cur, &uf, &drag);
@@ -302,9 +308,11 @@ fn push_fluid(
         let u = (*cur)[k] - (*old)[k];
         let t = rft_tangent(n, k, old, cur);
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
-        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * (*drag)[k]);
+        // Só o arrasto com a ÁGUA a empurra (o dos grãos fica no entulho);
+        // a água real no resíduo é uf × drag (ver joints_step).
+        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN);
         // Velocidade do resíduo RELATIVA à água (quem só é levado não empurra).
-        let v = s.xy + s.z * vec2<f32>(-r.y, r.x) + u - (*uf)[k];
+        let v = s.xy + s.z * vec2<f32>(-r.y, r.x) + u - (*uf)[k] * (*drag)[k];
         let f_body = rr * v;
         let f = vec2<f32>(cr * f_body.x - sr * f_body.y, sr * f_body.x + cr * f_body.y) * scale;
         let rw = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * r.x - sr * r.y, sr * r.x + cr * r.y);

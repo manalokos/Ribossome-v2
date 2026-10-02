@@ -97,7 +97,10 @@ fn permeability(x: u32, y: u32) -> f32 {
 
 // ENTULHO POROSO (Brinkman): a água atravessa-o com atrito proporcional aos
 // grãos (média das células do ambiente cobertas). Fator por passo.
-const RUBBLE_DRAG: f32 = 15.0;
+// (300: a água dos poros fica a ~3–5% da água livre. Mais forte quase não
+// abranda: a projeção da pressão força a água a passar; abrandar a sério
+// pede a permeabilidade dentro da própria pressão, lei de Darcy.)
+const RUBBLE_DRAG: f32 = 300.0;
 fn rubble_drag(x: u32, y: u32, dt: f32) -> f32 {
     let scale = GRID_SIZE / FLUID_SIZE;
     var g = 0.0;
