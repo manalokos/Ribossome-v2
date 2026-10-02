@@ -33,7 +33,7 @@ fn main() {
     let mut reqs = Vec::new();
     for t in 0..ORGAN_TYPES {
         // Promotor UGU (C) + modificador t (parâmetro 0) + intensidade por omissão; relógio no início.
-        let g = format!("AUG UGU UGU GGU {ala} UGU {} UUC {ala} UAA", codon_of(t));
+        let g = format!("AUG UGU UCU GGU {ala} UGU {} UUC {ala} UAA", codon_of(t));
         let x = s * (0.1 + 0.08 * t as f32);
         reqs.push(SpawnRequest::with_genome(x, s * 0.5, &bases(&g)));
     }

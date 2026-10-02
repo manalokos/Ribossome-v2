@@ -64,6 +64,8 @@ fn organ_extent(t: u32) -> f32 {
         case ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: { return 3.4; }
         case ORGAN_MUSCLE: { return 1.6; }
         case ORGAN_STORAGE: { return 1.9; }
+        case ORGAN_PHOTOSYSTEM: { return 1.8; }
+        case ORGAN_PROTEASE: { return 1.7; }
         case NO_ORGAN: { return 1.0; }
         default: { return 1.3; }
     }
@@ -222,6 +224,21 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             if (abs(u) + abs(v) > core * 1.25) { discard; }
             let edge = smoothstep(core * 0.85, core * 1.1, abs(u) + abs(v));
             return vec4<f32>(mix(in.color, vec3<f32>(0.6, 0.9, 1.0), edge), 1.0);
+        }
+        case ORGAN_PHOTOSYSTEM: {
+            // Disco verde com 8 raios curtos (capta luz).
+            let ang = atan2(v, u);
+            let ray = d < 0.95 && d > core && abs(sin(ang * 4.0)) < 0.25;
+            if (d > core && !ray) { discard; }
+            let leaf = vec3<f32>(0.35, 0.95, 0.35);
+            return vec4<f32>(select(mix(leaf * 0.7, leaf, 1.0 - d / core), vec3<f32>(0.85, 1.0, 0.4), ray), 1.0);
+        }
+        case ORGAN_PROTEASE: {
+            // Disco com dentes (6 triângulos à volta).
+            let ang = atan2(v, u);
+            let tooth = core + (0.95 - core) * max(0.0, 1.0 - abs(fract(ang / 1.0471976) - 0.5) * 4.0);
+            if (d > tooth) { discard; }
+            return vec4<f32>(select(vec3<f32>(0.9, 0.2, 0.2), vec3<f32>(1.0, 0.9, 0.9), d > core), 1.0);
         }
         default: {
             // Armazenamento: disco com anéis concêntricos.

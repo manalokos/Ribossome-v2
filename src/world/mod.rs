@@ -244,6 +244,8 @@ pub struct LifeCounters {
     pub births: u32,
     /// Mortes com energia < 1.
     pub starved: u32,
+    /// Mordidas de protease (acumulado).
+    pub bites: u32,
 }
 
 impl LifeCounters {
@@ -256,6 +258,7 @@ impl LifeCounters {
             deaths: w[4],
             births: w[5],
             starved: w[6],
+            bites: w[7],
         }
     }
 
@@ -343,6 +346,7 @@ impl World {
         let organs_buf = storage_buffer(device, "organs", max_agents * 32 * 4);
         let signals = storage_buffer(device, "signals", max_agents * 64 * 8);
         let sensor_mem = storage_buffer(device, "sensor memory", max_agents * 64 * 4);
+        let bitten = storage_buffer(device, "bitten energy", max_agents * 4);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
             size: 16,
@@ -383,7 +387,7 @@ impl World {
             entries: &fluid_entries,
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
-        let life_entries: Vec<_> = (0..19).map(|b| storage_entry(b, b == 4)).collect();
+        let life_entries: Vec<_> = (0..20).map(|b| storage_entry(b, b == 4)).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -525,6 +529,7 @@ impl World {
                 &organs_buf,
                 &signals,
                 &sensor_mem,
+                &bitten,
             ],
         );
 

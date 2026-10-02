@@ -152,7 +152,9 @@ gpu_struct! {
         /// SEDIMENTAÇÃO dos agentes (Stokes): afundam sedimentation·√n
         /// unidades do mundo por passo (n = resíduos; peso ∝ n, arrasto ∝ √n).
         pub sedimentation: f32,
-        pub _pad3: u32,
+        /// Fotoativação DIRETA dos gastos pela luz (multiplica a força UV).
+        /// 0 por omissão: a luz só vira comida pelos FOTOSSISTEMAS dos agentes.
+        pub direct_photoactivation: f32,
         pub _pad4: u32,
     }
 }
@@ -218,7 +220,7 @@ impl Default for SimParams {
             // ~1/20 da natação de um agente médio: afundar é lento, quem nada
             // para cima vence-o.
             sedimentation: 0.02,
-            _pad3: 0,
+            direct_photoactivation: 0.0,
             _pad4: 0,
         }
     }

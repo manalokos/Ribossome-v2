@@ -36,6 +36,9 @@
 @group(3) @binding(17) var<storage, read_write> signals: array<vec2<f32>>;
 // Memória dos sensores (o valor sentido no passo anterior), por resíduo.
 @group(3) @binding(18) var<storage, read_write> sensor_mem: array<f32>;
+// Energia tirada a cada agente por proteases de outros neste passo
+// (milésimos, somas atómicas: ordem indiferente).
+@group(3) @binding(19) var<storage, read_write> bitten: array<atomic<u32>>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;
@@ -45,6 +48,8 @@ const LC_DEATHS: u32 = 4u;
 const LC_BIRTHS: u32 = 5u;
 // Mortes com energia < 1 (fome).
 const LC_STARVED: u32 = 6u;
+// Mordidas de protease (contactos em que um agente tirou energia a outro).
+const LC_BITES: u32 = 7u;
 
 const GENOME_WORDS: u32 = 16u;
 const MAX_GENE_LEN: u32 = 256u;

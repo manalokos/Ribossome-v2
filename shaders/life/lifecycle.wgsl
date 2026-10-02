@@ -26,6 +26,11 @@ const UV_HAZARD_SCALE: f32 = 0.001;
 const MIN_GENE_LEN: u32 = 6u;
 const S_BROWN: u32 = 9u;
 const S_BIOTURB: u32 = 10u;
+const S_PHOTOSYS: u32 = 7u << 16u;   // + índice do resíduo
+// Fotossistema: energia por passo com luz plena e sol 1 (por órgão, × ganho) e
+// probabilidade de reativar um gasto por passo com luz plena.
+const PHOTO_YIELD: f32 = 0.005;
+const PHOTO_REACT_P: f32 = 0.02;
 // Ciclo catalítico: probabilidade por passo de hidrolisar o ligando ligado e
 // de soltar o produto (taxas globais, iguais para todos).
 const MOTOR_P_HYDROLYSIS: f32 = 0.2;
@@ -367,11 +372,18 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         var avail = vec4<u32>(0u);
         for (var ch = 0u; ch < 4u; ch++) { avail[ch] = chem_act_count(cell, ch); }
         let tot = avail.x + avail.y + avail.z + avail.w;
+        // ESPECIFICIDADE: cada aminoácido prefere certos canais (AA_SUBSTRATE,
+        // soma 1). Substrato efetivo = 4·Σ afinidade·disponível (sem
+        // preferência dá o total, como antes).
+        let aa_k = body_get(slot, k);
+        let aff = AA_SUBSTRATE[aa_k];
+        let w_avail = aff * vec4<f32>(avail);
+        let eff = 4.0 * (w_avail.x + w_avail.y + w_avail.z + w_avail.w);
         // Uma enzima real não sabe se a célula está cheia: por omissão
         // catalisa sempre que há substrato e a energia a mais perde-se como
         // calor. (A regulação pela fome do v3 fica como opção.)
         let hunger = select(1.0, clamp(1.0 - a.energy / cap, 0.0, 1.0), params.hunger_regulation != 0u);
-        let pe = clamp(params.uptake_rate * AA_CATALYTIC[body_get(slot, k)] * organ_catalysis_mult(slot, k) * f32(tot) * hunger, 0.0, 1.0);
+        let pe = clamp(params.uptake_rate * AA_CATALYTIC[aa_k] * organ_catalysis_mult(slot, k) * eff * hunger, 0.0, 1.0);
         let si = slot * MAX_BODY + k;
         let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
@@ -385,11 +397,12 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         } else if (st == 1u) {
             if (r.x < MOTOR_P_HYDROLYSIS) {
-                var u = u32(r.y * f32(tot));
+                // Canal escolhido pela afinidade × disponível.
+                var u = r.y * (w_avail.x + w_avail.y + w_avail.z + w_avail.w);
                 var b = 3u;
                 for (var ch = 0u; ch < 4u; ch++) {
-                    if (u < avail[ch]) { b = ch; break; }
-                    u -= avail[ch];
+                    if (u < w_avail[ch]) { b = ch; break; }
+                    u -= w_avail[ch];
                 }
                 if (tot > 0u && chem_spend_one(cell * 4u + b)) {
                     a.energy += params.food_power;
@@ -400,6 +413,28 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         } else if (r.x < MOTOR_P_RELEASE) {
             joint_state[si] = 0u;
+        }
+
+        // FOTOSSISTEMA: capta a luz onde está. Modo 0: energia para o agente
+        // (produtor primário). Modo 1: usa-a para REATIVAR os gastos da
+        // célula (recicla comida para si e para os outros). Mais luz também
+        // é mais dano UV: há um compromisso.
+        let ok = organ_get(slot, k);
+        if (organ_type(ok) == ORGAN_PHOTOSYSTEM) {
+            // Intensidade do sol (força UV) × luz que chega aqui.
+            let light = uv_light_at_cell(cell % GRID_SIZE, cell / GRID_SIZE) * max(params.uv_strength, 0.0);
+            let og = organ_gain(ok);
+            if ((organ_param(ok) & 1u) == 0u) {
+                a.energy += PHOTO_YIELD * light * og;
+            } else {
+                let q = rng_f4(a.id, params.epoch, S_PHOTOSYS + k);
+                if (q.x < clamp(PHOTO_REACT_P * light * og, 0.0, 1.0)) {
+                    let ch0 = min(u32(q.y * 4.0), 3u);
+                    for (var t = 0u; t < 4u; t++) {
+                        if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
+                    }
+                }
+            }
         }
     }
     a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * (f32(a.body_len) + organ_upkeep(slot, a.body_len));

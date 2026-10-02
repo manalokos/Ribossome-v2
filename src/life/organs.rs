@@ -3,7 +3,7 @@
 //! Codificação: um PROMOTOR (aminoácidos C, H ou W) seguido de um codão
 //! MODIFICADOR que não seja stop forma um órgão, que ocupa UMA posição do
 //! corpo. O modificador (índice do codão 0..63, ordem A U G C) define o tipo
-//! (modificador % 10) e o parâmetro (modificador / 10, 0..6). Um SEGUNDO
+//! (modificador % 12) e o parâmetro (modificador / 12, 0..5). Um SEGUNDO
 //! modificador (se não for stop) dá a INTENSIDADE: 64 níveis logarítmicos,
 //! ganho = 2^((índice − 32)/8), de ×0,06 a ×15 (9 bases no total); sem ele o
 //! ganho é 1 (6 bases). A intensidade multiplica a emissão dos sensores,
@@ -24,13 +24,15 @@
 //! - relógio: bit 0 canal, bits 1–2 período (20, 40, 80, 160 passos);
 //! - relé: bits 0–1 modo (α->β, β->α, inverte α, inverte β), bit 2 ganho ×2;
 //! - boca: catálise ×(2 + p); músculo: resposta ×(2 + p/2);
-//!   armazenamento: +4·(p + 1) de capacidade.
+//!   armazenamento: +4·(p + 1) de capacidade;
+//! - fotossistema: bit 0 = energia da luz (0) ou reativar gastos (1);
+//! - protease: mordida ×(1 + p/2).
 //!
 //! Esta é a única fonte de verdade: o shader recebe as constantes geradas.
 
 use super::amino::{AA_LETTERS, STOP, codon};
 
-pub const ORGAN_TYPES: usize = 10;
+pub const ORGAN_TYPES: usize = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -44,6 +46,8 @@ pub enum Organ {
     Storage = 7,
     FoodSensorDirectional = 8,
     LightSensorDirectional = 9,
+    Photosystem = 10,
+    Protease = 11,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -59,10 +63,12 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "armazenamento",
     "sensor de comida direcional",
     "sensor de luz direcional",
+    "fotossistema",
+    "protease",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -95,6 +101,14 @@ pub fn describe(t: u8, p: u8, gain_idx: u8) -> String {
             format!("relé [losango]: {modo}, força ×{:.2}", k * g)
         }
         7 => format!("armazenamento [disco com anéis]: +{} de capacidade de energia", 4 * (p as u32 + 1)),
+        10 => format!(
+            "fotossistema [disco verde com raios]: {}, força ×{g:.2}",
+            if p & 1 == 0 { "dá energia com a luz (produtor)" } else { "usa a luz para reativar os gastos à volta (recicla comida)" }
+        ),
+        11 => format!(
+            "protease [disco com dentes]: ao tocar noutro agente tira-lhe energia (fica com metade), força ×{:.2}; corpos ricos em prolina resistem",
+            (1.0 + 0.5 * p as f32) * g
+        ),
         8 => sensor(
             "sensor de comida DIRECIONAL, compara o lado esquerdo com o direito",
             "2 antenas verdes, uma de cada lado",
@@ -107,7 +121,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8) -> String {
 }
 
 /// Custo de manutenção por passo de um órgão, em múltiplos do custo de um resíduo.
-pub const ORGAN_UPKEEP: [f32; ORGAN_TYPES] = [3.0, 4.0, 2.0, 2.0, 1.0, 2.0, 1.0, 1.0, 3.0, 3.0];
+pub const ORGAN_UPKEEP: [f32; ORGAN_TYPES] = [3.0, 4.0, 2.0, 2.0, 1.0, 2.0, 1.0, 1.0, 3.0, 3.0, 2.0, 3.0];
 
 /// Período base do relógio (passos); o parâmetro multiplica-o por 2^(bits 1–2).
 pub const CLOCK_PERIOD_BASE: f32 = 20.0;
@@ -196,6 +210,8 @@ pub fn wgsl() -> String {
         "STORAGE",
         "FOOD_SENSOR_DIR",
         "LIGHT_SENSOR_DIR",
+        "PHOTOSYSTEM",
+        "PROTEASE",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");
@@ -224,13 +240,13 @@ mod tests {
         let body = translate_organs(&g, true);
         assert_eq!(body.len(), 3);
         assert_eq!(body[0].organ, None);
-        // GCA: 2*16 + 3*4 + 0 = 44 -> tipo 4, param 4; UUU: 1*16 + 1*4 + 1 = 21 -> intensidade 21.
-        assert_eq!(body[1], Residue { aa: aa_index('C'), organ: Some((4, 4, 21)) });
+        // GCA: 2*16 + 3*4 + 0 = 44 -> tipo 44 % 12 = 8, param 3; UUU: 1*16 + 1*4 + 1 = 21 -> intensidade 21.
+        assert_eq!(body[1], Residue { aa: aa_index('C'), organ: Some((8, 3, 21)) });
         assert_eq!(body[2].organ, None);
         // Sem segundo modificador (stop a seguir): intensidade por omissão, 6 bases.
         let g2 = bases("AUGUGUGCAUAA");
         let b2 = translate_organs(&g2, true);
-        assert_eq!(b2[1].organ, Some((4, 4, GAIN_DEFAULT)));
+        assert_eq!(b2[1].organ, Some((8, 3, GAIN_DEFAULT)));
         assert!((organ_gain(GAIN_DEFAULT) - 1.0).abs() < 1e-6);
     }
 

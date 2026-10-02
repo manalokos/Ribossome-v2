@@ -34,6 +34,38 @@ fn contact_insert(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (slot >= params.max_agents || agents[slot].alive == 0u) { return; }
     let c = contact_cell_xy(vec2<f32>(agents[slot].pos_x, agents[slot].pos_y));
     contact_next[slot] = atomicExchange(&contact_head[u32(c.y) * CONTACT_N + u32(c.x)], slot);
+    // Defesa contra proteases (fração de prolina), calculada uma vez por
+    // passo: os atacantes leem-na em contact_disp.w.
+    contact_disp[slot] = vec4<f32>(0.0, 0.0, 0.0, proline_fraction(slot, agents[slot].body_len));
+}
+
+// PROTEASE (predação química): ao tocar noutro agente, um agente com
+// proteases parte-lhe proteína e tira-lhe energia (fica com PRED_EFFICIENCY
+// dela). A matéria fica com a vítima e volta ao meio quando ela morre.
+// Defesa química: corpos ricos em PROLINA resistem (como algumas proteínas
+// reais). Nenhuma regra olha para o genoma.
+const PRED_BITE: f32 = 0.01;
+const PRED_EFFICIENCY: f32 = 0.5;
+const PRED_PROLINE_DEFENSE: f32 = 0.9;
+const AA_PROLINE: u32 = 12u;
+const BITE_SCALE: f32 = 1000.0;
+
+fn protease_power(slot: u32, n: u32) -> f32 {
+    var pw = 0.0;
+    for (var k = 0u; k < n; k++) {
+        let o = organ_get(slot, k);
+        if (organ_type(o) == ORGAN_PROTEASE) { pw += (1.0 + 0.5 * f32(organ_param(o))) * organ_gain(o); }
+    }
+    return pw;
+}
+
+fn proline_fraction(slot: u32, n: u32) -> f32 {
+    if (n == 0u) { return 0.0; }
+    var c = 0u;
+    for (var k = 0u; k < n; k++) {
+        if (body_get(slot, k) == AA_PROLINE) { c += 1u; }
+    }
+    return f32(c) / f32(n);
 }
 
 @compute @workgroup_size(64)
@@ -45,6 +77,8 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p = vec2<f32>(a.pos_x, a.pos_y);
     let c = contact_cell_xy(p);
     var push = vec2<f32>(0.0);
+    let power = protease_power(slot, a.body_len);
+    var gained = 0.0;
     for (var dy = -1; dy <= 1; dy++) {
         for (var dx = -1; dx <= 1; dx++) {
             let x = c.x + dx;
@@ -65,6 +99,15 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         var dir = select(vec2<f32>(-1.0, 0.0), vec2<f32>(1.0, 0.0), slot < e);
                         if (dist > 1e-4) { dir = d / dist; }
                         push += dir * overlap;
+                        if (power > 0.0 && b.energy > 0.0) {
+                            let resist = 1.0 - PRED_PROLINE_DEFENSE * contact_disp[e].w;
+                            let bite = min(PRED_BITE * power * resist, b.energy);
+                            if (bite > 0.0) {
+                                atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
+                                gained += bite * PRED_EFFICIENCY;
+                                atomicAdd(&life_counters[LC_BITES], 1u);
+                            }
+                        }
                     }
                 }
                 e = contact_next[e];
@@ -74,7 +117,8 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     var dp = push * CONTACT_RELAX;
     let dl = length(dp);
     if (dl > CONTACT_MAX_STEP) { dp *= CONTACT_MAX_STEP / dl; }
-    contact_disp[slot] = vec4<f32>(dp, 0.0, 0.0);
+    // .w (defesa) fica igual: outros atacantes ainda a podem estar a ler.
+    contact_disp[slot] = vec4<f32>(dp, gained, contact_disp[slot].w);
 }
 
 // Aplica os deslocamentos (não entra em rocha sólida).
@@ -89,5 +133,8 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
         a.pos_x = np.x;
         a.pos_y = np.y;
     }
+    // Predação: o que este agente mordeu e o que lhe morderam.
+    let lost = f32(atomicExchange(&bitten[slot], 0u)) / BITE_SCALE;
+    a.energy = min(a.energy + contact_disp[slot].z, energy_capacity(slot, a)) - lost;
     agents[slot] = a;
 }

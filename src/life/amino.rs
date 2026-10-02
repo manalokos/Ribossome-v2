@@ -274,6 +274,37 @@ pub const MAX_BEND: [f32; 20] = [
     0.50, // Y
 ];
 
+/// AFINIDADE DE SUBSTRATO de cada aminoácido pelos 4 canais (A, U, G, C),
+/// ordem de `AMINO`; soma 1. Regra QUALITATIVA (não são valores medidos),
+/// inspirada nos contactos proteína–RNA recorrentes: aromáticos (F W Y, e H)
+/// empilham com as purinas (A, G); Arg e Lys preferem G (o contacto mais
+/// frequente nas interfaces proteína–RNA); Asp e Glu fazem pontes de
+/// hidrogénio com C e A; os polares (S T N Q) e a Cys com as pirimidinas
+/// (U, C); alifáticos, Gly e Pro não distinguem. Cria nichos: quem come A
+/// não compete com quem come G.
+pub const SUBSTRATE: [[f32; 4]; 20] = [
+    [0.25, 0.25, 0.25, 0.25], // A
+    [0.20, 0.40, 0.20, 0.20], // C
+    [0.30, 0.15, 0.15, 0.40], // D
+    [0.30, 0.15, 0.15, 0.40], // E
+    [0.40, 0.10, 0.40, 0.10], // F
+    [0.25, 0.25, 0.25, 0.25], // G
+    [0.35, 0.15, 0.35, 0.15], // H
+    [0.25, 0.25, 0.25, 0.25], // I
+    [0.20, 0.20, 0.40, 0.20], // K
+    [0.25, 0.25, 0.25, 0.25], // L
+    [0.25, 0.25, 0.25, 0.25], // M
+    [0.15, 0.35, 0.15, 0.35], // N
+    [0.25, 0.25, 0.25, 0.25], // P
+    [0.15, 0.35, 0.15, 0.35], // Q
+    [0.20, 0.20, 0.40, 0.20], // R
+    [0.15, 0.35, 0.15, 0.35], // S
+    [0.15, 0.35, 0.15, 0.35], // T
+    [0.25, 0.25, 0.25, 0.25], // V
+    [0.40, 0.10, 0.40, 0.10], // W
+    [0.40, 0.10, 0.40, 0.10], // Y
+];
+
 /// CONDUTIVIDADE dos sinais por aminoácido (v3, `config/amino_acids.json`,
 /// ordem de `AMINO`): (α vindo do lado N, α vindo do lado C, β vindo do lado
 /// N, β vindo do lado C). Cada resíduo recebe o sinal dos dois vizinhos
@@ -355,6 +386,9 @@ pub fn wgsl() -> String {
     let cd: Vec<String> =
         CONDUCTANCE.iter().map(|c| format!("vec4<f32>({:.3}, {:.3}, {:.3}, {:.3})", c.0, c.1, c.2, c.3)).collect();
     s += &format!("const AA_CONDUCTANCE = array<vec4<f32>, 20>({});\n", cd.join(", "));
+    let su: Vec<String> =
+        SUBSTRATE.iter().map(|c| format!("vec4<f32>({:.3}, {:.3}, {:.3}, {:.3})", c[0], c[1], c[2], c[3])).collect();
+    s += &format!("const AA_SUBSTRATE = array<vec4<f32>, 20>({});\n", su.join(", "));
     let mb: Vec<String> = MAX_BEND.iter().map(|v| format!("{v:.3}")).collect();
     s += &format!("const AA_MAX_BEND = array<f32, 20>({});\n", mb.join(", "));
     let ra: Vec<String> = REST_ANGLE.iter().map(|v| format!("{v:.5}")).collect();
@@ -367,6 +401,16 @@ pub fn wgsl() -> String {
     let mv: Vec<String> = mj.iter().flatten().map(|v| format!("{v:.2}")).collect();
     s += &format!("const AA_MJ = array<f32, 400>({});\n", mv.join(", "));
     s
+}
+
+#[cfg(test)]
+mod substrate_tests {
+    #[test]
+    fn substrate_rows_sum_to_one() {
+        for (i, r) in super::SUBSTRATE.iter().enumerate() {
+            assert!((r.iter().sum::<f32>() - 1.0).abs() < 1e-5, "linha {i}");
+        }
+    }
 }
 
 #[cfg(test)]

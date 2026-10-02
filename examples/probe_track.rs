@@ -19,7 +19,7 @@ fn main() {
     world.params.death_probability = 0.0;
     world.params.swim_gain = std::env::var("SWIM").ok().and_then(|v| v.parse().ok()).unwrap_or(10.0);
     // relógio sem segundo modificador (UAA... não: espaçador AUG não é stop) -> usa GCU GCU como intensidade.
-    let genome = std::env::var("GENOME").unwrap_or_else(|_| format!("AUG UGU UGU {} UAA", "GGU ".repeat(15)));
+    let genome = std::env::var("GENOME").unwrap_or_else(|_| format!("AUG UGU UCU {} UAA", "GGU ".repeat(15)));
     let s = cfg.sim_size();
     world.request_seeds(&[SpawnRequest::with_genome(s * 0.5, s * 0.5, &bases(&genome))]);
     let mut last: Option<(f32, f32)> = None;
