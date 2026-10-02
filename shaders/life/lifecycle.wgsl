@@ -632,6 +632,7 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Energia (v3): metade para o filho, metade fica com o pai.
     let half = a.energy * 0.5;
     new_agent(child, cp, mr.w * 6.2831853, half, n, a.generation + 1u, a.id);
+    birth_bond(slot, a, child);
     a.energy -= half;
     a.pair_count = 0u;
     agents[slot] = a;

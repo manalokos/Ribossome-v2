@@ -38,8 +38,9 @@ const S_BOND: u32 = 8u << 16u;      // + 16 bits do id maior do par
 const S_BOND_PROP: u32 = 11u;
 
 // Ligação: x = slot do outro (BOND_NONE = livre), y = id do outro,
-// z = o meu resíduo | (o resíduo do outro << 16), w = (na proposta) lugares
-// livres depois da manutenção.
+// z = o meu resíduo | (o resíduo do outro << 16), w = tipo: 0 = ponte
+// salina, 1 + n = ligação de nascimento com n G/C nas pontas do genoma (na
+// proposta, w = lugares livres depois da manutenção).
 fn bond_at(slot: u32, i: u32) -> vec4<u32> {
     return bonds[slot * BOND_STRIDE + i];
 }
@@ -96,7 +97,11 @@ fn bond_maintain(@builtin(global_invocation_id) gid: vec3<u32>) {
             let lo = min(a.id, o.id);
             let hi = max(a.id, o.id);
             let q = rng_f4(lo, params.epoch, S_BOND + (hi & 0xFFFFu));
-            if (dist > BOND_BREAK_LEN || q.x < params.bond_break) {
+            // Ponte salina: quebra uniforme. Nascimento: o duplex das pontas
+            // segura mais com mais G/C (3 pontes de hidrogénio contra 2).
+            var p_break = params.bond_break;
+            if (b.w >= 1u) { p_break = params.birth_bond_break * exp2(-0.5 * f32(b.w - 1u)); }
+            if (dist > BOND_BREAK_LEN || q.x < p_break) {
                 keep = false;
             } else {
                 // Mola: cada lado corrige metade do desvio.
@@ -170,6 +175,32 @@ fn bond_propose(@builtin(global_invocation_id) gid: vec3<u32>) {
                 }
                 e = contact_next[e];
             }
+        }
+    }
+}
+
+// Bases das pontas do genoma (cada ponta) que seguram a cópia ao pai.
+const BIRTH_BOND_ENDS: u32 = 6u;
+
+// LIGAÇÃO DE NASCIMENTO (chamada em agents_birth): a cópia foi feita por
+// emparelhamento com o genoma do pai e fica presa pelas pontas hibridadas
+// até se separar. A última posição do corpo do pai liga à primeira do filho
+// (cadeias cabeça-cauda: filamentos). Sem lugar livre no pai, separam-se.
+fn birth_bond(parent: u32, pa: Agent, child: u32) {
+    if (params.birth_bond_break >= 1.0 || pa.body_len == 0u) { return; }
+    let ca = agents[child];
+    if (ca.body_len == 0u) { return; }
+    let L = pa.gene_len;
+    var gc = 0u;
+    for (var i = 0u; i < min(BIRTH_BOND_ENDS, L); i++) {
+        gc += select(0u, 1u, genome_get(parent, i) >= 2u) + select(0u, 1u, genome_get(parent, L - 1u - i) >= 2u);
+    }
+    for (var i = 0u; i < MAX_BONDS; i++) {
+        if (bond_at(parent, i).x == BOND_NONE) {
+            let kp = pa.body_len - 1u;
+            bonds[parent * BOND_STRIDE + i] = vec4<u32>(child, ca.id, kp, 1u + gc);
+            bonds[child * BOND_STRIDE] = vec4<u32>(parent, pa.id, kp << 16u, 1u + gc);
+            return;
         }
     }
 }

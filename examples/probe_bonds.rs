@@ -11,11 +11,17 @@ fn main() {
     let mut world = World::new(&gpu, cfg, 3);
     world.configure_lab();
     world.seed_lab(&gpu, 3, 6.0);
-    world.params.pairing_rate = 0.0;
+    world.params.pairing_rate = std::env::var("PAIR").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
     world.params.death_probability = 0.0;
     world.params.maintenance_cost = 0.0;
-    let text = format!("AUG {} UAA", "AAA GAA ".repeat(8));
-    let g: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
+    world.params.spawn_energy = 200.0;
+    world.params.pairing_cost = 0.0;
+    // Genoma = X + complementar invertido de X: o filho (lido da cadeia
+    // complementar) tem o mesmo corpo que o pai.
+    let text = format!("AUG {} UAA", "AAA GAA ".repeat(4));
+    let x: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
+    let mut g = x.clone();
+    g.extend(x.iter().rev().map(|b| b ^ 1));
     let s = cfg.sim_size();
     let mut rng = ribossome::life::SplitMix(5);
     // Em montinhos para se tocarem.
@@ -41,7 +47,7 @@ fn main() {
             let o = (slot * BOND_STRIDE as usize + i) * 4;
             [raw[o], raw[o + 1], raw[o + 2], raw[o + 3]]
         };
-        let (mut total, mut asym, mut with) = (0, 0, 0);
+        let (mut total, mut asym, mut with, mut birth) = (0, 0, 0, 0);
         for (slot, a) in agents.iter().enumerate().filter(|(_, a)| a.alive != 0) {
             let mut has = false;
             for i in 0..4 {
@@ -51,6 +57,7 @@ fn main() {
                 }
                 has = true;
                 total += 1;
+                birth += (b[3] >= 1) as u32;
                 let swapped = (b[2] >> 16) | ((b[2] & 0xFFFF) << 16);
                 let back = (0..4).any(|j| {
                     let c = bond(b[0] as usize, j);
@@ -63,6 +70,9 @@ fn main() {
             with += has as u32;
         }
         let alive = agents.iter().filter(|a| a.alive != 0).count();
-        println!("{} passos: {alive} agentes, {with} com ligações, {total} pontas de ligação, {asym} sem par", (round + 1) * 500);
+        println!(
+            "{} passos: {alive} agentes, {with} com ligações, {total} pontas de ligação ({birth} de nascimento), {asym} sem par",
+            (round + 1) * 500
+        );
     }
 }

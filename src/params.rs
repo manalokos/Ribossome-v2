@@ -219,7 +219,10 @@ gpu_struct! {
         pub bond_energy_share: f32,
         /// Condutância dos sinais α/β pela ligação.
         pub bond_signal: f32,
-        pub _pad_b0: u32,
+        /// LIGAÇÃO DE NASCIMENTO (separação incompleta da cópia): probabilidade
+        /// base por passo de a cópia se soltar do pai; cada G/C nas pontas
+        /// do genoma (12 bases) divide-a por √2. ≥ 1 = soltam-se sempre.
+        pub birth_bond_break: f32,
         pub _pad_b1: u32,
         pub _pad_b2: u32,
     }
@@ -299,7 +302,7 @@ impl Default for SimParams {
             bond_break: 0.0002,
             bond_energy_share: 0.01,
             bond_signal: 0.5,
-            _pad_b0: 0,
+            birth_bond_break: 0.002,
             _pad_b1: 0,
             _pad_b2: 0,
         }

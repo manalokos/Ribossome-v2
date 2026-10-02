@@ -264,7 +264,7 @@ fn residue_world_v(slot: u32, a: Agent, k: u32) -> vec2<f32> {
     return vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * lp.x - sr * lp.y, sr * lp.x + cr * lp.y);
 }
 
-// LIGAÇÃO i do agente: tubo fino dourado entre os dois resíduos. Só a
+// LIGAÇÃO i do agente: tubo fino entre os dois resíduos. Só a
 // desenha o lado de slot menor (o outro tem a mesma ligação ao contrário).
 fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
     var o: AgentVsOut;
@@ -295,7 +295,8 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
     o.tangent = seg;
     o.core_phase = vec2<f32>(r_tube, 0.0);
     o.organ = NO_ORGAN;
-    o.color = vec3<f32>(1.0, 0.82, 0.35);
+    // Dourado = ponte salina; azul-claro = ligação de nascimento (cópia presa).
+    o.color = select(vec3<f32>(1.0, 0.82, 0.35), vec3<f32>(0.45, 0.85, 1.0), b.w >= 1u);
     return o;
 }
 

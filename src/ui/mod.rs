@@ -446,6 +446,19 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.bond_energy_share, 0.0..=0.2).text("energia partilhada"))
         .on_hover_text("fração da diferença de energia que passa por cada ligação, por passo");
     ui.add(egui::Slider::new(&mut p.bond_signal, 0.0..=1.0).text("sinais pela ligação"));
+    ui.add(
+        egui::Slider::new(&mut p.birth_bond_break, 1e-5..=1.0)
+            .logarithmic(true)
+            .text("nascimento: separação da cópia (por passo)"),
+    )
+    .on_hover_text("a cópia fica presa ao pai pelas pontas hibridadas; cada G/C nas pontas (12 bases) divide isto por √2; 1 = separam-se logo");
+    if p.birth_bond_break < 1.0 {
+        ui.label(format!(
+            "  vida média: {:.0} passos sem G/C nas pontas, {:.0} com 12",
+            1.0 / p.birth_bond_break,
+            64.0 / p.birth_bond_break
+        ));
+    }
 }
 
 fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
