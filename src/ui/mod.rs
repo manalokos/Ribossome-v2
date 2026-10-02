@@ -310,6 +310,7 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
                 .text("bioturbação (empurrar entulho)"),
         );
         ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("custo por grão empurrado"));
+        ui.add(egui::Slider::new(&mut world.params.sedimentation, 0.0..=0.5).text("sedimentação (afundar ∝ √n)"));
         let mut rft = world.params.rft_enabled != 0;
         ui.checkbox(&mut rft, "natação (RFT)");
         world.params.rft_enabled = rft as u32;

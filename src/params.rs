@@ -149,7 +149,9 @@ gpu_struct! {
         /// absorvem UV). Profundidade ótica do topo ao fundo por monómero
         /// médio por célula (independente da resolução).
         pub monomer_uv_absorb: f32,
-        pub _pad2: u32,
+        /// SEDIMENTAÇÃO dos agentes (Stokes): afundam sedimentation·√n
+        /// unidades do mundo por passo (n = resíduos; peso ∝ n, arrasto ∝ √n).
+        pub sedimentation: f32,
         pub _pad3: u32,
         pub _pad4: u32,
     }
@@ -213,7 +215,9 @@ impl Default for SimParams {
             // 1,1: calibrado para a luz a meio do mundo ficar como antes só
             // com a água (uv_depth 11 do v3): ~0,4% da luz do topo.
             monomer_uv_absorb: 1.1,
-            _pad2: 0,
+            // ~1/20 da natação de um agente médio: afundar é lento, quem nada
+            // para cima vence-o.
+            sedimentation: 0.02,
             _pad3: 0,
             _pad4: 0,
         }

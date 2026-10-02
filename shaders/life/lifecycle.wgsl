@@ -324,7 +324,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Os resíduos dentro de terreno (entulho) estão ancorados: a corrente só
     // puxa a fração do corpo que está em água livre.
     var p = vec2<f32>(a.pos_x, a.pos_y);
-    if (params.fluid_enabled != 0u) {
+    var free_frac = 1.0;
+    if (params.fluid_enabled != 0u || params.sedimentation > 0.0) {
         var in_water = 0u;
         let nres = max(a.body_len, 1u);
         for (var k = 0u; k < nres; k++) {
@@ -332,7 +333,15 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (a.body_len > 0u) { rp = residue_world(slot, a, k); }
             if (gamma_count(world_to_cell(rp)) == 0u) { in_water += 1u; }
         }
-        let free_frac = f32(in_water) / f32(nres);
+        free_frac = f32(in_water) / f32(nres);
+    }
+    // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n, só a parte em água livre. ----
+    if (params.sedimentation > 0.0) {
+        let fall = params.sedimentation * sqrt(f32(max(a.body_len, 1u))) * free_frac;
+        let ns = vec2<f32>(p.x, max(p.y - fall, 0.0));
+        if (gamma_count(world_to_cell(ns)) < GAMMA_SOLID_THRESHOLD) { p = ns; }
+    }
+    if (params.fluid_enabled != 0u) {
         let v = fluid_velocity_at_world(p) * (SIM_SIZE / f32(FLUID_SIZE)) * free_frac;
         let np = clamp(p + v * params.dt, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(np)) < GAMMA_SOLID_THRESHOLD) { p = np; }

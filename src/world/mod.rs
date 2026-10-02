@@ -729,6 +729,8 @@ impl World {
         self.params.uv_strength = 0.0;
         self.params.uv_damage = 1.0;
         self.params.reactivation_rate = 0.002;
+        // Piscina de laboratório: sem gravidade (testes de natação limpos).
+        self.params.sedimentation = 0.0;
         // Comida pouco densa (~1,5 por canal): a catálise é mais rápida para a
         // energia chegar; a matéria limita a população (~20 mil agentes médios).
         self.params.uptake_rate = 0.006;
