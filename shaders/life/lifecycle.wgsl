@@ -300,7 +300,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         let sv_phys = rotate(swim.xy, a.rot + 0.5 * swim.z);
         let avg = mix(aux.zw, sv_phys, 1.0 / SWIM_AVG_STEPS);
         aux = vec4<f32>(aux.xy, avg);
-        let sv = sv_phys + (max(params.swim_gain, 0.0) - 1.0) * avg;
+        // Avanço médio × ganho + vaivém (o resto) × swim_wobble.
+        let sv = max(params.swim_gain, 0.0) * avg + clamp(params.swim_wobble, 0.0, 1.0) * (sv_phys - avg);
         swim_v = sv;
         let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(np0)) < GAMMA_SOLID_THRESHOLD) {
@@ -367,7 +368,17 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (gamma_count(world_to_cell(ns)) < GAMMA_SOLID_THRESHOLD) { p = ns; }
     }
     if (params.fluid_enabled != 0u) {
-        let v = fluid_velocity_at_world(p) * (SIM_SIZE / f32(FLUID_SIZE)) * free_frac;
+        // Velocidade da água MÉDIA num disco à volta do agente (centro + 8
+        // pontos a ~1,5× o seu raio): o dipolo que o próprio agente faz na
+        // água (agent_fluid_push) anula-se na média e não o leva a ele;
+        // correntes maiores (e as dos vizinhos) levam-no na mesma.
+        let rr = max(a.radius * 1.5, 2.0 * SIM_SIZE / f32(FLUID_SIZE));
+        var vsum = fluid_velocity_at_world(p);
+        for (var q = 0u; q < 8u; q++) {
+            let ang = f32(q) * 0.7853982;
+            vsum += fluid_velocity_at_world(p + vec2<f32>(cos(ang), sin(ang)) * rr);
+        }
+        let v = vsum / 9.0 * (SIM_SIZE / f32(FLUID_SIZE)) * free_frac;
         let np = clamp(p + v * params.dt, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(np)) < GAMMA_SOLID_THRESHOLD) { p = np; }
         a.vel_x = v.x;

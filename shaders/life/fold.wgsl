@@ -181,7 +181,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> vec4<f32> {
 // passos do fluido. (A deriva do próprio agente usa a água à sua volta, onde
 // o seu dipolo é ~simétrico; não se desconta à parte.)
 fn push_fluid(slot: u32, a: Agent, n: u32, old: ptr<function, array<vec2<f32>, 64>>, cur: ptr<function, array<vec2<f32>, 64>>, s: vec3<f32>) {
-    if (params.fluid_enabled == 0u || params.agent_fluid_push <= 0.0) { return; }
+    if (params.fluid_enabled == 0u || params.agent_fluid_push == 0.0) { return; }
     let rot_mid = a.rot + 0.5 * s.z;
     let cr = cos(rot_mid);
     let sr = sin(rot_mid);

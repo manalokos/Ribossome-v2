@@ -26,6 +26,7 @@ fn main() {
     world.params.sedimentation = 0.0;
     world.settings.fluid_enabled = env("FLUID", 1) != 0;
     world.params.rft_enabled = env("RFT", 1);
+    world.params.swim_wobble = env("WOBBLE", 1.0f32);
     let g = bases(&format!("AUG UGU UCU {} UAA", "GGU ".repeat(15)));
     let s = cfg.sim_size();
     let mut rng = ribossome::life::SplitMix(5);
@@ -61,6 +62,6 @@ fn main() {
             n += 1.0;
         }
     }
-    print!("fluido {} natação {} ", world.settings.fluid_enabled as u32, world.params.rft_enabled);
+    print!("fluido {} natação {} vaivém {} ", world.settings.fluid_enabled as u32, world.params.rft_enabled, world.params.swim_wobble);
     println!("push {}: caminho médio {:.0}, deslocamento líquido {:.0} ({} agentes)", world.params.agent_fluid_push, p / n, net / n, n);
 }

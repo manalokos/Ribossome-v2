@@ -164,7 +164,9 @@ gpu_struct! {
         /// Os agentes EMPURRAM a água: cada resíduo devolve ao fluido o seu
         /// arrasto (soma zero para um nadador: um dipolo). 0 = desligado.
         pub agent_fluid_push: f32,
-        pub _pad6: u32,
+        /// Fração do VAIVÉM de cada batida que se aplica (1 = físico, 0 = só
+        /// o avanço médio, sem balanço).
+        pub swim_wobble: f32,
         pub _pad7: u32,
     }
 }
@@ -235,8 +237,8 @@ impl Default for SimParams {
             // 0 (pedido do Filipe; o valor antigo fixo era 0,0002).
             activation_decay: 0.0,
             monomer_pressure: 20.0,
-            agent_fluid_push: 0.5,
-            _pad6: 0,
+            agent_fluid_push: 0.25,
+            swim_wobble: 1.0,
             _pad7: 0,
         }
     }

@@ -330,7 +330,9 @@ fn life_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         );
         ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("custo por grão empurrado"));
         ui.add(egui::Slider::new(&mut world.params.sedimentation, 0.0..=0.5).text("sedimentação (afundar ∝ √n)"));
-        ui.add(egui::Slider::new(&mut world.params.agent_fluid_push, 0.0..=2.0).text("agentes empurram a água"))
+        ui.add(egui::Slider::new(&mut world.params.swim_wobble, 0.0..=1.0).text("vaivém da natação"))
+            .on_hover_text("1 = balanço físico de cada batida; 0 = só o avanço médio");
+        ui.add(egui::Slider::new(&mut world.params.agent_fluid_push, -1.0..=1.0).text("agentes empurram a água"))
             .on_hover_text("cada resíduo devolve ao fluido o seu arrasto (só no mundo com fluido)");
         let mut rft = world.params.rft_enabled != 0;
         ui.checkbox(&mut rft, "natação (RFT)");
