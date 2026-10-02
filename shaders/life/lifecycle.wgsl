@@ -29,8 +29,10 @@ const S_BIOTURB: u32 = 10u;
 const S_PHOTOSYS: u32 = 7u << 16u;   // + índice do resíduo
 // Fotossistema: energia por passo com luz plena e sol 1 (por órgão, × ganho) e
 // probabilidade de reativar um gasto por passo com luz plena.
-const PHOTO_YIELD: f32 = 0.005;
-const PHOTO_REACT_P: f32 = 0.02;
+// (Por luz ABSORVIDA: um fotossistema sozinho absorve 1 − e^−0,15 ≈ 14% da
+// luz que lhe chega, por isso 0,036 e 0,144 dão os 0,005 e 0,02 de antes.)
+const PHOTO_YIELD: f32 = 0.036;
+const PHOTO_REACT_P: f32 = 0.144;
 // Ciclo catalítico: probabilidade por passo de hidrolisar o ligando ligado e
 // de soltar o produto (taxas globais, iguais para todos).
 const MOTOR_P_HYDROLYSIS: f32 = 0.2;
@@ -421,14 +423,25 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // é mais dano UV: há um compromisso.
         let ok = organ_get(slot, k);
         if (organ_type(ok) == ORGAN_PHOTOSYSTEM) {
-            // Intensidade do sol (força UV) × luz que chega aqui.
-            let light = uv_light_at_cell(cell % GRID_SIZE, cell / GRID_SIZE) * max(params.uv_strength, 0.0);
+            // LUZ CONSERVADA: os fotossistemas de uma célula da luz absorvem,
+            // juntos, a luz que lá CHEGA × (1 − exp(−τ·S)) (S = absorventes
+            // na célula, em triptofanos equivalentes) e repartem-na. Um
+            // sozinho recebe ~o de sempre; muitos juntos dividem a mesma luz
+            // (e fazem sombra aos de baixo): a produção por área é limitada
+            // pelo sol, o que dá a capacidade de carga dos produtores.
+            let lx = (cell % GRID_SIZE) / LIGHT_DIV;
+            let ly = (cell / GRID_SIZE) / LIGHT_DIV;
+            var incoming = 1.0;
+            if (ly + 1u < LIGHT_SIZE) { incoming = light_above(lx, ly + 1u); }
+            let s_abs = max(f32(atomicLoad(&shade_grid[ly * LIGHT_SIZE + lx])) / f32(SHADE_ONE), 1.0);
+            let share = (1.0 - exp(-AGENT_UV_ABSORB * s_abs)) / s_abs;
             let og = organ_gain(ok);
+            let power = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og;
             if ((organ_param(ok) & 1u) == 0u) {
-                a.energy += PHOTO_YIELD * light * og;
+                a.energy += PHOTO_YIELD * power;
             } else {
                 let q = rng_f4(a.id, params.epoch, S_PHOTOSYS + k);
-                if (q.x < clamp(PHOTO_REACT_P * light * og, 0.0, 1.0)) {
+                if (q.x < clamp(PHOTO_REACT_P * power, 0.0, 1.0)) {
                     let ch0 = min(u32(q.y * 4.0), 3u);
                     for (var t = 0u; t < 4u; t++) {
                         if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
