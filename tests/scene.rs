@@ -33,7 +33,7 @@ fn scene_round_trip() {
 
     let dir = std::env::temp_dir().join("ribossome_scene_test");
     let path = dir.join("cena.ribo");
-    let msg = a.save_scene(&gpu, path.clone(), serde_json::json!({"x": 1}), false).join().unwrap().unwrap();
+    let msg = a.save_scene(&gpu, path.clone(), serde_json::json!({"x": 1}), Vec::new(), false).join().unwrap().unwrap();
     eprintln!("gravado {msg}");
 
     let mut b = World::new(&gpu, cfg, 99);

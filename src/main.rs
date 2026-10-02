@@ -195,10 +195,14 @@ impl Running {
         let autosave_path = (!testing).then(|| autosave_file().to_string());
         let mut scene_msg = String::new();
         let mut resumed = None;
+        let mut resumed_stats: Option<Vec<u8>> = None;
         if let Some(path) = autosave_path.as_deref().filter(|p| resume && std::path::Path::new(p).exists()) {
             let t = std::time::Instant::now();
-            match ribossome::world::Scene::read(std::path::Path::new(path)).and_then(|s| world.load_scene(&gpu, &s)) {
+            let scene = ribossome::world::Scene::read(std::path::Path::new(path));
+            let stats_bytes = scene.as_ref().ok().and_then(|s| s.extra_block("estatisticas").map(|b| b.to_vec()));
+            match scene.and_then(|s| world.load_scene(&gpu, &s)) {
                 Ok((extra, notes)) => {
+                    resumed_stats = stats_bytes;
                     scene_msg = format!("retomado de {path} (epoch {})", world.params.epoch);
                     log::info!("{scene_msg} em {:.1} s", t.elapsed().as_secs_f32());
                     for n in notes {
@@ -274,6 +278,9 @@ impl Running {
         r.ui.scene_msg = scene_msg;
         if let Some(extra) = resumed {
             r.apply_interface(&extra);
+            if let Some(b) = resumed_stats {
+                r.ui.history = ribossome::stats::History::from_saved(&extra["estatisticas"], &b);
+            }
         }
         r
     }
@@ -330,9 +337,7 @@ impl Running {
         if let Some(n) = u("autosave_every") {
             self.ui.autosave_every = (n as u32).max(1000);
         }
-        if v["estatisticas"].is_object() {
-            self.ui.history = ribossome::stats::History::from_json(&v["estatisticas"]);
-        }
+
     }
 
     /// Começa a gravar uma cena (espera pela gravação anterior, se houver).
@@ -340,7 +345,8 @@ impl Running {
         self.finish_save(true);
         let t = std::time::Instant::now();
         let extra = self.interface_json();
-        self.save_job = Some(self.world.save_scene(&self.gpu, path, extra, keep_previous));
+        let blocks = vec![("estatisticas", self.ui.history.to_bytes())];
+        self.save_job = Some(self.world.save_scene(&self.gpu, path, extra, blocks, keep_previous));
         log::info!("cena: estado lido da GPU em {:.2} s (epoch {})", t.elapsed().as_secs_f32(), self.world.params.epoch);
         self.ui.scene_msg = "a gravar…".into();
     }
@@ -392,9 +398,15 @@ impl Running {
                     .pick_file()
                 {
                     self.finish_save(true);
-                    match ribossome::world::Scene::read(&path).and_then(|s| self.world.load_scene(&self.gpu, &s)) {
+                    let scene = ribossome::world::Scene::read(&path);
+                    let stats_bytes = scene.as_ref().ok().and_then(|s| s.extra_block("estatisticas").map(|b| b.to_vec()));
+                    match scene.and_then(|s| self.world.load_scene(&self.gpu, &s)) {
                         Ok((extra, notes)) => {
                             self.apply_interface(&extra);
+                            self.ui.history = ribossome::stats::History::from_saved(
+                                &extra["estatisticas"],
+                                stats_bytes.as_deref().unwrap_or_default(),
+                            );
                             self.ui.ledger = None;
                             self.last_autosave = self.world.params.epoch;
                             self.ui.scene_msg = format!("carregado {} (epoch {})", path.display(), self.world.params.epoch);

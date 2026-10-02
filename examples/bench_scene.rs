@@ -29,7 +29,7 @@ fn main() {
     let alive = world.life_counters_blocking(&gpu).alive(cfg.max_agents);
     let path = std::path::PathBuf::from("saves/bench_scene.ribo");
     let t = std::time::Instant::now();
-    let job = world.save_scene(&gpu, path.clone(), serde_json::json!({}), false);
+    let job = world.save_scene(&gpu, path.clone(), serde_json::json!({}), Vec::new(), false);
     let read_gpu = t.elapsed().as_secs_f32();
     let msg = job.join().unwrap().unwrap();
     println!("{alive} agentes: leitura da GPU {read_gpu:.2} s (a app para isto), total {:.2} s", t.elapsed().as_secs_f32());

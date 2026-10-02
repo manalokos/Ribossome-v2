@@ -169,6 +169,11 @@ impl Scene {
         self.blocks.get(name).map(|v| v.as_slice()).ok_or_else(|| format!("falta o bloco {name}"))
     }
 
+    /// Um bloco binário de quem gravou (ver `save_scene`), se existir.
+    pub fn extra_block(&self, name: &str) -> Option<&[u8]> {
+        self.blocks.get(name).map(|v| v.as_slice())
+    }
+
     pub fn epoch(&self) -> u32 {
         self.header["params"]["epoch"].as_f64().unwrap_or(0.0) as u32
     }
@@ -262,11 +267,13 @@ impl World {
     /// livro-razão). Devolve uma thread que comprime e escreve o ficheiro
     /// (primeiro num .tmp, depois troca: um ficheiro a meio nunca fica).
     /// `keep_previous`: o ficheiro que lá estava passa a `*.anterior.ribo`.
+    /// `extra_blocks`: blocos binários de quem chama (p. ex. as estatísticas).
     pub fn save_scene(
         &self,
         gpu: &Gpu,
         path: PathBuf,
         extra: Value,
+        extra_blocks: Vec<(&'static str, Vec<u8>)>,
         keep_previous: bool,
     ) -> std::thread::JoinHandle<Result<String, String>> {
         gpu.wait_idle();
@@ -304,6 +311,7 @@ impl World {
         if let Some(h) = &self.heat_image {
             blocks.push(("heat_image", bytemuck::cast_slice(h).to_vec()));
         }
+        blocks.extend(extra_blocks);
 
         let header = json!({
             "versao": VERSION,
