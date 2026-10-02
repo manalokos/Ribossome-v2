@@ -91,7 +91,7 @@ impl UiState {
             monomer_brightness: 0.5,
             signal_view: 0,
             stats: Stats::default(),
-            terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "terreno.png".into()),
+            terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "assets/terreno.png".into()),
             terrain_action: None,
             terrain_msg: String::new(),
             seed_count: 500,

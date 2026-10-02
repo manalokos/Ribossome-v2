@@ -48,6 +48,9 @@ fn lab_mode() -> bool {
     std::env::var("RIBO_LAB").map(|v| v != "0").unwrap_or(false)
 }
 
+/// Terreno carregado por omissão no mundo completo (azul = terreno, vermelho = calor).
+const DEFAULT_TERRAIN: &str = "assets/terreno.png";
+
 /// Monómeros ativados por canal e célula na piscina do modo laboratório.
 const LAB_PER_CHANNEL: f32 = 1.5;
 
@@ -106,8 +109,13 @@ impl Running {
         log::info!("mundo {}² células, {} unidades", cfg.grid_size, cfg.sim_size());
         let seed = 1;
         let mut world = World::new(&gpu, cfg, seed as u32);
-        // Terreno de uma imagem (RIBO_TERRAIN=caminho.png).
-        if let Ok(path) = std::env::var("RIBO_TERRAIN") {
+        // Terreno de uma imagem: RIBO_TERRAIN=caminho.png; por omissão (mundo
+        // completo) o terreno do projeto, assets/terreno.png; "-" = gerado.
+        let terrain = std::env::var("RIBO_TERRAIN")
+            .ok()
+            .or_else(|| (!lab_mode() && std::path::Path::new(DEFAULT_TERRAIN).exists()).then(|| DEFAULT_TERRAIN.into()))
+            .filter(|p| p != "-");
+        if let Some(path) = terrain {
             match world.load_terrain_png(std::path::Path::new(&path)) {
                 Ok(nf) => log::info!("terreno de {path} ({nf} células quentes)"),
                 Err(e) => log::error!("RIBO_TERRAIN: {e}; uso o terreno gerado"),
