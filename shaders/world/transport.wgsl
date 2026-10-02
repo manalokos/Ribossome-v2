@@ -192,8 +192,11 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (t_idx != idx) {
                 let g_tgt = gamma_count(t_idx);
                 if (g_tgt >= GAMMA_SOLID_THRESHOLD) {
-                    // Rocha: nunca se entra (só se sai, se lá houver algum).
-                    blocked = true;
+                    // Rocha: não se entra de fora. Um monómero que já esteja
+                    // DENTRO de rocha (um grão caiu-lhe em cima numa corrida)
+                    // pode atravessá-la até sair: infiltração, para nunca
+                    // ficar matéria presa para sempre.
+                    blocked = g_src < GAMMA_SOLID_THRESHOLD;
                 } else {
                     if (g_tgt > 0u) {
                         // Entulho poroso: entra-se com a permeabilidade.

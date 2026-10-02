@@ -27,10 +27,28 @@ fn gamma_take_one(idx: u32) -> bool {
     return taken;
 }
 
+// Para onde despejar um monómero que deixou de caber em `dst`: a célula de
+// origem do grão (`src`, que ganhou espaço) se tiver espaço; senão uma
+// vizinha de `dst` com espaço; senão `src` na mesma (a infiltração em
+// transport.wgsl deixa-o sair da rocha depois).
+fn evict_target(src: u32, dst: u32) -> u32 {
+    if (chem_cell_total(src) < chem_capacity(src)) { return src; }
+    let x = i32(dst % GRID_SIZE);
+    let y = i32(dst / GRID_SIZE);
+    var nb = array<vec2<i32>, 4>(vec2<i32>(x + 1, y), vec2<i32>(x - 1, y), vec2<i32>(x, y + 1), vec2<i32>(x, y - 1));
+    for (var i = 0u; i < 4u; i++) {
+        let c = nb[i];
+        if (any(c < vec2<i32>(0)) || any(c >= vec2<i32>(i32(GRID_SIZE)))) { continue; }
+        let n = u32(c.y) * GRID_SIZE + u32(c.x);
+        if (chem_cell_total(n) < chem_capacity(n)) { return n; }
+    }
+    return src;
+}
+
 // A ÚNICA forma de o terreno se mover: um quantum vai de `src` para `dst`,
 // e os monómeros que deixam de caber em `dst` (a capacidade acabou de
-// encolher) TROCAM para `src`, que ganhou espaço. Como um grão de areia a
-// cair e a deslocar água: o terreno nunca enterra monómeros.
+// encolher) saem para uma célula com espaço (evict_target). Como um grão de
+// areia a cair e a deslocar água: o terreno nunca enterra monómeros.
 fn gamma_move_one(src: u32, dst: u32) -> bool {
     if (!gamma_take_one(src)) { return false; }
     atomicAdd(&gamma_grid[dst], 1u);
@@ -40,16 +58,17 @@ fn gamma_move_one(src: u32, dst: u32) -> bool {
         if (guard >= 64u) { break; }
         guard += 1u;
         if (chem_cell_total(dst) <= cap) { break; }
+        let to = evict_target(src, dst);
         var moved = false;
         for (var c = 0u; c < 4u; c++) {
             let slot = dst * 4u + c;
             if (chem_take_state_one(slot, true)) {
-                chem_add_state(src, c, 1u, true);
+                chem_add_state(to, c, 1u, true);
                 moved = true;
                 break;
             }
             if (chem_take_state_one(slot, false)) {
-                chem_add_state(src, c, 1u, false);
+                chem_add_state(to, c, 1u, false);
                 moved = true;
                 break;
             }

@@ -688,11 +688,7 @@ impl World {
             None => terrain::generate(&self.cfg, seed as u32, &self.fumaroles),
         };
         let mut cells = seed_cells(&self.cfg, seed, self.seed_density);
-        for (i, &g) in gamma.iter().enumerate() {
-            if g > 0 {
-                cells[i * 4..i * 4 + 4].fill(0);
-            }
-        }
+        fit_matter_to_terrain(&mut cells, &gamma);
         gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
         gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
         // Mundo novo: não há agentes (a matéria deles pertencia ao mundo antigo).
@@ -716,11 +712,7 @@ impl World {
             Some((g, _)) => g.clone(),
             None => vec![0u32; n],
         };
-        for (i, &g) in gamma.iter().enumerate() {
-            if g > 0 {
-                cells[i * 4..i * 4 + 4].fill(0);
-            }
-        }
+        fit_matter_to_terrain(&mut cells, &gamma);
         gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
         gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
         self.clear_agents(gpu);
@@ -1092,6 +1084,29 @@ impl SplitMix {
 
 /// Matéria inicial: manchas fractais (fBm) independentes por canal, metade
 /// ativada. Nunca passa da capacidade da célula.
+/// Grãos a partir dos quais o terreno é rocha (= GAMMA_SOLID_THRESHOLD).
+const GAMMA_SOLID: u32 = 3;
+
+/// Ajusta a matéria semeada ao terreno, com a regra de `chem_capacity`: a
+/// rocha fica vazia; o entulho (poroso) guarda (3 − grãos)/3 do que teria
+/// (cada canal e estado arredondado para baixo).
+fn fit_matter_to_terrain(cells: &mut [u32], gamma: &[u32]) {
+    for (i, &g) in gamma.iter().enumerate() {
+        if g == 0 {
+            continue;
+        }
+        for v in &mut cells[i * 4..i * 4 + 4] {
+            if g >= GAMMA_SOLID {
+                *v = 0;
+            } else {
+                let (act, spent) = (*v & 0xFFFF, *v >> 16);
+                let keep = |n: u32| n * (GAMMA_SOLID - g) / GAMMA_SOLID;
+                *v = keep(act) | (keep(spent) << 16);
+            }
+        }
+    }
+}
+
 /// Densidade semeada por omissão (≈ 8 monómeros por célula de água).
 pub const SEED_DENSITY_DEFAULT: f32 = 0.4;
 
