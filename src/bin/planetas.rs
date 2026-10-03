@@ -43,9 +43,16 @@ struct SimParams {
     gamma: f32,
     expand: f32,
     soft: f32,
-    epoch: u32,
+    /// Viscosidade: troca de momento com as 4 vizinhas (amortece choques e
+    /// pulsações; conserva o momento).
+    visc: f32,
     n: u32,
     c: u32,
+    /// Densidade máxima: quanta por célula (o excesso sai à força).
+    cap: u32,
+    _p0: u32,
+    _p1: u32,
+    _p2: u32,
 }
 
 #[repr(C)]
@@ -62,7 +69,7 @@ struct ViewParams {
 }
 
 const COMMON: &str = r#"
-struct SimParams { g: f32, k_press: f32, gamma: f32, expand: f32, soft: f32, epoch: u32, n: u32, c: u32 }
+struct SimParams { g: f32, k_press: f32, gamma: f32, expand: f32, soft: f32, visc: f32, n: u32, c: u32, cap: u32, p0: u32, p1: u32, p2: u32 }
 // Velocidade máxima (células por passo): um pacote nunca salta mais de uma.
 const VMAX: f32 = 0.95;
 const BLK: u32 = 8u;
@@ -92,8 +99,10 @@ fn hash(a: u32, b: u32, c: u32) -> f32 {
     return f32(x >> 8u) / 16777216.0;
 }
 
+// P = K·mᵞ, a disparar perto da densidade máxima (quase incompressível).
 fn pressure(m: u32) -> f32 {
-    return P.k_press * pow(f32(m), P.gamma);
+    let f = f32(m) / f32(max(P.cap, 1u));
+    return P.k_press * pow(f32(m), P.gamma) / max(1.0 - f, 0.05);
 }
 
 fn mass_at(x: i32, y: i32) -> u32 {
@@ -180,6 +189,16 @@ fn kick(@builtin(global_invocation_id) gid: vec3<u32>) {
     let gp = vec2<f32>(pressure(mass_at(ix + 1, iy)) - pressure(mass_at(ix - 1, iy)),
                        pressure(mass_at(ix, iy + 1)) - pressure(mass_at(ix, iy - 1))) * 0.5;
     a -= gp / f32(m);
+    // VISCOSIDADE: troca de momento com cada vizinha, ∝ à massa reduzida e à
+    // diferença de velocidades (forças iguais e opostas: momento conservado).
+    var dirs = array<vec2<i32>, 4>(vec2<i32>(1, 0), vec2<i32>(-1, 0), vec2<i32>(0, 1), vec2<i32>(0, -1));
+    for (var k = 0u; k < 4u; k++) {
+        let t = vec2<i32>(ix, iy) + dirs[k];
+        let mt = mass_at(t.x, t.y);
+        if (mt == 0u) { continue; }
+        let vt = dyn_a[u32(t.y) * P.n + u32(t.x)].xy;
+        a += P.visc * f32(mt) / (f32(m) + f32(mt)) * (vt - d.xy);
+    }
     var v = d.xy + a;
     let sp = length(v);
     if (sp > VMAX) { v *= VMAX / sp; }
@@ -256,9 +275,38 @@ fn outflow(s: vec2<i32>) -> vec4<u32> {
         q[k] = u32(floor(raw[k] + r));
         tot += q[k];
     }
-    let cap = ms / 2u;
-    if (tot > cap) {
-        for (var k = 0u; k < 4u; k++) { q[k] = q[k] * cap / tot; }
+    var limit = ms / 2u;
+    // DENSIDADE MÁXIMA: acima do teto, o excesso sai à força, repartido pelas
+    // vizinhas com menos massa, na proporção da diferença (a mais vazia leva mais).
+    if (ms > P.cap) {
+        let excess = ms - P.cap;
+        var room = vec4<f32>(0.0);
+        for (var k = 0u; k < 4u; k++) {
+            let t = s + dirs[k];
+            let mt = mass_b_at(t.x, t.y);
+            // Para qualquer vizinha com menos massa (escorre em cascata para
+            // fora do núcleo, mesmo através de vizinhas também cheias).
+            if (mt == 0xFFFFFFFFu || mt >= ms) { continue; }
+            room[k] = f32(ms - mt);
+        }
+        let rsum = room.x + room.y + room.z + room.w;
+        if (rsum > 0.0) {
+            var given = 0u;
+            var best = 0u;
+            for (var k = 0u; k < 4u; k++) {
+                let f = u32(floor(f32(excess) * room[k] / rsum));
+                q[k] = max(q[k], f);
+                given += f;
+                if (room[k] > room[best]) { best = k; }
+            }
+            // O resto do arredondamento vai para a mais vazia.
+            q[best] += excess - min(given, excess);
+            limit = max(limit, excess);
+            tot = q.x + q.y + q.z + q.w;
+        }
+    }
+    if (tot > limit) {
+        for (var k = 0u; k < 4u; k++) { q[k] = q[k] * limit / tot; }
     }
     return q;
 }
@@ -382,6 +430,8 @@ impl SplitMix {
 struct Cloud {
     radius: f32,
     fill: f32,
+    /// Gradiente do centro para fora: densidade ∝ (1 − r/R)^concentração.
+    concentration: f32,
     spin: f32,
     dispersion: f32,
     seed: u64,
@@ -397,7 +447,7 @@ fn make_cloud(s: &Cloud) -> (Vec<u32>, Vec<[f32; 4]>) {
         for x in 0..n {
             let (px, py) = (x as f32 + 0.5 - c, y as f32 + 0.5 - c);
             let r = (px * px + py * py).sqrt();
-            if r > s.radius || rng.f32() > s.fill {
+            if r > s.radius || rng.f32() > s.fill * (1.0 - r / s.radius).powf(s.concentration) {
                 continue;
             }
             // Rotação de corpo rígido (spin = velocidade na borda) + agitação.
@@ -560,11 +610,11 @@ impl Sim {
 }
 
 fn default_params() -> SimParams {
-    SimParams { g: 3.0e-5, k_press: 2.0e-4, gamma: 2.0, expand: 0.3, soft: 1.0, epoch: 0, n: N, c: C }
+    SimParams { g: 3.0e-5, k_press: 2.0e-4, gamma: 2.0, expand: 0.3, soft: 1.0, visc: 0.1, n: N, c: C, cap: 2000, _p0: 0, _p1: 0, _p2: 0 }
 }
 
 fn default_cloud() -> Cloud {
-    Cloud { radius: 380.0, fill: 0.5, spin: 0.15, dispersion: 0.03, seed: 1 }
+    Cloud { radius: 380.0, fill: 0.9, concentration: 1.5, spin: 0.15, dispersion: 0.03, seed: 1 }
 }
 
 struct Running {
@@ -778,13 +828,19 @@ impl Running {
                 ui.add(egui::Slider::new(&mut p.k_press, 0.0..=0.1).logarithmic(true).smallest_positive(1e-6).text("pressão K"))
                     .on_hover_text("P = K·mᵞ: mais pressão, mais difícil comprimir");
                 ui.add(egui::Slider::new(&mut p.gamma, 1.0..=3.0).text("γ (rigidez)"));
+                ui.add(egui::Slider::new(&mut p.cap, 10..=100_000).logarithmic(true).text("densidade máxima (quanta/célula)"))
+                    .on_hover_text("acima disto o excesso sai à força para as vizinhas: os corpos densos ganham tamanho");
+                ui.add(egui::Slider::new(&mut p.visc, 0.0..=0.25).text("viscosidade"))
+                    .on_hover_text("amortece choques e pulsações (troca de momento entre vizinhas)");
                 ui.add(egui::Slider::new(&mut p.expand, 0.0..=1.0).text("expansão (fluxo de quanta)"))
                     .on_hover_text("quanta passam para vizinhas com menos pressão");
                 ui.separator();
                 ui.label("nuvem nova:");
                 let c = &mut self.cloud;
                 ui.add(egui::Slider::new(&mut c.radius, 50.0..=500.0).text("raio"));
-                ui.add(egui::Slider::new(&mut c.fill, 0.02..=1.0).text("densidade"));
+                ui.add(egui::Slider::new(&mut c.fill, 0.02..=1.0).text("densidade no centro"));
+                ui.add(egui::Slider::new(&mut c.concentration, 0.0..=4.0).text("concentração"))
+                    .on_hover_text("densidade ∝ (1 − r/R)^isto: 0 = uniforme; mais = mais concentrada no centro");
                 ui.add(egui::Slider::new(&mut c.spin, 0.0..=0.6).text("rotação (vel. na borda)"));
                 ui.add(egui::Slider::new(&mut c.dispersion, 0.0..=0.3).text("agitação"));
                 ui.separator();
@@ -939,12 +995,19 @@ impl ApplicationHandler for App {
 /// Sem janela: `planetas --teste [passos]` corre a nuvem e mostra a evolução.
 fn headless(steps: u64) {
     let gpu = Gpu::new_headless().expect("GPU");
-    let mut sim = Sim::new(&gpu, default_params());
+    let mut params = default_params();
+    if let Some(v) = std::env::var("VISC").ok().and_then(|v| v.parse().ok()) {
+        params.visc = v;
+    }
+    if let Some(v) = std::env::var("CAP").ok().and_then(|v| v.parse().ok()) {
+        params.cap = v;
+    }
+    let mut sim = Sim::new(&gpu, params);
     let (m, d) = make_cloud(&default_cloud());
     sim.upload(&gpu, &m, &d);
     let l0 = sim.read_stats(&gpu)[3] as i32;
     let t = std::time::Instant::now();
-    let report = 10;
+    let report: u64 = std::env::var("REPORT").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
     for k in 0..=report {
         let target = steps * k / report;
         while sim.step < target {
