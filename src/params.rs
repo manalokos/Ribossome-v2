@@ -339,29 +339,30 @@ impl SimParams {
 
 impl Default for SimParams {
     fn default() -> Self {
+        // Valores afinados pelo Filipe a ver o mundo (out 2026), com dois
+        // ajustes: heat_kill 0,2 (o metabolismo Q10 já torna o calor caro) e
+        // dia de 8000 epochs (com 3/4 de dia, a noite de 2000 cabe na vida
+        // de um agente, ~2500 passos).
         Self {
             epoch: 0,
             seed: 1,
             dt: 0.017,
-            diffusion: 20.0,
-            settle: 0.0,
+            diffusion: 2.0,
+            settle: 1.5,
             fluid_dt: 0.017 * 2.0,
-            fluid_decay: 0.999,
-            fluid_vorticity: 7.0,
+            fluid_decay: 0.995,
+            fluid_vorticity: 7.7,
             fluid_viscosity: 3.7,
             fumarole_count: 0,
             uv_strength: 3.0,
-            // 2 (era 11 do v3): o resto da atenuação vem dos monómeros.
-            uv_depth: 2.0,
+            uv_depth: 0.0,
             fluid_enabled: 1,
             fluid_obstacle_strength: 1000.0,
             slope_steer_rate: 210.0,
-            // 0 (o v3 tinha 0.6): a coesão separava os nucleótidos por tipo em fios
-            // e condensava-os em camadas presas junto ao fundo e às rochas.
-            cohesion: 0.0,
+            cohesion: 0.55,
             spawn_count: 0,
             max_agents: 0,
-            death_probability: 0.02,
+            death_probability: 0.025,
             spawn_energy: 5.0,
             food_power: 6.0,
             // Mais cara do que no v3 (0,0001): com ela a energia nunca faltava e
@@ -369,58 +370,52 @@ impl Default for SimParams {
             maintenance_cost: 0.002,
             pairing_rate: 3.0,
             mutation_rate: 0.003,
-            uv_damage: 10.0,
-            uptake_rate: 0.0005,
+            uv_damage: 1.0,
+            uptake_rate: 0.0015,
             // 0: a agitação térmica já entra pelo tremor das juntas (RFT); somar
             // este browniano contava-a duas vezes e afogava a natação.
             brownian: 0.0,
-            phoretic_gain: 100.0,
-            chain_stiffness: 20.0,
+            phoretic_gain: 0.0,
+            chain_stiffness: 100.0,
             // 0 por omissão (pedido do Filipe): sem tremor térmico, o movimento
             // próprio vem só dos sinais.
             thermal_kt: 0.0,
-            // 0: com órgãos, quem move as juntas são os músculos (o motor
-            // catalítico "puro" fica como opção).
-            motor_amplitude: 0.0,
+            motor_amplitude: 1.0,
             rft_enabled: 1,
             require_start: 1,
-            joint_coupling: 0.9,
+            joint_coupling: 0.0,
             // 1: inibição pela carga energética (um agente cheio não come).
             hunger_regulation: 1,
             pairing_cost: 0.3,
             reactivation_rate: 0.0,
             // 10: com 1 a natação era lenta demais para dar vantagem visível.
             swim_gain: 10.0,
-            bioturbation: 0.05,
+            bioturbation: 0.1,
             bioturbation_cost: 0.05,
-            // 1,1: calibrado para a luz a meio do mundo ficar como antes só
-            // com a água (uv_depth 11 do v3): ~0,4% da luz do topo.
-            monomer_uv_absorb: 1.1,
-            // ~1/20 da natação de um agente médio: afundar é lento, quem nada
-            // para cima vence-o.
-            sedimentation: 0.02,
+            monomer_uv_absorb: 0.0,
+            sedimentation: 0.11,
             direct_photoactivation: 0.0,
             // 0 (pedido do Filipe; o valor antigo fixo era 0,0002).
             activation_decay: 0.0,
             monomer_pressure: 20.0,
-            agent_fluid_push: 0.25,
+            agent_fluid_push: 0.2,
             swim_wobble: 1.0,
             fluid_swim_only: 0,
             motion_cost: 0.1,
-            bond_rate: 0.2,
+            bond_rate: 0.05,
             bond_energy_share: 0.01,
             bond_signal: 0.5,
-            aggregation: 0.0,
-            photo_yield: 0.1,
-            heat_kill: 0.02,
+            aggregation: 0.02,
+            photo_yield: 0.21,
+            heat_kill: 0.2,
             flow_coupling: 1.0,
-            inertia: 1.0,
-            death_energy_cap: 10.0,
+            inertia: 2.0,
+            death_energy_cap: 20.0,
             chemo_yield: 1.0,
             redox_decay: 0.02,
-            thermal_activation: 1.0,
-            denature_temp: 6.0,
-            day_period: 0.0,
+            thermal_activation: 0.0,
+            denature_temp: 8.0,
+            day_period: 8000.0,
             sun_slope: 0.0,
             sun_now: 1.0,
             sun_angle: 80.0,

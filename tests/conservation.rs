@@ -36,6 +36,10 @@ fn matter_is_conserved_exactly() {
     // Difusão forte para haver muitos saltos (e corridas entre threads).
     world.params.diffusion = 30.0;
     world.params.settle = 1.0;
+    // Reações ligadas (os defaults podem tê-las desligadas): ativação térmica
+    // e agregação também mexem nos ativados.
+    world.params.thermal_activation = 1.0;
+    world.params.aggregation = 0.02;
     let seeded = world.seed_matter(&gpu, 7);
     assert!(seeded.total() > 0);
 
@@ -70,6 +74,11 @@ fn fluid_and_light_are_sane() {
     let gpu = Gpu::new_headless().expect("este teste precisa de uma GPU");
     let cfg = WorldConfig::TEST;
     let mut world = World::new(&gpu, cfg, 3);
+    // A queda da luz testa-se com a absorção ligada (os defaults podem tê-la
+    // desligada) e sempre de dia.
+    world.params.uv_depth = 2.0;
+    world.params.monomer_uv_absorb = 1.1;
+    world.params.day_period = 0.0;
     world.seed_matter(&gpu, 3);
     run(&gpu, &mut world, 600);
 
