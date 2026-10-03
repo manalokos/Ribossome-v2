@@ -204,16 +204,17 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
                 if (dot(v, v) > dot(vs, vs)) { vs = v; }
             }
         }
-        let w_s = GAMMA_SETTLE_SPEED * max(params.sediment_settle, 0.0);
+        // A GRAVIDADE não está aqui: é a passagem vertical (grain_fall), que
+        // faz descer inteiras as pilhas sem apoio. Aqui só a corrente (e a
+        // coesão, que é horizontal: resiste a ser arrancado, não à queda).
         let unsupported = y > 0u && gamma_count(idx - GRID_SIZE) == 0u;
         var v_move = vec2<f32>(0.0);
         var p_sed = 0.0;
-        var p_fall = 0.0;
         if (unsupported && bonds == 0u) {
-            // EM SUSPENSÃO (grão solto na água): anda com a corrente menos a
-            // velocidade de queda. Sobe se a corrente a subir vencer a queda;
-            // assenta onde ela abranda.
-            v_move = vs - vec2<f32>(0.0, w_s);
+            // EM SUSPENSÃO (grão solto na água): anda com a corrente. A
+            // queda (grain_fall) puxa-o para baixo ao mesmo tempo: sobe onde
+            // a corrente a subir vence a queda, assenta onde ela abranda.
+            v_move = vs;
             p_sed = parcel_hop_p(v_move);
         } else {
             // NO FUNDO, ARRANQUE (Shields): só o excesso de velocidade acima
@@ -223,9 +224,6 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
             let excess = max(speed - crit, 0.0);
             v_move = select(vec2<f32>(0.0), vs * (excess / max(speed, 1e-6)), speed > 1e-6);
             p_sed = parcel_hop_p(v_move) * GAMMA_SEDIMENT_FACTOR * max(params.sediment_transport, 0.0);
-            // Pendurado (vizinhos dos lados, nada por baixo): cai devagar,
-            // tanto menos quanto mais preso.
-            if (unsupported) { p_fall = parcel_hop_p(vec2<f32>(0.0, w_s)) * mob; }
         }
         // Preso (muitos vizinhos) e sem corrente que o arranque: fica.
         if (bonds >= 4u && p_sed <= 0.0) { return; }
@@ -236,9 +234,7 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
         if (n >= 2u && em_found && rw2 < GAMMA_SHED_P) {
             // Mini-falésia: o quantum de cima desce para a vaga mais aninhada.
             dest = em_idx;
-        } else if (rw < p_fall) {
-            dest = idx - GRID_SIZE;
-        } else if (rw < p_fall + p_sed) {
+        } else if (rw < p_sed) {
             // Salto na direção do movimento (corrente, ou corrente − queda),
             // nunca para cima de uma célula com mais grãos.
             var ddx = 0i;
@@ -256,7 +252,7 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
                 let wi = u32(wy) * GRID_SIZE + u32(wx);
                 if (gamma_count(wi) <= n) { dest = wi; }
             }
-        } else if (rw < p_fall + p_sed + GAMMA_STRAY_WALK_P * mob) {
+        } else if (rw < p_sed + GAMMA_STRAY_WALK_P * mob) {
             if (best_score > i32(bonds)) {
                 dest = best_idx;
             } else if (bonds == 0u) {
@@ -298,6 +294,44 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
     if (best_idx == idx || n - best_count < SANDPILE_DIFF) { return; }
     if (rng_f4(idx, params.epoch, S_SAND + phase).x < GAMMA_RELAX_P) {
         gamma_move_one(idx, best_idx);
+    }
+}
+
+// GRAVIDADE DOS GRÃOS (vertical, separada da coesão): uma thread por
+// coluna percorre-a de baixo para cima. Um grão solto (abaixo do limiar da
+// rocha) está APOIADO se tiver por baixo, sem buracos, grãos apoiados, rocha
+// ou o fundo. Os que não estão descem UMA célula juntos, a pilha inteira
+// (cada célula desce para a que a de baixo acabou de deixar), por isso um
+// grumo cai inteiro em vez de se desfiar. Todas as colunas usam o mesmo
+// relógio (descem no mesmo passo), à velocidade de queda
+// GAMMA_SETTLE_SPEED × sediment_settle: um grumo largo cai junto.
+@compute @workgroup_size(64)
+fn grain_fall(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let x = gid.x;
+    if (x >= GRID_SIZE) { return; }
+    let w_s = GAMMA_SETTLE_SPEED * max(params.sediment_settle, 0.0);
+    let rate = parcel_hop_p(vec2<f32>(0.0, w_s));
+    if (rate <= 0.0) { return; }
+    // Relógio comum (ponto fixo 16.16): desce quando a parte inteira de
+    // epoch·rate avança.
+    let rf = u32(rate * 65536.0);
+    if (((params.epoch * rf) >> 16u) == (((params.epoch + 1u) * rf) >> 16u)) { return; }
+    var supported = true; // o fundo do mundo apoia
+    for (var y = 0u; y < GRID_SIZE; y++) {
+        let idx = y * GRID_SIZE + x;
+        let n = gamma_count(idx);
+        if (n == 0u) {
+            supported = false;
+            continue;
+        }
+        if (n >= GAMMA_SOLID_THRESHOLD) {
+            supported = true; // rocha: fixa, apoia o que está em cima
+            continue;
+        }
+        if (supported) { continue; }
+        // Sem apoio: desce para a célula de baixo (vazia: ou já era, ou a
+        // pilha de baixo acabou de descer).
+        for (var k = 0u; k < n; k++) { gamma_move_one(idx, idx - GRID_SIZE); }
     }
 }
 

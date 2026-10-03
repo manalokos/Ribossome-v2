@@ -156,6 +156,7 @@ struct Pipelines {
     slope: wgpu::ComputePipeline,
     relax_a: wgpu::ComputePipeline,
     relax_b: wgpu::ComputePipeline,
+    grain_fall: wgpu::ComputePipeline,
     spawn: wgpu::ComputePipeline,
     agents_step: wgpu::ComputePipeline,
     agents_ledger: wgpu::ComputePipeline,
@@ -744,6 +745,7 @@ impl World {
             slope: compute("compute_gamma_slope"),
             relax_a: compute("relax_gamma_a"),
             relax_b: compute("relax_gamma_b"),
+            grain_fall: compute("grain_fall"),
             spawn: compute("spawn_seeds"),
             agents_step: compute("agents_step"),
             agents_ledger: compute("agents_ledger"),
@@ -1182,6 +1184,9 @@ impl World {
             if st.terrain_enabled {
                 run(&mut pass, "relax_a", &pl.relax_a, ab, [g, g]);
                 run(&mut pass, "relax_b", &pl.relax_b, ab, [g, g]);
+                if self.params.sediment_settle > 0.0 {
+                    run(&mut pass, "grain_fall", &pl.grain_fall, ab, [groups(self.cfg.grid_size, 64), 1]);
+                }
             }
             run(&mut pass, "slope", &pl.slope, ab, [g, g]);
 

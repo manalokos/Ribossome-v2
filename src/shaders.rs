@@ -90,6 +90,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("compute_gamma_slope", Stage::Compute),
         ("relax_gamma_a", Stage::Compute),
         ("relax_gamma_b", Stage::Compute),
+        ("grain_fall", Stage::Compute),
         ("spawn_seeds", Stage::Compute),
         ("agents_step", Stage::Compute),
         ("agents_ledger", Stage::Compute),
