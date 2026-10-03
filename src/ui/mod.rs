@@ -25,6 +25,9 @@ pub struct UiState {
     pub seed_len: [u32; 2],
     pub seed_aug: bool,
     pub seed_now: bool,
+    /// "Ativar já": fração dos gastos a ativar e pedido.
+    pub activate_frac: f32,
+    pub activate_now: bool,
     /// Terreno em imagem: caminho, ação pedida e resultado da última.
     pub terrain_path: String,
     pub terrain_action: Option<TerrainAction>,
@@ -154,6 +157,8 @@ impl UiState {
             seed_len: [12, 120],
             seed_aug: true,
             seed_now: false,
+            activate_frac: 0.3,
+            activate_now: false,
             scene_action: None,
             autosave_on: true,
             autosave_every: 50_000,
@@ -229,7 +234,7 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
     ui.separator();
     egui::ScrollArea::vertical().show(ui, |ui| match st.tab {
         Tab::Vista => tab_view(ui, st),
-        Tab::Materia => tab_matter(ui, world),
+        Tab::Materia => tab_matter(ui, st, world),
         Tab::Luz => tab_light(ui, world),
         Tab::Agua => tab_water(ui, world),
         Tab::Terreno => tab_terrain(ui, st, world),
@@ -341,9 +346,17 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
     }
 }
 
-fn tab_matter(ui: &mut egui::Ui, world: &mut World) {
+fn tab_matter(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     let p = &mut world.params;
     ui.add(egui::Slider::new(&mut world.seed_density, 0.05..=1.0).text("densidade inicial (na próxima semente)"));
+    ui.add(egui::Slider::new(&mut world.seed_active, 0.0..=1.0).text("fração ativada inicial (na próxima semente)"))
+        .on_hover_text("fração dos monómeros que nascem ativados quando se semeia um mundo novo (0,5 = metade)");
+    ui.horizontal(|ui| {
+        ui.add(egui::Slider::new(&mut st.activate_frac, 0.0..=1.0).text("ativar já"));
+        if ui.button("ativar").on_hover_text("ativa agora esta fração dos monómeros gastos livres (a matéria não muda)").clicked() {
+            st.activate_now = true;
+        }
+    });
     ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("difusão ×"));
     ui.add(egui::Slider::new(&mut p.monomer_pressure, 0.0..=20.0).text("pressão dos monómeros"))
         .on_hover_text("a difusão empurra das zonas cheias para as vazias");

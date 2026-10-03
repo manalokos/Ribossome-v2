@@ -333,6 +333,7 @@ impl World {
             "fumarolas": self.fumaroles.iter().map(|f| named_json(f.to_named())).collect::<Vec<_>>(),
             "ganho_fumarolas": self.fumarole_gain,
             "densidade_sementeira": self.seed_density,
+            "fracao_ativada_sementeira": self.seed_active,
             // Só para registo: ao carregar usam-se sempre as de assets/.
             "tabela_aminoacidos": serde_json::to_value(&self.amino).unwrap(),
             "tabela_orgaos": serde_json::to_value(&self.organ_table).unwrap(),
@@ -430,6 +431,7 @@ impl World {
             .unwrap_or_default();
         self.fumarole_gain = h["ganho_fumarolas"].as_f64().unwrap_or(1.0) as f32;
         self.seed_density = h["densidade_sementeira"].as_f64().map_or(SEED_DENSITY_DEFAULT, |v| v as f32);
+        self.seed_active = h["fracao_ativada_sementeira"].as_f64().map_or(super::SEED_ACTIVE_DEFAULT, |v| v as f32);
         // Compara depois de ler (o JSON arredonda os f32 de outra maneira).
         let same_amino = serde_json::from_value::<Vec<crate::life::table::AminoRow>>(h["tabela_aminoacidos"].clone())
             .is_ok_and(|t| serde_json::to_value(t).ok() == serde_json::to_value(&self.amino).ok());

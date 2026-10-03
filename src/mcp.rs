@@ -115,6 +115,11 @@ fn tools() -> Value {
             "inputSchema": obj(json!({ "name": { "type": "string" } }), &["name"]),
         },
         {
+            "name": "activate_spent",
+            "description": "Ativa já uma fração dos monómeros GASTOS livres do mundo (ação de experimentador; a matéria não muda, só o estado).",
+            "inputSchema": obj(json!({ "fraction": { "type": "number", "description": "0..1" } }), &["fraction"]),
+        },
+        {
             "name": "pause",
             "description": "Pausa (paused: true) ou continua (false) a simulação; opcionalmente muda os passos por frame.",
             "inputSchema": obj(json!({

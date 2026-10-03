@@ -187,3 +187,19 @@ fn life_cycle_conserves_matter() {
     assert_eq!(end.total(), seeded.total(), "matéria total não conservada com vida");
     assert_eq!(channels(&end), channels(&seeded), "matéria não conservada por canal com vida");
 }
+
+/// "Ativar já": muda gastos para ativados sem criar nem destruir matéria.
+#[test]
+fn activate_spent_conserves_matter() {
+    let gpu = Gpu::new_headless().expect("este teste precisa de uma GPU");
+    let mut world = World::new(&gpu, WorldConfig::TEST, 13);
+    let before = world.seed_matter(&gpu, 13);
+    let spent_before: u64 = before.spent.iter().map(|&v| v as u64).sum();
+    let n = world.activate_spent(&gpu, 0.5, 1);
+    let after = Ledger::from_cells(&world.read_cells_blocking(&gpu));
+    assert_eq!(after.total(), before.total(), "ativar não pode mudar a matéria");
+    assert_eq!(channels(&after), channels(&before), "nem por canal");
+    let act_gain: u64 = after.act.iter().map(|&v| v as u64).sum::<u64>() - before.act.iter().map(|&v| v as u64).sum::<u64>();
+    assert_eq!(act_gain, n, "os ativados ganhos são os que a função diz");
+    assert!((n as f64 - spent_before as f64 * 0.5).abs() < spent_before as f64 * 0.02, "~metade dos gastos: {n} de {spent_before}");
+}

@@ -250,6 +250,8 @@ pub struct World {
     /// Densidade da matéria semeada no mundo completo (fração do máximo
     /// histórico de ~20 por célula). Só conta na próxima sementeira.
     pub seed_density: f32,
+    /// Fração dos monómeros que nascem ATIVADOS na sementeira (0,5 = metade).
+    pub seed_active: f32,
     /// Medição por kernel (None = desligada; ver `enable_kernel_timing`).
     pub kernel_timing: Option<KernelTiming>,
     /// Terreno carregado de uma imagem (grãos por célula, fumarolas): usado
@@ -816,6 +818,7 @@ impl World {
             pipelines,
             last_counters: None,
             seed_density: SEED_DENSITY_DEFAULT,
+            seed_active: SEED_ACTIVE_DEFAULT,
             kernel_timing: None,
             custom_terrain: None,
             custom_chem: None,
@@ -850,6 +853,7 @@ impl World {
         self.fumaroles = vec![Fumarole::v3_default()];
         self.fumarole_gain = 1.0;
         self.seed_density = SEED_DENSITY_DEFAULT;
+        self.seed_active = SEED_ACTIVE_DEFAULT;
         self.custom_terrain = None;
         self.custom_chem = None;
         self.heat_image = None;
@@ -887,7 +891,7 @@ impl World {
             }
             None => terrain::generate(&self.cfg, seed as u32, &self.fumaroles),
         };
-        let mut cells = seed_cells(&self.cfg, seed, self.seed_density);
+        let mut cells = seed_cells(&self.cfg, seed, self.seed_density, self.seed_active);
         fit_matter_to_terrain(&mut cells, &gamma, seed);
         gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
         gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
@@ -1492,6 +1496,28 @@ impl World {
         bytemuck::cast_slice(&gpu.read_buffer_blocking(&self.chem_buf)).to_vec()
     }
 
+    /// Ação de experimentador: ativa já uma fração dos monómeros GASTOS
+    /// livres (cada um com probabilidade `frac`). A matéria não muda, só o
+    /// estado. Devolve quantos foram ativados.
+    pub fn activate_spent(&mut self, gpu: &Gpu, frac: f32, seed: u64) -> u64 {
+        let mut cells = self.read_cells_blocking(gpu);
+        let f = frac.clamp(0.0, 1.0);
+        let mut rng = SplitMix(seed ^ 0xAC71_7A7E);
+        let mut done = 0u64;
+        for v in cells.iter_mut() {
+            let (act, spent) = (*v & 0xFFFF, *v >> 16);
+            if spent == 0 {
+                continue;
+            }
+            // Arredondamento ao acaso da média (binomial aproximada).
+            let k = ((spent as f32 * f + rng.f32()) as u32).min(spent);
+            *v = (act + k) | ((spent - k) << 16);
+            done += k as u64;
+        }
+        gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
+        done
+    }
+
     /// Lê o livro-razão calculado na GPU de forma síncrona (testes).
     pub fn ledger_blocking(&self, gpu: &Gpu) -> Ledger {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
@@ -1541,8 +1567,9 @@ fn fit_matter_to_terrain(cells: &mut [u32], gamma: &[u32], seed: u64) {
 
 /// Densidade semeada por omissão (≈ 8 monómeros por célula de água).
 pub const SEED_DENSITY_DEFAULT: f32 = 0.4;
+pub const SEED_ACTIVE_DEFAULT: f32 = 0.5;
 
-fn seed_cells(cfg: &WorldConfig, seed: u64, density: f32) -> Vec<u32> {
+fn seed_cells(cfg: &WorldConfig, seed: u64, density: f32, active: f32) -> Vec<u32> {
     let n = cfg.grid_size as usize;
     let mut rng = SplitMix(seed);
     let max_per_channel = CHEM_CELL_CAP / 4;
@@ -1560,7 +1587,7 @@ fn seed_cells(cfg: &WorldConfig, seed: u64, density: f32) -> Vec<u32> {
                 let d = (0.5 + 1.6 * (bilinear(f, m, fx, fy) - 0.5)).clamp(0.0, 1.0);
                 let expect = d * (max_per_channel as f32 - 2.0) * density.clamp(0.0, 1.0);
                 let count = ((expect + rng.f32()) as u32).min(max_per_channel);
-                let act = (0..count).filter(|_| rng.f32() < 0.5).count() as u32;
+                let act = (0..count).filter(|_| rng.f32() < active.clamp(0.0, 1.0)).count() as u32;
                 cells[(y * n + x) * 4 + ch] = act | ((count - act) << 16);
             }
         }

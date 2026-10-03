@@ -615,6 +615,12 @@ impl Running {
                 self.start_save(path.clone(), false);
                 Ok(vec![text(format!("a gravar {} (epoch {})", path.display(), self.world.params.epoch))])
             }
+            "activate_spent" => {
+                let f = args["fraction"].as_f64().ok_or("falta 'fraction' (0..1)")? as f32;
+                let n = self.world.activate_spent(&self.gpu, f, self.world.params.epoch as u64);
+                log::info!("mcp: ativar já {f}: {n} monómeros");
+                Ok(vec![text(format!("{n} monómeros gastos ativados ({:.0}%)", f.clamp(0.0, 1.0) * 100.0))])
+            }
             "pause" => {
                 if let Some(p) = args["paused"].as_bool() {
                     self.ui.paused = p;
@@ -740,6 +746,10 @@ impl Running {
                 &mut self.seed_rng,
             );
             self.world.request_seeds(&reqs);
+        }
+        if std::mem::take(&mut self.ui.activate_now) {
+            let n = self.world.activate_spent(&self.gpu, self.ui.activate_frac, self.world.params.epoch as u64);
+            log::info!("ativar já: {n} monómeros gastos ativados ({:.0}%)", self.ui.activate_frac * 100.0);
         }
         if let Some(action) = self.ui.terrain_action.take() {
             self.terrain_action(action);
