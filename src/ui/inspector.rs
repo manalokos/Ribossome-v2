@@ -79,15 +79,16 @@ impl Inspector {
         }
     }
 
-    /// Escolhe o organismo vivo mais próximo do ponto (leitura síncrona: só ao clicar).
+    /// Escolhe SEMPRE o organismo vivo mais próximo do ponto, a qualquer
+    /// distância (leitura síncrona: só ao clicar). A distância é à borda do
+    /// corpo (centro − raio), para um corpo grande ganhar a um pequeno ao lado.
     pub fn pick(&mut self, gpu: &Gpu, world: &World, p: [f32; 2]) {
         let agents = world.read_agents_blocking(gpu);
         let best = agents
             .iter()
             .enumerate()
             .filter(|(_, a)| a.alive != 0)
-            .map(|(s, a)| (s, ((a.pos_x - p[0]).powi(2) + (a.pos_y - p[1]).powi(2)).sqrt(), a))
-            .filter(|(_, d, a)| *d < a.radius.max(30.0) * 2.0)
+            .map(|(s, a)| (s, (((a.pos_x - p[0]).powi(2) + (a.pos_y - p[1]).powi(2)).sqrt() - a.radius).max(0.0), a))
             .min_by(|x, y| x.1.total_cmp(&y.1));
         self.selected = best.map(|(s, _, a)| Selected { slot: s as u32, id: a.id });
         self.data = None;
