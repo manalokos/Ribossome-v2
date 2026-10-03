@@ -141,8 +141,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         let ly_up = min(ly + 1u, LIGHT_SIZE - 1u);
         let light_up = light_view[ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV];
         let rock_glow = LIGHT_GOLD * sqrt(clamp(light_up, 0.0, 1.0));
-        let amb_r = mix(0.35, 1.0, clamp(view.daylight, 0.0, 1.0));
-        return vec4<f32>(clamp(rock * amb_r + rock_glow, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+        return vec4<f32>(clamp(rock + rock_glow, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     }
     let rubble = vec3<f32>(0.22, 0.20, 0.18) * (0.6 + 0.2 * f32(g));
     let back = select(water, rubble, g > 0u);
@@ -162,8 +161,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     let act_frac = act_amt / max(total_amt, 1e-5);
     let hue = mix(MONOMER_SPENT_COLOR, act_col, act_frac);
     let inten = pow(clamp(total_amt, 0.0, 1.0), MONOMER_GAMMA);
-    // Noite: tudo mais escuro (a luz de ambiente acompanha o sol).
-    let ambient = mix(0.35, 1.0, clamp(view.daylight, 0.0, 1.0));
-    let c = mix(back, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) * ambient + glow;
+    // A noite vê-se só na camada da luz (glow), que já vem escura do topo.
+    let c = mix(back, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }

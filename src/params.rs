@@ -263,7 +263,9 @@ gpu_struct! {
         /// ENTRA no topo; a noite desce pela água como a luz (UV, fotossíntese,
         /// aquecimento e desenho veem-na).
         pub sun_now: f32,
-        pub _pad_s0: u32,
+        /// Ângulo máximo do sol ao zénite no nascer/pôr (graus; até 85). Mais
+        /// alto = luz mais rasante de manhã e à tarde, sombras mais compridas.
+        pub sun_angle: f32,
         pub _pad_s1: u32,
         pub _pad_s2: u32,
     }
@@ -273,7 +275,8 @@ gpu_struct! {
 const DERIVED_PARAMS: [&str; 7] = ["epoch", "seed", "fluid_dt", "fluid_enabled", "max_agents", "fumarole_count", "spawn_count"];
 
 impl SimParams {
-    /// Inclinação do sol (tangente do ângulo ao zénite, ±60° do nascer ao pôr).
+    /// Inclinação do sol (tangente do ângulo ao zénite, ±sun_angle do nascer
+    /// ao pôr).
     pub fn sun_slope_at(&self, epoch: u32) -> f32 {
         if self.day_period < 1.0 {
             return 0.0;
@@ -282,7 +285,8 @@ impl SimParams {
         if phase >= 0.5 {
             return 0.0;
         }
-        let angle = (phase / 0.5 - 0.5) * 2.0 * 60f64.to_radians();
+        let max_angle = (self.sun_angle as f64).clamp(0.0, 85.0).to_radians();
+        let angle = (phase / 0.5 - 0.5) * 2.0 * max_angle;
         angle.tan() as f32
     }
 
@@ -395,7 +399,7 @@ impl Default for SimParams {
             day_period: 0.0,
             sun_slope: 0.0,
             sun_now: 1.0,
-            _pad_s0: 0,
+            sun_angle: 80.0,
             _pad_s1: 0,
             _pad_s2: 0,
         }

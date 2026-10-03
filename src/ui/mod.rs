@@ -377,6 +377,8 @@ fn tab_light(ui: &mut egui::Ui, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.day_period, 0.0..=200_000.0).text("dia e noite: período (epochs; 0 = sempre dia)"))
         .on_hover_text("o sol segue max(0, sen(2π·t/período)): noite metade do tempo, com amanhecer e anoitecer");
     if p.day_period >= 1.0 {
+        ui.add(egui::Slider::new(&mut p.sun_angle, 0.0..=85.0).text("sol: ângulo máximo ao nascer/pôr (graus)"))
+            .on_hover_text("0 = sempre a pique; 85 = luz quase rasante de manhã e à tarde (sombras compridas)");
         let d = p.daylight(p.epoch);
         ui.label(format!("  agora: {} ({:.0}% do sol)", if d > 0.0 { "dia" } else { "noite" }, d * 100.0));
     }
