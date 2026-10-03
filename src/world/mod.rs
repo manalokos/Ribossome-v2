@@ -14,8 +14,9 @@ use crate::shaders::{self, CHEM_CELL_CAP};
 
 /// Máximo de passos de simulação por frame (cada um tem a sua cópia dos params).
 pub const MAX_STEPS_PER_FRAME: u32 = 64;
-/// Alinhamento dos offsets dinâmicos de uniform (o mínimo garantido é 256).
-const PARAMS_STRIDE: u64 = 256;
+/// Alinhamento dos offsets dinâmicos de uniform (múltiplo de 256, o mínimo
+/// garantido; os SimParams já passam de 256 bytes).
+const PARAMS_STRIDE: u64 = 512;
 pub const MAX_FUMAROLES: usize = 64;
 const LEDGER_WORDS: u64 = 12;
 /// Máximo de pedidos de sementes por frame.
@@ -1088,9 +1089,9 @@ impl World {
             let spawn_count = if i == 0 { spawns.len() as u32 } else { 0 };
             let epoch = self.params.epoch.wrapping_add(i);
             // Dia e noite: o sol deste passo.
-            let uv_strength = self.params.uv_strength * self.params.daylight(epoch);
+            let sun_now = self.params.daylight(epoch);
             let sun_slope = self.params.sun_slope_at(epoch);
-            let p = SimParams { epoch, spawn_count, uv_strength, sun_slope, ..self.params };
+            let p = SimParams { epoch, spawn_count, sun_now, sun_slope, ..self.params };
             let at = (PARAMS_STRIDE * i as u64) as usize;
             bytes[at..at + size_of::<SimParams>()].copy_from_slice(bytemuck::bytes_of(&p));
         }

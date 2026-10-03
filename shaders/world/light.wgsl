@@ -98,7 +98,7 @@ fn compute_uv_light(@builtin(local_invocation_id) lid_v: vec3<u32>) {
     for (var c = 0u; c < cols; c++) {
         let x = lid * cols + c;
         if (x >= LIGHT_SIZE) { continue; }
-        light_grid[top * LIGHT_SIZE + x] *= row_water;
+        light_grid[top * LIGHT_SIZE + x] *= row_water * params.sun_now;
     }
     storageBarrier();
     workgroupBarrier();
@@ -125,7 +125,8 @@ fn light_propagate(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = i % LIGHT_SIZE;
     let y = i / LIGHT_SIZE;
     let row_water = exp(-max(params.uv_depth, 0.0) * f32(LIGHT_DIV) / f32(GRID_SIZE));
-    var above = 1.0;
+    // No topo entra o sol desta hora (de noite, nada).
+    var above = params.sun_now;
     if (y + 1u < LIGHT_SIZE) { above = light_above(x, y + 1u); }
     light_next[i] = above * row_water * light_transmit(x, y);
 }
@@ -144,7 +145,7 @@ const SUN_WATER_ABSORB: f32 = 0.05;
 fn light_absorbed_at(env: u32) -> f32 {
     let lx = (env % GRID_SIZE) / LIGHT_DIV;
     let ly = (env / GRID_SIZE) / LIGHT_DIV;
-    var incoming = 1.0;
+    var incoming = params.sun_now;
     if (ly + 1u < LIGHT_SIZE) { incoming = light_above(lx, ly + 1u); }
     incoming = max(incoming, 0.0);
     return incoming * ((1.0 - light_transmit(lx, ly)) + SUN_WATER_ABSORB);

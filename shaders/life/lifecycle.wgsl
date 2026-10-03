@@ -488,7 +488,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             // pelo sol, o que dá a capacidade de carga dos produtores.
             let lx = (cell % GRID_SIZE) / LIGHT_DIV;
             let ly = (cell / GRID_SIZE) / LIGHT_DIV;
-            var incoming = 1.0;
+            var incoming = params.sun_now;
             if (ly + 1u < LIGHT_SIZE) { incoming = light_above(lx, ly + 1u); }
             let s_abs = max(f32(atomicLoad(&shade_grid[ly * LIGHT_SIZE + lx])) / f32(SHADE_ONE), 1.0);
             let share = (1.0 - exp(-AGENT_UV_ABSORB * s_abs)) / s_abs;

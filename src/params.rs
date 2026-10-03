@@ -259,6 +259,13 @@ gpu_struct! {
         /// pique). Calculada pelo passo a partir da hora do dia: de manhã a
         /// luz vem de um lado, à tarde do outro (as sombras rodam).
         pub sun_slope: f32,
+        /// Fração do sol neste passo (calculada pelo passo): é a luz que
+        /// ENTRA no topo; a noite desce pela água como a luz (UV, fotossíntese,
+        /// aquecimento e desenho veem-na).
+        pub sun_now: f32,
+        pub _pad_s0: u32,
+        pub _pad_s1: u32,
+        pub _pad_s2: u32,
     }
 }
 
@@ -387,6 +394,10 @@ impl Default for SimParams {
             denature_temp: 6.0,
             day_period: 0.0,
             sun_slope: 0.0,
+            sun_now: 1.0,
+            _pad_s0: 0,
+            _pad_s1: 0,
+            _pad_s2: 0,
         }
     }
 }
