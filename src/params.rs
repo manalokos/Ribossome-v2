@@ -252,8 +252,9 @@ gpu_struct! {
         /// Temperatura a partir da qual o calor desnatura (o miolo das
         /// fumarolas chega a 12; a pluma morna anda por 3–6).
         pub denature_temp: f32,
-        /// DIA E NOITE: período do ciclo em epochs (0 = sempre dia). O sol
-        /// (uv_strength) é × max(0, sen(2π·epoch/período)): noite metade do tempo.
+        /// DIA E NOITE: período do ciclo em epochs (0 = sempre dia). Durante
+        /// a fração day_fraction do ciclo o sol sobe e desce como meio seno;
+        /// no resto é noite.
         pub day_period: f32,
         /// Inclinação do sol neste passo (células de luz por linha; 0 = a
         /// pique). Calculada pelo passo a partir da hora do dia: de manhã a
@@ -266,7 +267,9 @@ gpu_struct! {
         /// Ângulo máximo do sol ao zénite no nascer/pôr (graus; até 85). Mais
         /// alto = luz mais rasante de manhã e à tarde, sombras mais compridas.
         pub sun_angle: f32,
-        pub _pad_s1: u32,
+        /// Fração do período que é dia (0,5 = dia e noite iguais; 0,75 =
+        /// dia de 3/4 do ciclo, noite curta).
+        pub day_fraction: f32,
         pub _pad_s2: u32,
     }
 }
@@ -281,12 +284,12 @@ impl SimParams {
         if self.day_period < 1.0 {
             return 0.0;
         }
-        let phase = (epoch as f64 / self.day_period as f64).fract();
-        if phase >= 0.5 {
+        let (day, phase) = self.day_phase(epoch);
+        if !day {
             return 0.0;
         }
         let max_angle = (self.sun_angle as f64).clamp(0.0, 85.0).to_radians();
-        let angle = (phase / 0.5 - 0.5) * 2.0 * max_angle;
+        let angle = (phase - 0.5) * 2.0 * max_angle;
         angle.tan() as f32
     }
 
@@ -295,8 +298,18 @@ impl SimParams {
         if self.day_period < 1.0 {
             return 1.0;
         }
+        let (day, phase) = self.day_phase(epoch);
+        if !day {
+            return 0.0;
+        }
+        (std::f64::consts::PI * phase).sin().max(0.0) as f32
+    }
+
+    /// (é dia?, posição dentro do dia 0..1 do nascer ao pôr).
+    fn day_phase(&self, epoch: u32) -> (bool, f64) {
         let phase = (epoch as f64 / self.day_period as f64).fract();
-        (std::f64::consts::TAU * phase).sin().max(0.0) as f32
+        let frac = (self.day_fraction as f64).clamp(0.05, 1.0);
+        (phase < frac, phase / frac)
     }
 
     /// Os parâmetros diferentes dos valores do código: (nome, atual, código).
@@ -400,7 +413,7 @@ impl Default for SimParams {
             sun_slope: 0.0,
             sun_now: 1.0,
             sun_angle: 80.0,
-            _pad_s1: 0,
+            day_fraction: 0.75,
             _pad_s2: 0,
         }
     }
