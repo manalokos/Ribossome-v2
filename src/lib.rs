@@ -4,6 +4,7 @@
 pub mod editor;
 pub mod gpu;
 pub mod life;
+pub mod mcp;
 pub mod params;
 pub mod render;
 pub mod runlog;

@@ -172,6 +172,13 @@ impl History {
         }
     }
 
+    /// As últimas `n` amostras guardadas: (epoch, valores pela ordem de `names`).
+    pub fn last_rows(&self, n: usize) -> Vec<(u32, &[f32])> {
+        let k = self.names.len();
+        let start = self.epochs.len().saturating_sub(n);
+        (start..self.epochs.len()).map(|i| (self.epochs[i], &self.values[i * k..(i + 1) * k])).collect()
+    }
+
     /// Para gravar com a cena: metadados (JSON) e as amostras (binário:
     /// n, epochs[n], valores[n × séries], em u32/f32 little-endian).
     pub fn to_json(&self) -> serde_json::Value {

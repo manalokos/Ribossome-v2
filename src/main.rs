@@ -37,6 +37,8 @@ struct Running {
     runlog: ribossome::runlog::RunLog,
     /// Editor local da tabela dos aminoácidos (http://127.0.0.1:8787).
     editor: Option<ribossome::editor::Editor>,
+    /// Servidor MCP local (http://127.0.0.1:8788/mcp).
+    mcp: Option<ribossome::mcp::Mcp>,
     /// Gravação de cena em curso (a thread que comprime e escreve).
     save_job: Option<std::thread::JoinHandle<Result<String, String>>>,
     /// Epoch do último autosave.
@@ -249,6 +251,7 @@ impl Running {
         ));
         let editor =
             ribossome::editor::Editor::start(world.amino.clone(), world.organ_table.clone(), world.organ_code.clone());
+        let mcp = ribossome::mcp::Mcp::start();
         let mut inspector = ui::inspector::Inspector::new(&gpu, &world);
         inspector.register(&gpu.device, &mut egui_renderer);
 
@@ -274,6 +277,7 @@ impl Running {
             seed_rng: ribossome::life::SplitMix(seed ^ 0x5EED),
             runlog,
             editor,
+            mcp,
             save_job: None,
             last_autosave,
             kin_id: None,
@@ -461,6 +465,140 @@ impl Running {
         }
     }
 
+    /// Atende os pedidos do servidor MCP (entre frames, na thread principal).
+    fn mcp_tick(&mut self) {
+        let calls: Vec<ribossome::mcp::Call> = match &self.mcp {
+            Some(m) => m.rx.try_iter().collect(),
+            None => return,
+        };
+        for c in calls {
+            let out = self.mcp_call(&c.tool, &c.args);
+            let _ = c.reply.send(out);
+        }
+    }
+
+    fn mcp_call(&mut self, tool: &str, args: &serde_json::Value) -> Result<Vec<serde_json::Value>, String> {
+        use ribossome::mcp::{json_text, png, text};
+        use serde_json::json;
+        let named = |p: &ribossome::params::SimParams, k: &str| p.to_named().into_iter().find(|(n, _)| *n == k).map_or(0.0, |(_, v)| v);
+        // Os parâmetros são f32/u32: mostra-os como tal (0.6, não 0.6000000238).
+        let num = |v: f64| if v.fract() == 0.0 && v.abs() < 1e15 { json!(v as i64) } else { json!(format!("{}", v as f32).parse::<f64>().unwrap_or(v)) };
+        match tool {
+            "get_params" => {
+                let p = &self.world.params;
+                let d = ribossome::params::SimParams::default().to_named();
+                let cur: serde_json::Map<String, serde_json::Value> = p
+                    .to_named()
+                    .into_iter()
+                    .zip(d)
+                    .filter(|((n, _), _)| !n.starts_with('_'))
+                    .map(|((n, v), (_, dv))| (n.to_string(), json!({ "atual": num(v), "omissao": num(dv) })))
+                    .collect();
+                let changed: Vec<serde_json::Value> = p
+                    .changed_from_default()
+                    .into_iter()
+                    .map(|(n, v, dv)| json!({ "nome": n, "atual": num(v), "omissao": num(dv) }))
+                    .collect();
+                Ok(vec![json_text(&json!({
+                    "epoch": p.epoch,
+                    "pausa": self.ui.paused,
+                    "passos_por_frame": self.ui.steps_per_frame,
+                    "sol_agora": p.daylight(p.epoch),
+                    "mudados": changed,
+                    "parametros": cur,
+                }))])
+            }
+            "set_params" => {
+                let map = args["params"].as_object().ok_or("falta 'params' (objeto nome -> valor)")?;
+                // Valida tudo antes de mudar alguma coisa.
+                let mut probe = self.world.params;
+                for (k, v) in map {
+                    let x = v.as_f64().ok_or(format!("{k}: o valor tem de ser um número"))?;
+                    if k.starts_with('_') || !probe.set_named(k, x) {
+                        return Err(format!("parâmetro desconhecido: {k}"));
+                    }
+                }
+                let mut lines = Vec::new();
+                for (k, v) in map {
+                    let old = named(&self.world.params, k);
+                    self.world.params.set_named(k, v.as_f64().unwrap_or(0.0));
+                    let new = named(&self.world.params, k);
+                    log::info!("mcp: {k} {} -> {}", num(old), num(new));
+                    lines.push(format!("{k}: {} -> {}", num(old), num(new)));
+                }
+                Ok(vec![text(lines.join("\n"))])
+            }
+            "get_stats" => {
+                let h = &self.ui.history;
+                let n = args["last"].as_u64().unwrap_or(10).clamp(1, 1000) as usize;
+                let want: Vec<String> = args["series"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                if let Some(bad) = want.iter().find(|s| !h.names.contains(s)) {
+                    return Err(format!("série desconhecida: {bad}; existem: {}", h.names.join(", ")));
+                }
+                let rows: Vec<serde_json::Value> = h
+                    .last_rows(n)
+                    .into_iter()
+                    .map(|(e, v)| {
+                        let mut m = serde_json::Map::new();
+                        m.insert("epoch".into(), json!(e));
+                        for (name, x) in h.names.iter().zip(v) {
+                            if want.is_empty() || want.contains(name) {
+                                m.insert(name.clone(), json!((*x as f64 * 1000.0).round() / 1000.0));
+                            }
+                        }
+                        serde_json::Value::Object(m)
+                    })
+                    .collect();
+                Ok(vec![json_text(&json!({ "amostra_a_cada_epochs": h.every, "amostras": rows }))])
+            }
+            "habitat" => {
+                let block = args["block"].as_u64().unwrap_or(128) as usize;
+                Ok(vec![json_text(&ribossome::mcp::habitat(&self.gpu, &self.world, block))])
+            }
+            "screenshot" => {
+                let size = args["size"].as_u64().unwrap_or(768).clamp(64, 2048) as u32;
+                let view = args["view"].as_u64().unwrap_or(0) as u32;
+                let bright = args["brightness"].as_f64().unwrap_or(0.5) as f32;
+                let s = self.world.cfg.sim_size();
+                let cam = if args["camera"].as_bool().unwrap_or(false) {
+                    let [_, h] = self.screen();
+                    Camera { center: self.cam.center, zoom: self.cam.zoom * size as f32 / h.max(1.0) }
+                } else {
+                    Camera { center: [0.5 * s, 0.5 * s], zoom: size as f32 / s }
+                };
+                let cap = ribossome::render::capture::Capture::new(&self.gpu, &self.world, size);
+                let rgba = cap.render(&self.gpu, &self.world, &cam, view, bright);
+                let bytes = cap.encode_png(&rgba).map_err(|e| format!("png: {e}"))?;
+                Ok(vec![png(&bytes), text(format!("vista {view}, epoch {}", self.world.params.epoch))])
+            }
+            "save_scene" => {
+                let name = args["name"].as_str().ok_or("falta 'name'")?;
+                if name.is_empty() || name.contains(['/', '\\', '.']) || name.starts_with("autosave") {
+                    return Err("nome inválido (sem / \\ . e não pode começar por autosave)".into());
+                }
+                let _ = std::fs::create_dir_all(SAVES_DIR);
+                let path = std::path::Path::new(SAVES_DIR).join(format!("{name}.ribo"));
+                self.finish_save(true);
+                self.start_save(path.clone(), false);
+                Ok(vec![text(format!("a gravar {} (epoch {})", path.display(), self.world.params.epoch))])
+            }
+            "pause" => {
+                if let Some(p) = args["paused"].as_bool() {
+                    self.ui.paused = p;
+                }
+                if let Some(n) = args["steps_per_frame"].as_u64() {
+                    self.ui.steps_per_frame = (n as u32).clamp(1, ribossome::world::MAX_STEPS_PER_FRAME);
+                }
+                log::info!("mcp: pausa {} passos/frame {}", self.ui.paused, self.ui.steps_per_frame);
+                Ok(vec![text(format!("pausa: {}, passos por frame: {}", self.ui.paused, self.ui.steps_per_frame))])
+            }
+            _ => Err(format!("ferramenta desconhecida: {tool}")),
+        }
+    }
+
     /// Ao fechar: grava o autosave e espera que fique escrito.
     fn on_close(&mut self) {
         if self.ui.autosave_on
@@ -549,6 +687,7 @@ impl Running {
                 ed.open_browser();
             }
         }
+        self.mcp_tick();
         self.scene_tick();
         self.inspector.poll(&self.gpu.device);
         if self.inspector.follow

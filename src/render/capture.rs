@@ -127,6 +127,18 @@ impl Capture {
         data
     }
 
+    /// A imagem em PNG, em memória.
+    pub fn encode_png(&self, rgba: &[u8]) -> std::io::Result<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut enc = png::Encoder::new(&mut out, self.size, self.size);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().map_err(std::io::Error::other)?;
+        w.write_image_data(rgba).map_err(std::io::Error::other)?;
+        w.finish().map_err(std::io::Error::other)?;
+        Ok(out)
+    }
+
     pub fn save_png(&self, rgba: &[u8], path: &std::path::Path) -> std::io::Result<()> {
         let file = std::io::BufWriter::new(std::fs::File::create(path)?);
         let mut enc = png::Encoder::new(file, self.size, self.size);
