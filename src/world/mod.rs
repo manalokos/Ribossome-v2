@@ -125,6 +125,8 @@ impl Default for WorldSettings {
 
 struct Pipelines {
     transport: wgpu::ComputePipeline,
+    agg_count: wgpu::ComputePipeline,
+    agg_neighbours: wgpu::ComputePipeline,
     commit: wgpu::ComputePipeline,
     thermal_activation: wgpu::ComputePipeline,
     ledger: wgpu::ComputePipeline,
@@ -380,6 +382,8 @@ impl World {
         let shade_buf = storage_buffer(device, "agent shade", lcells * 4);
         let light_tmp = storage_buffer(device, "uv light next", lcells * 4);
         let slope_buf = storage_buffer(device, "gamma slope", cells * 8);
+        let agg_act = storage_buffer(device, "aggregation counts", cells * 4);
+        let agg_nb = storage_buffer(device, "aggregation neighbours", cells * 4);
         let ledger_staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ledger staging"),
             // Livro-razão + contadores do ciclo de vida (8 palavras).
@@ -497,7 +501,7 @@ impl World {
         // Grupo 1 — mundo (resolução do ambiente).
         let world_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("world layout"),
-            entries: &(0..8).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
+            entries: &(0..10).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
         });
         // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
         let fluid_entries: Vec<_> = (0..15).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
@@ -536,7 +540,7 @@ impl World {
         let world_bg = bind_all(
             "world bg",
             &world_layout,
-            &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf, &chem_next, &shade_buf, &light_tmp],
+            &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf, &chem_next, &shade_buf, &light_tmp, &agg_act, &agg_nb],
         );
         // Ping-pong: "ab" lê a e escreve b (velocidade e pressão em simultâneo).
         let fluid_ab = bind_all(
@@ -704,6 +708,8 @@ impl World {
         };
         let pipelines = Pipelines {
             transport: compute("transport_scatter"),
+            agg_count: compute("agg_count"),
+            agg_neighbours: compute("agg_neighbours"),
             commit: compute("transport_commit"),
             thermal_activation: compute("thermal_activation"),
             ledger: compute("ledger_reduce"),
@@ -1227,6 +1233,10 @@ impl World {
 
             // TRANSPORTE em duas fases (reprodutível): espalhar para chem_next
             // a partir do estado antes do passo, depois copiar de volta.
+            if self.params.aggregation > 0.0 {
+                run(&mut pass, "agg_count", &pl.agg_count, ab, [g, g]);
+                run(&mut pass, "agg_neighbours", &pl.agg_neighbours, ab, [g, g]);
+            }
             run(&mut pass, "transport", &pl.transport, ab, [g, g]);
             run(&mut pass, "commit", &pl.commit, ab, commit_groups);
 

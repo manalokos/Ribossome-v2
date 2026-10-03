@@ -57,6 +57,35 @@ fn parcel_hop_p(v: vec2<f32>) -> f32 {
     return clamp(l1 * env_per_fluid * max(params.dt, 1e-3), 0.0, GRAIN_ADV_CAP);
 }
 
+// AGREGAÇÃO, passo 1: ativados por célula (todos os canais).
+@compute @workgroup_size(16, 16)
+fn agg_count(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= GRID_SIZE || gid.y >= GRID_SIZE) { return; }
+    let idx = gid.y * GRID_SIZE + gid.x;
+    var c = 0u;
+    for (var ch = 0u; ch < 4u; ch++) { c += chem_act_count(idx, ch); }
+    agg_act[idx] = c;
+}
+
+// AGREGAÇÃO, passo 2: ativados nas 8 células vizinhas.
+@compute @workgroup_size(16, 16)
+fn agg_neighbours(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let x = gid.x;
+    let y = gid.y;
+    if (x >= GRID_SIZE || y >= GRID_SIZE) { return; }
+    var sum = 0u;
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            let nx = i32(x) + dx;
+            let ny = i32(y) + dy;
+            if (nx < 0 || ny < 0 || nx >= i32(GRID_SIZE) || ny >= i32(GRID_SIZE)) { continue; }
+            sum += agg_act[u32(ny) * GRID_SIZE + u32(nx)];
+        }
+    }
+    agg_nb[y * GRID_SIZE + x] = sum;
+}
+
 // SORTEIO SUAVE para arredondar a deslocação dos grumos: ruído de valor
 // (um valor por passo a cada SMOOTH_CELL células, interpolado suavemente) +
 // um deslocamento global aleatório, módulo 1. Cada célula continua com um
@@ -183,34 +212,12 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     var p_bound = 0.0;
     var accept = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
     if (params.aggregation > 0.0 && src_total <= chem_capacity(idx)) {
-        // Ativados (todos os canais) na janela 5×5 à volta.
-        var win = array<u32, 25>();
-        for (var dy = -2; dy <= 2; dy++) {
-            for (var dx = -2; dx <= 2; dx++) {
-                let nx = i32(x) + dx;
-                let ny = i32(y) + dy;
-                var c = 0u;
-                if (nx >= 0 && ny >= 0 && nx < i32(GRID_SIZE) && ny < i32(GRID_SIZE)) {
-                    let ni = u32(ny) * GRID_SIZE + u32(nx);
-                    for (var c2 = 0u; c2 < 4u; c2++) { c += chem_act_count(ni, c2); }
-                }
-                win[u32((dy + 2) * 5 + dx + 2)] = c;
-            }
-        }
-        // Vizinhos (8 à volta) de um sítio a (ox, oy) do centro.
-        var e = array<f32, 5>(0.0, 0.0, 0.0, 0.0, 0.0);
-        var ox = array<i32, 5>(0, 1, -1, 0, 0);
-        var oy = array<i32, 5>(0, 0, 0, 1, -1);
-        for (var s5 = 0u; s5 < 5u; s5++) {
-            var sum = 0u;
-            for (var dy = -1; dy <= 1; dy++) {
-                for (var dx = -1; dx <= 1; dx++) {
-                    if (dx == 0 && dy == 0) { continue; }
-                    sum += win[u32((oy[s5] + dy + 2) * 5 + ox[s5] + dx + 2)];
-                }
-            }
-            e[s5] = f32(sum);
-        }
+        // Vizinhos ativados aqui e nos 4 destinos (pré-calculados em agg_nb).
+        var e = array<f32, 5>(f32(agg_nb[idx]), 0.0, 0.0, 0.0, 0.0);
+        if (x + 1u < GRID_SIZE) { e[1] = f32(agg_nb[idx + 1u]); }
+        if (x > 0u) { e[2] = f32(agg_nb[idx - 1u]); }
+        if (y + 1u < GRID_SIZE) { e[3] = f32(agg_nb[idx + GRID_SIZE]); }
+        if (y > 0u) { e[4] = f32(agg_nb[idx - GRID_SIZE]); }
         let fx = min((x * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
         let fy = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
         // T = 1 na água à temperatura ambiente; no limiar da ativação térmica, 2.

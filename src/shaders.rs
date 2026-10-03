@@ -55,6 +55,8 @@ pub const WORLD: ModuleDef = ModuleDef {
     entries: &[
         ("transport_scatter", Stage::Compute),
         ("transport_commit", Stage::Compute),
+        ("agg_count", Stage::Compute),
+        ("agg_neighbours", Stage::Compute),
         ("thermal_activation", Stage::Compute),
         ("ledger_reduce", Stage::Compute),
         ("compute_uv_light", Stage::Compute),

@@ -15,6 +15,7 @@ fn main() {
     world.load_terrain_png(std::path::Path::new("assets/terreno.png")).unwrap();
     world.seed_matter(&gpu, 1);
     world.params.agent_fluid_push = env("PUSH", world.params.agent_fluid_push);
+    world.params.aggregation = env("AGG", world.params.aggregation);
     world.params.death_probability = 0.0;
     world.params.maintenance_cost = 0.0;
     world.params.pairing_rate = 0.0;

@@ -50,3 +50,8 @@
 @group(1) @binding(6) var<storage, read_write> shade_grid: array<atomic<u32>>;
 // Luz do passo seguinte (propagação; light_commit copia para light_grid).
 @group(1) @binding(7) var<storage, read_write> light_next: array<f32>;
+// AGREGAÇÃO (só com params.aggregation > 0): ativados por célula (todos os
+// canais) e a soma dos 8 vizinhos, calculados antes do transporte (assim o
+// transporte lê 5 valores por célula em vez de uma janela 5×5 × 4 canais).
+@group(1) @binding(8) var<storage, read_write> agg_act: array<u32>;
+@group(1) @binding(9) var<storage, read_write> agg_nb: array<u32>;
