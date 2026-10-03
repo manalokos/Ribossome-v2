@@ -329,7 +329,9 @@ fn kin_vertex(vi: u32, slot: u32, a: Agent) -> AgentVsOut {
     o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
     let q = kin_view[slot];
     if (view.signal_view != 4u || a.alive == 0u || q < 0.0) { return o; }
-    let t = clamp(q, 0.0, 1.0);
+    // Raiz quadrada: mais resolução nos parentescos fracos (os clãs
+    // distantes distinguem-se uns dos outros): 25% de 8-meros -> meio da escala.
+    let t = sqrt(clamp(q, 0.0, 1.0));
     let col = select(mix(vec3<f32>(1.0, 0.85, 0.1), vec3<f32>(0.15, 1.0, 0.25), (t - 0.5) * 2.0),
                      mix(vec3<f32>(1.0, 0.12, 0.08), vec3<f32>(1.0, 0.85, 0.1), t * 2.0), t < 0.5);
     let c = vec2<f32>(a.pos_x, a.pos_y);
