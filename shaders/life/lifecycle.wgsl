@@ -296,24 +296,26 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     var aux = rna_tail[slot * 2u + 1u];
     if (a.age == 0u) { aux = vec4<f32>(0.0); } // slot reutilizado: sem herança
     // Orientação a meio do passo (o corpo roda durante o passo).
-    let rot_mid = a.rot + 0.5 * (js.swim.z + js.flow.z);
+    // Transporte pela água × flow_coupling (1 = físico).
+    let fc = clamp(params.flow_coupling, 0.0, 1.0);
+    let rot_mid = a.rot + 0.5 * (js.swim.z + fc * js.flow.z);
     let sv_phys = rotate(js.swim.xy, rot_mid);
     let avg = mix(aux.zw, sv_phys, 1.0 / SWIM_AVG_STEPS);
     aux = vec4<f32>(aux.xy, avg);
     // Avanço médio × ganho + vaivém (o resto) × swim_wobble.
     let sv = max(params.swim_gain, 0.0) * avg + clamp(params.swim_wobble, 0.0, 1.0) * (sv_phys - avg);
     swim_v = sv;
-    var flow_w = rotate(js.flow.xy, rot_mid);
+    var flow_w = fc * rotate(js.flow.xy, rot_mid);
     if (a.body_len < 2u && params.fluid_enabled != 0u) {
         // Sem corpo articulado (RNA nu, um resíduo): levado pela água no centro.
-        flow_w = water_at(vec2<f32>(a.pos_x, a.pos_y), true);
+        flow_w = fc * water_at(vec2<f32>(a.pos_x, a.pos_y), true);
     }
     let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv + flow_w, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
     if (gamma_count(world_to_cell(np0)) < GAMMA_SOLID_THRESHOLD) {
         a.pos_x = np0.x;
         a.pos_y = np0.y;
     }
-    a.rot += js.swim.z + js.flow.z + js.phi;
+    a.rot += js.swim.z + fc * js.flow.z + js.phi;
     a.vel_x = flow_w.x / max(params.dt, 1e-6);
     a.vel_y = flow_w.y / max(params.dt, 1e-6);
     a.age += 1u;

@@ -230,7 +230,10 @@ gpu_struct! {
         /// isto × (excesso de temperatura acima do limiar / 10) ×
         /// (1 − termoestabilidade média do corpo). Não depende da energia.
         pub heat_kill: f32,
-        pub _pad_g2: u32,
+        /// EXPERIÊNCIA: fração do transporte pela água que se aplica aos
+        /// agentes (1 = físico: a baixo Reynolds um corpo livre segue a
+        /// corrente; 0 = ignoram as correntes e só nadam).
+        pub flow_coupling: f32,
     }
 }
 
@@ -328,7 +331,7 @@ impl Default for SimParams {
             aggregation: 0.0,
             photo_yield: 0.1,
             heat_kill: 0.05,
-            _pad_g2: 0,
+            flow_coupling: 1.0,
         }
     }
 }
