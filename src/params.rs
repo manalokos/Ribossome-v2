@@ -342,9 +342,10 @@ impl SimParams {
 impl Default for SimParams {
     fn default() -> Self {
         // Valores afinados pelo Filipe a ver o mundo (out 2026), com dois
-        // ajustes: heat_kill 0,2 (o metabolismo Q10 já torna o calor caro) e
+        // ajustes: heat_kill 0,1 (o metabolismo Q10 já torna o calor caro) e
         // dia de 8000 epochs (com 3/4 de dia, a noite de 2000 cabe na vida
-        // de um agente, ~2500 passos).
+        // de um agente, ~2500 passos). Pingos de ativação abiótica (sol 0,02,
+        // calor 0,1) e fotossíntese 0,5: equilíbrio visto pelo Filipe.
         Self {
             epoch: 0,
             seed: 1,
@@ -396,7 +397,7 @@ impl Default for SimParams {
             bioturbation_cost: 0.05,
             monomer_uv_absorb: 0.0,
             sedimentation: 0.11,
-            direct_photoactivation: 0.0,
+            direct_photoactivation: 0.02,
             // 0 (pedido do Filipe; o valor antigo fixo era 0,0002).
             activation_decay: 0.0,
             monomer_pressure: 20.0,
@@ -408,14 +409,14 @@ impl Default for SimParams {
             bond_energy_share: 0.01,
             bond_signal: 0.5,
             aggregation: 0.02,
-            photo_yield: 0.21,
-            heat_kill: 0.2,
+            photo_yield: 0.5,
+            heat_kill: 0.1,
             flow_coupling: 1.0,
             inertia: 2.0,
             death_energy_cap: 20.0,
             chemo_yield: 1.0,
             redox_decay: 0.02,
-            thermal_activation: 0.0,
+            thermal_activation: 0.1,
             denature_temp: 8.0,
             day_period: 8000.0,
             sun_slope: 0.0,
