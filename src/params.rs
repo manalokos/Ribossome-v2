@@ -239,9 +239,21 @@ gpu_struct! {
         /// massa relativa a um corpo médio de 16 resíduos). 0 = sobreamortecido
         /// puro (sem inércia). Os pesados aceleram devagar e perdem as rajadas.
         pub inertia: f32,
-        pub _pad_i0: u32,
-        pub _pad_i1: u32,
-        pub _pad_i2: u32,
+        /// Teto da energia que reduz a mortalidade base (morte ∝ 1/energia até
+        /// aqui): uma reserva protege, acumular muito mais não. 0 = sem teto (v3).
+        pub death_energy_cap: f32,
+        /// Quimiossíntese: energia por unidade de redutor consumido.
+        pub chemo_yield: f32,
+        /// Oxidação do redutor das fumarolas na água (por s).
+        pub redox_decay: f32,
+        /// Ativação ABIÓTICA dos gastos pelo calor das fumarolas (× a de sempre;
+        /// 0 = só os quimiossintéticos tiram partido das fumarolas).
+        pub thermal_activation: f32,
+        /// Temperatura a partir da qual o calor desnatura (o miolo das
+        /// fumarolas chega a 12; a pluma morna anda por 3–6).
+        pub denature_temp: f32,
+        pub _pad_c1: u32,
+        pub _pad_c2: u32,
     }
 }
 
@@ -338,12 +350,16 @@ impl Default for SimParams {
             bond_signal: 0.5,
             aggregation: 0.0,
             photo_yield: 0.1,
-            heat_kill: 0.05,
+            heat_kill: 0.02,
             flow_coupling: 1.0,
             inertia: 1.0,
-            _pad_i0: 0,
-            _pad_i1: 0,
-            _pad_i2: 0,
+            death_energy_cap: 10.0,
+            chemo_yield: 1.0,
+            redox_decay: 0.02,
+            thermal_activation: 1.0,
+            denature_temp: 6.0,
+            _pad_c1: 0,
+            _pad_c2: 0,
         }
     }
 }

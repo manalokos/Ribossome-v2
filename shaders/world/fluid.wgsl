@@ -27,6 +27,10 @@ const TEMP_BUOYANCY: f32 = 12.0;    // força por unidade de desvio ao ambiente
 const TEMP_AMBIENT_SURFACE: f32 = 0.0;
 const TEMP_AMBIENT_ATTEN: f32 = 4.0;
 const TEMP_DIFFUSE: f32 = 0.08;
+// Redutor: largado ∝ calor das fumarolas; ponto fixo do consumo; teto.
+const REDOX_RATE: f32 = 0.01;
+const REDOX_FP: f32 = 10000.0;
+const REDOX_MAX: f32 = 50.0;
 
 fn fgrid(x: u32, y: u32) -> u32 {
     return y * FLUID_SIZE + x;
@@ -292,6 +296,21 @@ fn update_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     let amb = temp_ambient_at(y);
     t = amb + (t - amb) * exp(-TEMP_COOL_RATE * dt);
     temp_out[idx] = clamp(t, 0.0, TEMP_MAX);
+
+    // REDUTOR: a mesma advecção e difusão; nasce nas fumarolas, perde o
+    // que os quimiossintéticos comeram e oxida-se devagar (mais devagar do
+    // que o calor arrefece: chega mais longe do que a zona que mata).
+    var r = mix(mix(redox_in[fgrid(x0, y0)], redox_in[fgrid(x1, y0)], fx),
+                mix(redox_in[fgrid(x0, y1)], redox_in[fgrid(x1, y1)], fx), fy);
+    let rl = redox_in[fgrid(u32(max(i32(x) - 1, 0)), y)];
+    let rr = redox_in[fgrid(min(x + 1u, FLUID_SIZE - 1u), y)];
+    let rb = redox_in[fgrid(x, u32(max(i32(y) - 1, 0)))];
+    let rt = redox_in[fgrid(x, min(y + 1u, FLUID_SIZE - 1u))];
+    r = mix(r, (rl + rr + rb + rt) * 0.25, TEMP_DIFFUSE);
+    r += heat_src[idx] * REDOX_RATE * dt;
+    r = max(r - f32(atomicLoad(&redox_eaten[idx])) / REDOX_FP, 0.0);
+    r *= exp(-max(params.redox_decay, 0.0) * dt);
+    redox_out[idx] = clamp(r, 0.0, REDOX_MAX);
 }
 
 @compute @workgroup_size(16, 16)
@@ -299,6 +318,8 @@ fn copy_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= FLUID_SIZE || gid.y >= FLUID_SIZE) { return; }
     let idx = fgrid(gid.x, gid.y);
     temp_in[idx] = temp_out[idx];
+    redox_in[idx] = redox_out[idx];
+    atomicStore(&redox_eaten[idx], 0u);
 }
 
 // FLUTUAÇÃO: força = cima × BUOYANCY × desvio ao ambiente local, com uma

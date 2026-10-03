@@ -304,6 +304,7 @@ impl World {
         blocks.push(("velocity", gpu.read_buffer_blocking(&self.velocity_buf)));
         blocks.push(("pressure", gpu.read_buffer_blocking(&self.snap.pressure)));
         blocks.push(("temperature", gpu.read_buffer_blocking(&self.temp_buf)));
+        blocks.push(("redox", gpu.read_buffer_blocking(&self.redox_buf)));
         if let Some((g, h)) = &self.custom_terrain {
             blocks.push(("custom_gamma", bytemuck::cast_slice(g).to_vec()));
             blocks.push(("custom_heat", bytemuck::cast_slice(h).to_vec()));
@@ -448,6 +449,9 @@ impl World {
         q.write_buffer(&self.velocity_buf, 0, scene.block("velocity")?);
         q.write_buffer(&self.snap.pressure, 0, scene.block("pressure")?);
         q.write_buffer(&self.temp_buf, 0, scene.block("temperature")?);
+        if let Some(r) = scene.blocks.get("redox").filter(|b| b.len() == fcells * 4) {
+            q.write_buffer(&self.redox_buf, 0, r);
+        }
 
         // Agentes: limpa, espalha os vivos pelos slots gravados e refaz a
         // pilha dos slots livres (o mais baixo sai primeiro, como no início).

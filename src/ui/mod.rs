@@ -163,7 +163,7 @@ impl UiState {
     }
 }
 
-pub const VIEW_NAMES: [&str; 10] = [
+pub const VIEW_NAMES: [&str; 11] = [
     "normal",
     "1 A ativ.",
     "2 U ativ.",
@@ -174,6 +174,7 @@ pub const VIEW_NAMES: [&str; 10] = [
     "7 temperatura",
     "8 luz UV",
     "9 fluido",
+    "redutor das fumarolas",
 ];
 const CH: [&str; 4] = ["A", "U", "G", "C"];
 
@@ -390,6 +391,14 @@ fn tab_light(ui: &mut egui::Ui, world: &mut World) {
 fn tab_water(ui: &mut egui::Ui, world: &mut World) {
     let p = &mut world.params;
     let st = &mut world.settings;
+    ui.strong("Fumarolas: química");
+    ui.add(egui::Slider::new(&mut p.thermal_activation, 0.0..=2.0).text("ativação abiótica pelo calor"))
+        .on_hover_text("o calor reativa gastos sozinho (× a de sempre); 0 = só os quimiossintéticos aproveitam as fumarolas");
+    ui.add(egui::Slider::new(&mut p.chemo_yield, 0.0..=5.0).text("rendimento da quimiossíntese"))
+        .on_hover_text("energia por unidade de redutor consumido");
+    ui.add(egui::Slider::new(&mut p.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("oxidação do redutor (1/s)"))
+        .on_hover_text("quanto mais lento, mais longe o redutor chega (vista 'redutor das fumarolas')");
+    ui.separator();
     ui.checkbox(&mut st.fluid_enabled, "fluido ligado");
     ui.checkbox(&mut st.multigrid, "pressão por multigrid (senão Jacobi)");
     if st.multigrid {
@@ -464,6 +473,10 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.strong("Metabolismo e ciclo de vida");
     let p = &mut world.params;
     ui.add(egui::Slider::new(&mut p.death_probability, 0.0..=0.2).text("mortalidade base"));
+    ui.add(egui::Slider::new(&mut p.death_energy_cap, 0.0..=200.0).text("teto da proteção pela energia"))
+        .on_hover_text("a mortalidade base é ÷ energia só até este valor (uma reserva protege, acumular mais não); 0 = sem teto (v3)");
+    ui.add(egui::Slider::new(&mut p.denature_temp, 0.0..=12.0).text("temperatura de desnaturação"))
+        .on_hover_text("acima disto o calor mata (vista 7 = temperatura; o miolo das fumarolas chega a 12)");
     ui.add(egui::Slider::new(&mut p.heat_kill, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("desnaturação pelo calor"))
         .on_hover_text("risco de morrer na água quente (acima do limiar das fumarolas), × (1 − termoestabilidade do corpo; coluna da tabela dos aminoácidos)");
     ui.add(egui::Slider::new(&mut p.spawn_energy, 0.1..=50.0).text("energia inicial"));

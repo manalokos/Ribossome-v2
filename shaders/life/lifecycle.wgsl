@@ -22,9 +22,6 @@ const PAIRING_REACH: f32 = 2.5;
 // Mortalidade (v3): frio ×0,1, quente ×10 (T >= 8); risco UV independente da energia.
 const COLD_DEATH_MULT: f32 = 0.1;
 const HOT_DEATH_MULT: f32 = 10.0;
-// Desnaturação: começa à temperatura em que as fumarolas ativam monómeros
-// (TEMP_ACT_THRESHOLD = 2): a comida está onde o calor mata.
-const HEAT_DENATURE_T: f32 = 2.0;
 const UV_HAZARD_SCALE: f32 = 0.001;
 const MIN_GENE_LEN: u32 = 6u;
 const S_BROWN: u32 = 9u;
@@ -32,6 +29,10 @@ const S_BIOTURB: u32 = 10u;
 // Passos da média da velocidade de natação (o avanço que o ganho amplifica).
 const SWIM_AVG_STEPS: f32 = 100.0;
 const S_PHOTOSYS: u32 = 7u << 16u;   // + índice do resíduo
+const S_CHEMO: u32 = 9u << 16u;      // + índice do resíduo
+// Quimiossíntese: fração do redutor da célula do fluido que cada órgão
+// consome por passo (× ganho × eficiência).
+const CHEMO_TAKE: f32 = 0.02;
 // Fotossistema: o rendimento (energia por unidade de luz absorvida) é
 // params.photo_yield. Um fotossistema sozinho absorve 1 − e^−0,15 ≈ 14% da
 // luz que lhe chega. O modo reciclador reativa com probabilidade
@@ -449,6 +450,30 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             joint_state[si] = 0u;
         }
 
+        // QUIMIOSSÍNTESE: consome o redutor das fumarolas onde está (o que
+        // consome sai do campo). Modo 0: energia; modo 1: reativa gastos da
+        // célula (a mesma energia por redutor nos dois modos).
+        let oc = organ_get(slot, k);
+        if (organ_type(oc) == ORGAN_CHEMO && params.fluid_enabled != 0u) {
+            let fi = fluid_index_at_world(rw);
+            let cv = organ_var(oc);
+            let take = CHEMO_TAKE * redox_in[fi] * organ_gain(oc) * max(cv.p1, 0.0);
+            if (take > 0.0) {
+                atomicAdd(&redox_eaten[fi], u32(take * REDOX_FP));
+                let rec = clamp(cv.p0, 0.0, 1.0);
+                a.energy += (1.0 - rec) * params.chemo_yield * take;
+                if (rec > 0.0) {
+                    let q = rng_f4(a.id, params.epoch, S_CHEMO + k);
+                    if (q.x < clamp(rec * params.chemo_yield * take / max(params.food_power, 1e-3), 0.0, 1.0)) {
+                        let ch0 = min(u32(q.y * 4.0), 3u);
+                        for (var t = 0u; t < 4u; t++) {
+                            if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
+                        }
+                    }
+                }
+            }
+        }
+
         // FOTOSSISTEMA: capta a luz onde está. Modo 0: energia para o agente
         // (produtor primário). Modo 1: usa-a para REATIVAR os gastos da
         // célula (recicla comida para si e para os outros). Mais luz também
@@ -541,13 +566,16 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // DESNATURAÇÃO: acima do limiar, o calor desfaz as proteínas (não
     // depende de estar bem alimentado); a composição do corpo protege.
     var heat_hazard = 0.0;
-    if (wt > HEAT_DENATURE_T && params.heat_kill > 0.0) {
+    if (wt > params.denature_temp && params.heat_kill > 0.0) {
         var stab = 0.0;
         for (var k = 0u; k < a.body_len; k++) { stab += aa_props[body_get(slot, k)].thermo; }
         stab = clamp(stab / f32(max(a.body_len, 1u)), 0.0, 1.0);
-        heat_hazard = params.heat_kill * (wt - HEAT_DENATURE_T) / 10.0 * (1.0 - stab);
+        heat_hazard = params.heat_kill * (wt - params.denature_temp) / 10.0 * (1.0 - stab);
     }
-    let p_death = clamp(params.death_probability / max(a.energy, 0.01) * thermal + uv_hazard + heat_hazard, 0.0, 1.0);
+    // A reserva de energia protege até death_energy_cap (0 = sem teto, v3).
+    var e_eff = max(a.energy, 0.01);
+    if (params.death_energy_cap > 0.0) { e_eff = min(e_eff, params.death_energy_cap); }
+    let p_death = clamp(params.death_probability / e_eff * thermal + uv_hazard + heat_hazard, 0.0, 1.0);
     if (a.energy <= 0.0 || rng_f4(a.id, params.epoch, S_DEATH).x < p_death) {
         die(slot, a);
         return;

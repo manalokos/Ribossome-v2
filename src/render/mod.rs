@@ -125,6 +125,16 @@ impl WorldView {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -137,6 +147,7 @@ impl WorldView {
                 wgpu::BindGroupEntry { binding: 3, resource: world.light_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 4, resource: world.temp_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 5, resource: world.velocity_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: world.redox_buf.as_entire_binding() },
             ],
         });
         let pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

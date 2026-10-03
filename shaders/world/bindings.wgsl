@@ -38,6 +38,12 @@
 // do fluido: a pergunta "é parede?" passa a ser UMA leitura (antes eram 4 do
 // terreno, e o realce de vorticidade fazia ~700 por célula).
 @group(2) @binding(11) var<storage, read_write> solid_mask: array<u32>;
+// REDUTOR das fumarolas (H₂S, H₂…): largado onde há calor de fumarola,
+// levado e difundido como a temperatura, oxida-se devagar; os órgãos de
+// quimiossíntese consomem-no (redox_eaten, ponto fixo, somas atómicas).
+@group(2) @binding(12) var<storage, read_write> redox_in: array<f32>;
+@group(2) @binding(13) var<storage, read_write> redox_out: array<f32>;
+@group(2) @binding(14) var<storage, read_write> redox_eaten: array<atomic<u32>>;
 
 // Sombra dos agentes: resíduos por célula da luz (LIGHT_SIZE²), refeita antes
 // de cada cálculo da luz.

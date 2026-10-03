@@ -319,7 +319,7 @@ impl Running {
             self.ui.steps_per_frame = (n as u32).clamp(1, ribossome::world::MAX_STEPS_PER_FRAME);
         }
         if let Some(n) = u("view_mode") {
-            self.ui.view_mode = (n as u32).min(9);
+            self.ui.view_mode = (n as u32).min(10);
         }
         if let Some(x) = v["monomer_brightness"].as_f64() {
             self.ui.monomer_brightness = x as f32;

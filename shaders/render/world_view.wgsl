@@ -9,6 +9,7 @@
 @group(0) @binding(3) var<storage, read> light_view: array<f32>;
 @group(0) @binding(4) var<storage, read> temp_view: array<f32>;
 @group(0) @binding(5) var<storage, read> velocity_view: array<vec2<f32>>;
+@group(0) @binding(6) var<storage, read> redox_view: array<f32>;
 
 // Célula do fluido debaixo de uma posição do mundo.
 fn fluid_index_at_world(w: vec2<f32>) -> u32 {
@@ -119,6 +120,11 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         let dir = select(vec2<f32>(0.0), normalize(v), length(v) > 1e-6);
         let hue = vec3<f32>(0.5 + 0.5 * dir.x, 0.5 + 0.5 * dir.y, 0.6);
         return vec4<f32>(hue * sqrt(sp), 1.0);
+    }
+    // 10: redutor das fumarolas (raiz quadrada; amarelo-enxofre).
+    if (view.view_mode == 10u) {
+        let r = redox_view[fluid_index_at_world(world)];
+        return vec4<f32>(vec3<f32>(0.95, 0.85, 0.2) * clamp(sqrt(r / 5.0), 0.0, 1.0) + water * 0.3, 1.0);
     }
     if (view.view_mode == 5u) {
         let t = clamp(dot(spent, vec4<f32>(1.0)) / 24.0, 0.0, 1.0);

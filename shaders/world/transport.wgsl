@@ -338,7 +338,7 @@ fn thermal_activation(@builtin(global_invocation_id) gid: vec3<u32>) {
     let fy = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
     let t_loc = temp_in[fgrid(fx, fy)];
     if (t_loc <= TEMP_ACT_THRESHOLD) { return; }
-    let p_act = clamp(FUMAROLE_ACT_P * (t_loc - TEMP_ACT_THRESHOLD) / TEMP_ACT_THRESHOLD, 0.0, 0.9);
+    let p_act = clamp(FUMAROLE_ACT_P * max(params.thermal_activation, 0.0) * (t_loc - TEMP_ACT_THRESHOLD) / TEMP_ACT_THRESHOLD, 0.0, 0.9);
     let idx = y * GRID_SIZE + x;
     for (var ch = 0u; ch < 4u; ch++) {
         let slot = idx * 4u + ch;

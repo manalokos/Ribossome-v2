@@ -33,7 +33,7 @@
 
 use super::amino::{STOP, codon};
 
-pub const ORGAN_TYPES: usize = 14;
+pub const ORGAN_TYPES: usize = 15;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -51,6 +51,7 @@ pub enum Organ {
     Protease = 11,
     Anchor = 12,
     Bias = 13,
+    Chemosynthesis = 14,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -70,10 +71,11 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "protease",
     "âncora",
     "bias",
+    "quimiossíntese",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -137,6 +139,10 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("quebra", "probabilidade por passo de se soltar (0 = permanente)"),
     ],
     &[pd("canal", "0 = emite em α, 1 = em β"), pd("valor", "sinal constante emitido (× intensidade)")],
+    &[
+        pd("reciclar", "0..1: fração do redutor usada para reativar gastos (o resto dá energia)"),
+        pd("eficiencia", "multiplica o que consome"),
+    ],
 ];
 
 fn fmt_canal(v: f32) -> &'static str {
@@ -221,6 +227,12 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             } else {
                 format!("solta-se em média ao fim de {:.0} passos", 1.0 / v("quebra"))
             }
+        ),
+        14 => format!(
+            "quimiossíntese [disco amarelo-enxofre]: consome o redutor das fumarolas; {:.0}% para reativar gastos, {:.0}% para energia, eficiência ×{:.2}",
+            v("reciclar") * 100.0,
+            (1.0 - v("reciclar")) * 100.0,
+            v("eficiencia") * g
         ),
         13 => format!(
             "bias [ponto {}]: emite sempre {:+.2} em {}",
@@ -314,6 +326,7 @@ pub fn wgsl() -> String {
         "PROTEASE",
         "ANCHOR",
         "BIAS",
+        "CHEMO",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");

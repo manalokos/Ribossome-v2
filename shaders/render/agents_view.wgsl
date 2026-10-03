@@ -489,6 +489,12 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             let leaf = vec3<f32>(0.35, 0.95, 0.35);
             return vec4<f32>(select(mix(leaf * 0.7, leaf, 1.0 - d / core), vec3<f32>(0.85, 1.0, 0.4), ray), 1.0);
         }
+        case ORGAN_CHEMO: {
+            // Disco amarelo-enxofre com pintas escuras (consome o redutor).
+            if (d > core) { discard; }
+            let spot = step(0.6, fract(u * 3.7 / core) * fract(v * 3.1 / core) * 2.5);
+            return vec4<f32>(mix(vec3<f32>(0.9, 0.78, 0.15), vec3<f32>(0.35, 0.28, 0.05), spot), 1.0);
+        }
         case ORGAN_BIAS: {
             // Ponto cheio (laranja = α, verde = β) com um contorno claro.
             if (d > core) { discard; }

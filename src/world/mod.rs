@@ -201,6 +201,8 @@ pub struct World {
     pub velocity_buf: wgpu::Buffer,
     /// Temperatura publicada (temp_in).
     pub temp_buf: wgpu::Buffer,
+    /// Redutor das fumarolas publicado (redox_in).
+    pub redox_buf: wgpu::Buffer,
     /// Fonte de calor por célula do FLUIDO (força; o shader multiplica por
     /// TEMP_HEAT_RATE). Reconstruída no CPU quando algo muda.
     heat_buf: wgpu::Buffer,
@@ -388,6 +390,9 @@ impl World {
         let vel_a = storage_buffer(device, "velocity a", fcells * 8);
         let vel_smooth = storage_buffer(device, "velocity smooth", fcells * 8);
         let solid_mask = storage_buffer(device, "fluid solid mask", fcells * 4);
+        let redox_a = storage_buffer(device, "redox in", fcells * 4);
+        let redox_b = storage_buffer(device, "redox out", fcells * 4);
+        let redox_eaten = storage_buffer(device, "redox eaten", fcells * 4);
         let vel_b = storage_buffer(device, "velocity b", fcells * 8);
         let p_a = storage_buffer(device, "pressure a", fcells * 4);
         let p_b = storage_buffer(device, "pressure b", fcells * 4);
@@ -495,7 +500,7 @@ impl World {
             entries: &(0..8).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
         });
         // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
-        let fluid_entries: Vec<_> = (0..12).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
+        let fluid_entries: Vec<_> = (0..15).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
         let fluid_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fluid layout"),
             entries: &fluid_entries,
@@ -537,12 +542,12 @@ impl World {
         let fluid_ab = bind_all(
             "fluid ab",
             &fluid_layout,
-            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask],
+            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask, &redox_a, &redox_b, &redox_eaten],
         );
         let fluid_ba = bind_all(
             "fluid ba",
             &fluid_layout,
-            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask],
+            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask, &redox_a, &redox_b, &redox_eaten],
         );
 
         // Grupo 4 — multigrid da pressão: um uniforme por nível (offset
@@ -764,6 +769,7 @@ impl World {
             slope_buf,
             velocity_buf: vel_a,
             temp_buf: temp_a,
+            redox_buf: redox_a,
             heat_buf,
             ledger_buf,
             ledger_staging,
