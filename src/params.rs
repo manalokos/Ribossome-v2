@@ -285,10 +285,10 @@ impl SimParams {
             return 0.0;
         }
         let (day, phase) = self.day_phase(epoch);
-        if !day {
-            return 0.0;
-        }
         let max_angle = (self.sun_angle as f64).clamp(0.0, 85.0).to_radians();
+        // De noite fica a inclinação do pôr do sol: a última luz que ainda
+        // está na água continua a descer na diagonal (não vira vertical).
+        let phase = if day { phase } else { 1.0 };
         let angle = (phase - 0.5) * 2.0 * max_angle;
         angle.tan() as f32
     }
