@@ -14,6 +14,11 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 pub const PORT: u16 = 8788;
+
+/// Porta em uso: `RIBO_MCP_PORT` ou PORT (para correr dois programas lado a lado).
+pub fn port() -> u16 {
+    std::env::var("RIBO_MCP_PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(PORT)
+}
 const PROTOCOL: &str = "2025-06-18";
 /// Quanto a thread do servidor espera pela app (o habitat lê a grelha toda).
 const REPLY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -183,10 +188,11 @@ fn handle(msg: &Value, tx: &Sender<Call>) -> Option<Value> {
 impl Mcp {
     /// Arranca o servidor numa thread. None se a porta estiver ocupada.
     pub fn start() -> Option<Self> {
-        let server = match tiny_http::Server::http(("127.0.0.1", PORT)) {
+        let port = port();
+        let server = match tiny_http::Server::http(("127.0.0.1", port)) {
             Ok(s) => s,
             Err(e) => {
-                log::error!("mcp: não consegui abrir a porta {PORT}: {e}");
+                log::error!("mcp: não consegui abrir a porta {port}: {e}");
                 return None;
             }
         };
@@ -219,7 +225,7 @@ impl Mcp {
                 };
             }
         });
-        let url = format!("http://127.0.0.1:{PORT}/mcp");
+        let url = format!("http://127.0.0.1:{port}/mcp");
         log::info!("mcp: servidor em {url}");
         Some(Self { rx, url })
     }

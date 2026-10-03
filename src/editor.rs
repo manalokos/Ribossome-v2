@@ -18,6 +18,11 @@ pub enum Update {
 }
 
 pub const PORT: u16 = 8787;
+
+/// Porta em uso: `RIBO_EDITOR_PORT` ou PORT.
+pub fn port() -> u16 {
+    std::env::var("RIBO_EDITOR_PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(PORT)
+}
 const PAGE: &str = include_str!("../assets/editor.html");
 
 pub struct Editor {
@@ -46,10 +51,11 @@ fn organs_json(table: &[OrganRow]) -> String {
 impl Editor {
     /// Arranca o servidor numa thread. None se a porta estiver ocupada.
     pub fn start(initial: Vec<AminoRow>, initial_organs: Vec<OrganRow>, initial_code: OrganCode) -> Option<Self> {
-        let server = match tiny_http::Server::http(("127.0.0.1", PORT)) {
+        let port = port();
+        let server = match tiny_http::Server::http(("127.0.0.1", port)) {
             Ok(s) => s,
             Err(e) => {
-                log::error!("editor: não consegui abrir a porta {PORT}: {e}");
+                log::error!("editor: não consegui abrir a porta {port}: {e}");
                 return None;
             }
         };
@@ -152,7 +158,7 @@ impl Editor {
                 let _ = req.respond(reply);
             }
         });
-        let url = format!("http://127.0.0.1:{PORT}/");
+        let url = format!("http://127.0.0.1:{port}/");
         log::info!("editor dos aminoácidos em {url}");
         Some(Self { rx, url })
     }
