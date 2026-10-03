@@ -3,7 +3,8 @@
 //! grãos mudou, grãos que mudaram de sítio (metade da soma das diferenças) e
 //! a subida média do centro de massa do entulho. Grava a vista do terreno
 //! antes e depois (target/snapshots/sedimento_*.png). Variáveis: SCENE,
-//! STEPS, TRANSPORT, THRESHOLD, SETTLE (por cima dos da cena).
+//! STEPS, TRANSPORT, THRESHOLD, SETTLE (por cima dos da cena), VIEW (vista
+//! das imagens, 6 = terreno).
 use ribossome::gpu::Gpu;
 use ribossome::params::WorldConfig;
 use ribossome::render::Camera;
@@ -38,7 +39,7 @@ fn main() {
     let s = cfg.sim_size();
     let cam = Camera { center: [0.5 * s, 0.5 * s], zoom: 1024.0 / s };
     let shot = |w: &World, name: &str| {
-        let rgba = cap.render(&gpu, w, &cam, 6, 0.5);
+        let rgba = cap.render(&gpu, w, &cam, envf("VIEW").unwrap_or(6.0) as u32, 0.5);
         cap.save_png(&rgba, &out.join(format!("sedimento_{name}.png"))).unwrap();
     };
     // Velocidades do fluido (células do fluido/s): para escolher a crítica.

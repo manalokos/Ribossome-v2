@@ -33,6 +33,9 @@ const TEMP_BUOYANCY: f32 = 12.0;    // força por unidade de desvio ao ambiente
 const TEMP_AMBIENT_SURFACE: f32 = 0.0;
 const TEMP_AMBIENT_ATTEN: f32 = 4.0;
 const TEMP_DIFFUSE: f32 = 0.08;
+// CONDUÇÃO NO TERRENO: a rocha conduz o calor ~4× melhor do que a água
+// (granito ~2,5 W/m·K, água 0,6). A difusão é × até isto com o enchimento.
+const TEMP_ROCK_CONDUCT: f32 = 4.0;
 // Redutor: largado ∝ calor das fumarolas; ponto fixo do consumo; teto.
 const REDOX_RATE: f32 = 0.01;
 const REDOX_FP: f32 = 10000.0;
@@ -89,6 +92,25 @@ fn gamma_solidity_at_fluid_cell(x: u32, y: u32) -> f32 {
         if (gamma_count(sy * GRID_SIZE + sx) >= GAMMA_SOLID_THRESHOLD) { n_solid += 1u; }
     }
     return f32(n_solid) * 0.25;
+}
+
+// Enchimento de grãos da célula do fluido: 0 = água, 1 = rocha (média de 4
+// amostras do ambiente, cada uma min(grãos, limiar da rocha)/limiar; o
+// entulho fica a meio).
+fn gamma_fill_at_fluid_cell(x: u32, y: u32) -> f32 {
+    let scale = f32(GRID_SIZE) / f32(FLUID_SIZE);
+    let gx = (f32(x) + 0.5) * scale;
+    let gy = (f32(y) + 0.5) * scale;
+    let h = scale * 0.25;
+    var fill = 0.0;
+    for (var s = 0u; s < 4u; s++) {
+        let ox = select(-h, h, (s & 1u) == 1u);
+        let oy = select(-h, h, (s & 2u) == 2u);
+        let sx = u32(clamp(gx + ox, 0.0, f32(GRID_SIZE - 1u)));
+        let sy = u32(clamp(gy + oy, 0.0, f32(GRID_SIZE - 1u)));
+        fill += f32(min(gamma_count(sy * GRID_SIZE + sx), GAMMA_SOLID_THRESHOLD)) / f32(GAMMA_SOLID_THRESHOLD);
+    }
+    return fill * 0.25;
 }
 
 // 1 = água livre, 0 = sólido. Maioria sólida = parede (penínsulas finas
@@ -286,7 +308,9 @@ fn update_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     let tr = temp_in[fgrid(min(x + 1u, FLUID_SIZE - 1u), y)];
     let tb = temp_in[fgrid(x, u32(max(i32(y) - 1, 0)))];
     let tt = temp_in[fgrid(x, min(y + 1u, FLUID_SIZE - 1u))];
-    t = mix(t, (tl + tr + tb + tt) * 0.25, TEMP_DIFFUSE);
+    // Difusão, mais forte no terreno (condução na rocha e no entulho).
+    let fill = gamma_fill_at_fluid_cell(x, y);
+    t = mix(t, (tl + tr + tb + tt) * 0.25, TEMP_DIFFUSE * mix(1.0, TEMP_ROCK_CONDUCT, fill));
 
     // Fumarolas: mapa de calor por célula (CPU: pontuais + píxeis vermelhos).
     t += heat_src[idx].x * TEMP_HEAT_RATE * dt;
@@ -301,8 +325,11 @@ fn update_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ir = params.sun_now * SUN_IR * exp(-depth / SUN_IR_DEPTH);
     t += max(params.sun_heat, 0.0) * SUN_HEAT_RATE * (light_absorbed_at(env) + ir) * dt;
 
+    // Arrefecimento para o ambiente (perdas da água): no terreno não há, o
+    // calor só sai por condução até à água, que o leva por convecção. Uma
+    // fumarola enterrada aquece o entulho até o calor chegar à superfície.
     let amb = temp_ambient_at(y);
-    t = amb + (t - amb) * exp(-TEMP_COOL_RATE * dt);
+    t = amb + (t - amb) * exp(-TEMP_COOL_RATE * (1.0 - fill) * dt);
     temp_out[idx] = clamp(t, 0.0, TEMP_MAX);
 
     // REDUTOR: a mesma advecção e difusão; nasce nas fumarolas, perde o
