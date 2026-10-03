@@ -368,7 +368,7 @@ fn tab_matter(ui: &mut egui::Ui, world: &mut World) {
         .on_hover_text("a luz reativa gastos sozinha (segue o dia e a noite e as sombras). 1 = ~1,8% dos gastos por passo em sol pleno; 0,02 = um pingo. 0 = só os fotossistemas");
     ui.add(egui::Slider::new(&mut p.thermal_activation, 0.0..=2.0).logarithmic(true).smallest_positive(0.01).text("pelo calor (acima de T = 2)"))
         .on_hover_text("o calor reativa gastos sozinho, só na água acima de T = 2 (fumarolas). 0 = só os quimiossintéticos aproveitam as fumarolas");
-    ui.add(egui::Slider::new(&mut p.settle, 0.0..=100.0).logarithmic(true).smallest_positive(0.1).text("assentamento ×"))
+    ui.add(egui::Slider::new(&mut p.settle, 0.0..=100.0).logarithmic(true).smallest_positive(0.1).text("assentamento dos MONÓMEROS ×"))
         .on_hover_text("probabilidade por passo de um monómero descer uma célula = 0,002 × isto (10 = 0,02 células/passo)");
     ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));
     ui.add(
@@ -474,11 +474,11 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         .on_hover_text("quanto a corrente leva o entulho solto (1 = o do v3)");
     ui.add(egui::Slider::new(&mut world.params.sediment_threshold, 0.0..=5.0).text("velocidade crítica de arranque"))
         .on_hover_text("critério de Shields: abaixo desta velocidade (células do fluido/s) a corrente não arranca grãos; acima, arranca ∝ ao excesso");
-    ui.add(egui::Slider::new(&mut world.params.sediment_settle, 0.0..=5.0).text("queda dos grãos (assentar)"))
+    ui.add(egui::Slider::new(&mut world.params.sediment_settle, 0.0..=5.0).text("queda dos GRÃOS de entulho (gravidade)"))
         .on_hover_text("velocidade de queda (×0,5 células do fluido/s): um grão solto anda com a corrente menos a queda — sobe onde a corrente a subir é mais forte (suspensão) e assenta onde ela abranda. 0 = flutuam");
     ui.add(egui::Slider::new(&mut world.params.bioturbation, 0.0..=0.5).text("bioturbação (empurrar entulho)"));
     ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("custo por grão empurrado"));
-    ui.add(egui::Slider::new(&mut world.params.sedimentation, 0.0..=0.5).text("sedimentação (afundar ∝ √n)"));
+    ui.add(egui::Slider::new(&mut world.params.sedimentation, 0.0..=0.5).text("afundamento dos AGENTES (∝ √n)"));
 }
 
 fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
