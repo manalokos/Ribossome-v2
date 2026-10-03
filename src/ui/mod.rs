@@ -368,7 +368,8 @@ fn tab_matter(ui: &mut egui::Ui, world: &mut World) {
         .on_hover_text("a luz reativa gastos sozinha (segue o dia e a noite e as sombras). 1 = ~1,8% dos gastos por passo em sol pleno; 0,02 = um pingo. 0 = só os fotossistemas");
     ui.add(egui::Slider::new(&mut p.thermal_activation, 0.0..=2.0).logarithmic(true).smallest_positive(0.01).text("pelo calor (acima de T = 2)"))
         .on_hover_text("o calor reativa gastos sozinho, só na água acima de T = 2 (fumarolas). 0 = só os quimiossintéticos aproveitam as fumarolas");
-    ui.add(egui::Slider::new(&mut p.settle, 0.0..=10.0).text("assentamento ×"));
+    ui.add(egui::Slider::new(&mut p.settle, 0.0..=100.0).logarithmic(true).smallest_positive(0.1).text("assentamento ×"))
+        .on_hover_text("probabilidade por passo de um monómero descer uma célula = 0,002 × isto (10 = 0,02 células/passo)");
     ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));
     ui.add(
         egui::Slider::new(&mut p.aggregation, 0.0..=1.0).logarithmic(true).smallest_positive(0.01).text("agregação dos ativados"),
