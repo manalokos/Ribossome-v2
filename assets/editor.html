@@ -73,6 +73,7 @@ const COLS = [
   ["substrato_C", "C", "Preferência por C."],
   ["absorcao_uv", "UV", "Absorção de luz UV (sombra): triptofano = 1."],
   ["comprimento", "compr.", "Comprimento do segmento (unidades do mundo; o v3 usava 11). Também pesa no arrasto da natação."],
+  ["termoestabilidade", "termo", "Termoestabilidade (0..1): a desnaturação pelo calor é × (1 − média do corpo). Termófilos: mais E, K, R, P; menos Q, N."],
 ];
 const GROUPS = [["", 1], ["física", 4], ["forma e sinais", 4], ["condutividade", 4], ["substrato", 4], ["luz", 1], ["corpo", 1]];
 let organRows = [];

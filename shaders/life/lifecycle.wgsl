@@ -22,6 +22,9 @@ const PAIRING_REACH: f32 = 2.5;
 // Mortalidade (v3): frio ×0,1, quente ×10 (T >= 8); risco UV independente da energia.
 const COLD_DEATH_MULT: f32 = 0.1;
 const HOT_DEATH_MULT: f32 = 10.0;
+// Desnaturação: começa à temperatura em que as fumarolas ativam monómeros
+// (TEMP_ACT_THRESHOLD = 2): a comida está onde o calor mata.
+const HEAT_DENATURE_T: f32 = 2.0;
 const UV_HAZARD_SCALE: f32 = 0.001;
 const MIN_GENE_LEN: u32 = 6u;
 const S_BROWN: u32 = 9u;
@@ -510,7 +513,16 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     var thermal = mix(COLD_DEATH_MULT, 1.0, clamp(wt / 2.0, 0.0, 1.0));
     if (wt > 2.0) { thermal = mix(1.0, HOT_DEATH_MULT, clamp((wt - 2.0) / 6.0, 0.0, 1.0)); }
     let uv_hazard = params.death_probability * (uv_mult - 1.0) * UV_HAZARD_SCALE;
-    let p_death = clamp(params.death_probability / max(a.energy, 0.01) * thermal + uv_hazard, 0.0, 1.0);
+    // DESNATURAÇÃO: acima do limiar, o calor desfaz as proteínas (não
+    // depende de estar bem alimentado); a composição do corpo protege.
+    var heat_hazard = 0.0;
+    if (wt > HEAT_DENATURE_T && params.heat_kill > 0.0) {
+        var stab = 0.0;
+        for (var k = 0u; k < a.body_len; k++) { stab += aa_props[body_get(slot, k)].thermo; }
+        stab = clamp(stab / f32(max(a.body_len, 1u)), 0.0, 1.0);
+        heat_hazard = params.heat_kill * (wt - HEAT_DENATURE_T) / 10.0 * (1.0 - stab);
+    }
+    let p_death = clamp(params.death_probability / max(a.energy, 0.01) * thermal + uv_hazard + heat_hazard, 0.0, 1.0);
     if (a.energy <= 0.0 || rng_f4(a.id, params.epoch, S_DEATH).x < p_death) {
         die(slot, a);
         return;

@@ -464,6 +464,8 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.strong("Metabolismo e ciclo de vida");
     let p = &mut world.params;
     ui.add(egui::Slider::new(&mut p.death_probability, 0.0..=0.2).text("mortalidade base"));
+    ui.add(egui::Slider::new(&mut p.heat_kill, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("desnaturação pelo calor"))
+        .on_hover_text("risco de morrer na água quente (acima do limiar das fumarolas), × (1 − termoestabilidade do corpo; coluna da tabela dos aminoácidos)");
     ui.add(egui::Slider::new(&mut p.spawn_energy, 0.1..=50.0).text("energia inicial"));
     ui.add(egui::Slider::new(&mut p.food_power, 0.0..=20.0).text("energia por monómero"));
     ui.add(

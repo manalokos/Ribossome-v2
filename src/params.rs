@@ -226,7 +226,10 @@ gpu_struct! {
         /// absorvida (o reciclador reativa com probabilidade isto·potência/
         /// food_power: a mesma energia nos dois modos).
         pub photo_yield: f32,
-        pub _pad_g1: u32,
+        /// DESNATURAÇÃO pelo calor: probabilidade por passo de morrer =
+        /// isto × (excesso de temperatura acima do limiar / 10) ×
+        /// (1 − termoestabilidade média do corpo). Não depende da energia.
+        pub heat_kill: f32,
         pub _pad_g2: u32,
     }
 }
@@ -324,7 +327,7 @@ impl Default for SimParams {
             bond_signal: 0.5,
             aggregation: 0.0,
             photo_yield: 0.1,
-            _pad_g1: 0,
+            heat_kill: 0.05,
             _pad_g2: 0,
         }
     }
@@ -487,7 +490,9 @@ gpu_struct! {
         pub uv_absorb: f32,
         /// Comprimento do segmento (unidades do mundo).
         pub seg_len: f32,
-        pub _pad1: u32,
+        /// Termoestabilidade (0..1): contribuição do resíduo para resistir à
+        /// desnaturação pelo calor (termófilos: mais E, K, R, P; menos Q, N).
+        pub thermo: f32,
         pub _pad2: u32,
     }
 }

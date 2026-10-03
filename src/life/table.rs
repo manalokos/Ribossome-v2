@@ -47,6 +47,11 @@ pub struct AminoRow {
     pub absorcao_uv: f32,
     /// Comprimento do segmento (unidades do mundo; o v3 usava 11 para todos).
     pub comprimento: f32,
+    /// Termoestabilidade (0..1): o risco de desnaturação pelo calor é ×
+    /// (1 − média do corpo). Os termófilos reais têm mais aminoácidos com
+    /// carga (E, K, R) e prolina, e menos glutamina e asparagina.
+    #[serde(default)]
+    pub termoestabilidade: f32,
 }
 
 /// Uma linha da tabela dos órgãos (assets/orgaos.json).
@@ -241,7 +246,7 @@ pub fn to_gpu(rows: &[AminoRow]) -> Vec<AaProps> {
             sub_c: r.substrato_c,
             uv_absorb: r.absorcao_uv,
             seg_len: r.comprimento,
-            _pad1: 0,
+            thermo: r.termoestabilidade,
             _pad2: 0,
         })
         .collect()
