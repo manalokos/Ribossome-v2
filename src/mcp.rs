@@ -75,6 +75,16 @@ fn tools() -> Value {
             }), &["params"]),
         },
         {
+            "name": "set_world",
+            "description": "Definições do mundo que não são parâmetros: fluido ligado, física do terreno (grãos), repulsão entre agentes e força de todas as fumarolas (0 = sem calor nem química). Só muda o que for dado.",
+            "inputSchema": obj(json!({
+                "fluid_enabled": { "type": "boolean" },
+                "terrain_enabled": { "type": "boolean" },
+                "contact_enabled": { "type": "boolean" },
+                "fumarole_gain": { "type": "number" }
+            }), &[]),
+        },
+        {
             "name": "get_stats",
             "description": "Estatísticas dos gráficos (vivos, nascimentos e mortes por 1000 epochs, energia, tamanhos, gerações, % de agentes com cada órgão...): as últimas N amostras (uma a cada 'every' epochs).",
             "inputSchema": obj(json!({

@@ -499,7 +499,15 @@ impl Running {
                     .into_iter()
                     .map(|(n, v, dv)| json!({ "nome": n, "atual": num(v), "omissao": num(dv) }))
                     .collect();
+                let st = &self.world.settings;
                 Ok(vec![json_text(&json!({
+                    "mundo": {
+                        "fluid_enabled": st.fluid_enabled,
+                        "terrain_enabled": st.terrain_enabled,
+                        "contact_enabled": st.contact_enabled,
+                        "fumarole_gain": num(self.world.fumarole_gain as f64),
+                        "terreno_carregado": self.world.custom_terrain.is_some(),
+                    },
                     "epoch": p.epoch,
                     "pausa": self.ui.paused,
                     "passos_por_frame": self.ui.steps_per_frame,
@@ -527,6 +535,28 @@ impl Running {
                     lines.push(format!("{k}: {} -> {}", num(old), num(new)));
                 }
                 Ok(vec![text(lines.join("\n"))])
+            }
+            "set_world" => {
+                let mut lines = Vec::new();
+                let st = &mut self.world.settings;
+                for (k, slot) in [
+                    ("fluid_enabled", &mut st.fluid_enabled),
+                    ("terrain_enabled", &mut st.terrain_enabled),
+                    ("contact_enabled", &mut st.contact_enabled),
+                ] {
+                    if let Some(v) = args[k].as_bool() {
+                        lines.push(format!("{k}: {} -> {v}", *slot));
+                        *slot = v;
+                    }
+                }
+                if let Some(v) = args["fumarole_gain"].as_f64() {
+                    lines.push(format!("fumarole_gain: {} -> {}", self.world.fumarole_gain, v as f32));
+                    self.world.fumarole_gain = (v as f32).max(0.0);
+                }
+                for l in &lines {
+                    log::info!("mcp: {l}");
+                }
+                Ok(vec![text(if lines.is_empty() { "nada mudado".into() } else { lines.join("\n") })])
             }
             "get_stats" => {
                 let h = &self.ui.history;
