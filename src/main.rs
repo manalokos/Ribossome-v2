@@ -589,7 +589,8 @@ impl Running {
                 Ok(vec![json_text(&ribossome::mcp::habitat(&self.gpu, &self.world, block))])
             }
             "screenshot" => {
-                let size = args["size"].as_u64().unwrap_or(768).clamp(64, 2048) as u32;
+                // Múltiplo de 64 (ver Capture::new), para a câmara bater certo.
+                let size = (args["size"].as_u64().unwrap_or(768).clamp(64, 2048) as u32).div_ceil(64) * 64;
                 let view = args["view"].as_u64().unwrap_or(0) as u32;
                 let bright = args["brightness"].as_f64().unwrap_or(0.5) as f32;
                 let s = self.world.cfg.sim_size();

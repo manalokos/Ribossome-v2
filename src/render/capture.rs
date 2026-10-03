@@ -17,7 +17,11 @@ pub struct Capture {
 }
 
 impl Capture {
+    /// `size` é arredondado para cima a múltiplo de 64: a cópia para o CPU
+    /// exige linhas com múltiplo de 256 bytes (um tamanho como 900 fazia o
+    /// wgpu recusar a cópia e a app ir abaixo).
     pub fn new(gpu: &Gpu, world: &World, size: u32) -> Self {
+        let size = size.max(64).div_ceil(64) * 64;
         let view = WorldView::new(&gpu.device, world, FORMAT);
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("capture"),
