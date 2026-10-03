@@ -45,7 +45,10 @@ fn main() {
         let mut w = World::new(&gpu, WorldConfig::TEST, 9);
         let seeded = w.seed_matter(&gpu, 9);
         w.params.aggregation = a;
-        w.params.reactivation_rate = 0.001;
+        let envf = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
+        w.params.reactivation_rate = envf("REACT", 0.001);
+        w.params.diffusion = envf("DIFF", w.params.diffusion);
+        w.params.monomer_pressure = envf("PRESS", w.params.monomer_pressure);
         let c0 = clumping(&w.read_cells_blocking(&gpu));
         let mut done = 0;
         while done < steps {

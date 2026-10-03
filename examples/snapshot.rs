@@ -1,6 +1,7 @@
 //! Corre o mundo sem janela e grava PNGs da vista (para depurar sem ecrã).
 //! Variáveis: STEPS (lista separada por vírgulas), VIEWS (ex. "0,7,9"),
-//! FLUID=0, FLAT=1, BIG=1, ZOOM (1 = mundo inteiro), CX/CY (centro, fração), OUT (pasta).
+//! FLUID=0, FLAT=1, BIG=1, ZOOM (1 = mundo inteiro), CX/CY (centro, fração), OUT (pasta),
+//! PREFIX (nome); parâmetros: COH, DIFF, PRESS, REACT, PHOTO, AGG, UVDEPTH, UVABS.
 use ribossome::gpu::Gpu;
 use ribossome::params::WorldConfig;
 use ribossome::render::Camera;
@@ -18,6 +19,13 @@ fn main() {
     let mut world = World::new(&gpu, cfg, 1);
     world.settings.fluid_enabled = env("FLUID", 1) == 1;
     world.params.cohesion = env("COH", world.params.cohesion);
+    world.params.diffusion = env("DIFF", world.params.diffusion);
+    world.params.monomer_pressure = env("PRESS", world.params.monomer_pressure);
+    world.params.reactivation_rate = env("REACT", world.params.reactivation_rate);
+    world.params.direct_photoactivation = env("PHOTO", world.params.direct_photoactivation);
+    world.params.aggregation = env("AGG", world.params.aggregation);
+    world.params.uv_depth = env("UVDEPTH", world.params.uv_depth);
+    world.params.monomer_uv_absorb = env("UVABS", world.params.monomer_uv_absorb);
     if let Ok(t) = std::env::var("TERRAIN") {
         let hot = world.load_terrain_png(std::path::Path::new(&t)).unwrap();
         println!("terreno {t}: {hot} células quentes");
@@ -54,7 +62,7 @@ fn main() {
         }
         for &v in &views {
             let rgba = cap.render(&gpu, &world, &cam, v, env("BRIGHT", 0.5));
-            let p = out.join(format!("passo{m:06}_vista{v}.png"));
+            let p = out.join(format!("{}passo{m:06}_vista{v}.png", env("PREFIX", String::new())));
             cap.save_png(&rgba, &p).unwrap();
             println!("{}", p.display());
         }

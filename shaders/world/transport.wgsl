@@ -147,37 +147,59 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     p_diff = clamp(p_diff + PRESSURE_HOP_P * params.monomer_pressure * max_drop, 0.0, 0.5);
     let light_t = uv_light_at_cell(x, y);
 
-    // AGREGAÇÃO dos ativados (gás de rede com atração): cada ativado fica
-    // PRESO com probabilidade 1 − exp(−ε·n/T), n = ativados nas 8 células
-    // VIZINHAS (todos os canais; a própria não conta, senão tudo se
-    // concentrava numa célula em vez de formar manchas), T = temperatura
-    // local (o calor das fumarolas dissolve os grumos). Numa célula
-    // acima da capacidade ninguém fica preso (a pressão tem de escoar).
+    // AGREGAÇÃO dos ativados: gás de rede com atração, dinâmica de KAWASAKI.
+    // A energia de um ativado num sítio = −ε × ativados nas 8 células à
+    // volta (todos os canais). Um salto de difusão para um sítio com MENOS
+    // vizinhos só é aceite com probabilidade exp(−ε·Δ/T); para um com mais,
+    // sempre. Assim os soltos vagueiam e são apanhados pelos aglomerados, que
+    // crescem (só travar a saída congelava a sopa ao acaso, como um vidro).
+    // T = temperatura local (o calor dissolve os grumos). Volume excluído: a
+    // atração enfraquece com o enchimento da célula (a pressão espalha os
+    // cheios). Os ativados com muitos vizinhos também são levados JUNTOS pela
+    // corrente (o grumo viaja inteiro).
     var p_bound = 0.0;
+    var accept = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
     if (params.aggregation > 0.0 && src_total <= chem_capacity(idx)) {
-        var n_act = 0u;
-        for (var dy = -1; dy <= 1; dy++) {
-            for (var dx = -1; dx <= 1; dx++) {
-                if (dx == 0 && dy == 0) { continue; }
+        // Ativados (todos os canais) na janela 5×5 à volta.
+        var win = array<u32, 25>();
+        for (var dy = -2; dy <= 2; dy++) {
+            for (var dx = -2; dx <= 2; dx++) {
                 let nx = i32(x) + dx;
                 let ny = i32(y) + dy;
-                if (nx < 0 || ny < 0 || nx >= i32(GRID_SIZE) || ny >= i32(GRID_SIZE)) { continue; }
-                let ni = u32(ny) * GRID_SIZE + u32(nx);
-                for (var c2 = 0u; c2 < 4u; c2++) { n_act += chem_act_count(ni, c2); }
+                var c = 0u;
+                if (nx >= 0 && ny >= 0 && nx < i32(GRID_SIZE) && ny < i32(GRID_SIZE)) {
+                    let ni = u32(ny) * GRID_SIZE + u32(nx);
+                    for (var c2 = 0u; c2 < 4u; c2++) { c += chem_act_count(ni, c2); }
+                }
+                win[u32((dy + 2) * 5 + dx + 2)] = c;
             }
         }
-        if (n_act > 0u) {
-            let fx = min((x * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
-            let fy = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
-            // T = 1 na água à temperatura ambiente (a temperatura do fluido é o
-            // excesso sobre o ambiente); no limiar da ativação térmica, 2.
-            let t_rel = 1.0 + max(temp_in[fgrid(fx, fy)], 0.0) / TEMP_ACT_THRESHOLD;
-            // Volume excluído: a ligação enfraquece com o enchimento da própria
-            // célula (cheia, solta os seus e a pressão espalha-os): forma
-            // manchas de várias células em vez de picos numa só.
-            let room = clamp(1.0 - 2.0 * f32(src_total) / f32(max(chem_capacity(idx), 1u)), 0.0, 1.0);
-            p_bound = 1.0 - exp(-params.aggregation * f32(min(n_act, 48u)) * room / t_rel);
+        // Vizinhos (8 à volta) de um sítio a (ox, oy) do centro.
+        var e = array<f32, 5>(0.0, 0.0, 0.0, 0.0, 0.0);
+        var ox = array<i32, 5>(0, 1, -1, 0, 0);
+        var oy = array<i32, 5>(0, 0, 0, 1, -1);
+        for (var s5 = 0u; s5 < 5u; s5++) {
+            var sum = 0u;
+            for (var dy = -1; dy <= 1; dy++) {
+                for (var dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0) { continue; }
+                    sum += win[u32((oy[s5] + dy + 2) * 5 + ox[s5] + dx + 2)];
+                }
+            }
+            e[s5] = f32(sum);
         }
+        let fx = min((x * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
+        let fy = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
+        // T = 1 na água à temperatura ambiente; no limiar da ativação térmica, 2.
+        let t_rel = 1.0 + max(temp_in[fgrid(fx, fy)], 0.0) / TEMP_ACT_THRESHOLD;
+        let room = clamp(1.0 - 2.0 * f32(src_total) / f32(max(chem_capacity(idx), 1u)), 0.0, 1.0);
+        let k_e = params.aggregation * room / t_rel;
+        for (var d = 0u; d < 4u; d++) {
+            // No destino, a célula de origem (com o próprio) conta como vizinha: −1.
+            let drop = e[0] - (e[d + 1u] - 1.0);
+            if (drop > 0.0) { accept[d] = exp(-k_e * drop); }
+        }
+        p_bound = 1.0 - exp(-k_e * min(e[0], 48.0));
     }
 
     for (var ch = 0u; ch < 4u; ch++) {
@@ -234,10 +256,12 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         let movers = min(n, MAX_MOVERS_PER_CH);
         let act_stay = act_n - min(act_n, movers);
         stay += act_stay + (n - movers - act_stay) * CHEM_SPENT_ONE;
-        // Ponto de partida comum dos ativados presos: a corrente leva o grumo
-        // inteiro (com pontos ao acaso, cada um ia para a sua célula e o
-        // grumo desfazia-se ao primeiro passo).
-        let bound_start = rng_f4(slot, params.epoch, S_MOVE + MAX_MOVERS_PER_CH).xy;
+        // Ponto de partida dos ativados presos: o MESMO em todo o mundo neste
+        // passo (sorteado por passo, sem viés). Com um sorteio por célula,
+        // células vizinhas do mesmo grumo arredondavam a deslocação de forma
+        // diferente e o grumo rasgava-se a cada passo (difusão numérica);
+        // assim só o cisalhamento real da corrente o deforma.
+        let bound_start = rng_f4(0x9E3779B9u, params.epoch, S_MOVE + MAX_MOVERS_PER_CH).xy;
         for (var k = 0u; k < movers; k++) {
             let unit = select(CHEM_SPENT_ONE, 1u, k < act_n);
             // 4 números: ponto de partida (x, y), evento, direção do salto.
@@ -252,7 +276,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let jitter = (rj.xy * 2.0 - 1.0) * length(disp) * RUBBLE_DISPERSION;
                 p += clamp(jitter, vec2<f32>(-0.9), vec2<f32>(0.9));
             }
-            let r = select(rf.z, 1.0, bound);
+            let r = rf.z;
             if (r < p_diff) {
                 // Direção: pressão × coesão (esta só para os ativados).
                 var w = press;
@@ -263,8 +287,12 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (u < w[cd]) { d = cd; break; }
                     u -= w[cd];
                 }
-                if (d == 0u) { p.x += 1.0; } else if (d == 1u) { p.x -= 1.0; }
-                else if (d == 2u) { p.y += 1.0; } else { p.y -= 1.0; }
+                // Kawasaki: um ativado só sai para menos vizinhos com exp(−ε·Δ/T).
+                let stay_put = k < act_n && fract(rf.w * 13.73 + rf.x * 5.31) >= accept[d];
+                if (!stay_put) {
+                    if (d == 0u) { p.x += 1.0; } else if (d == 1u) { p.x -= 1.0; }
+                    else if (d == 2u) { p.y += 1.0; } else { p.y -= 1.0; }
+                }
             } else if (r < p_diff + p_settle) {
                 p.y -= 1.0;
             }
