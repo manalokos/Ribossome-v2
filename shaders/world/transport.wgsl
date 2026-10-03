@@ -213,8 +213,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     // sempre. Assim os soltos vagueiam e são apanhados pelos aglomerados, que
     // crescem (só travar a saída congelava a sopa ao acaso, como um vidro).
     // T = temperatura local (o calor dissolve os grumos). Volume excluído: a
-    // atração enfraquece com o enchimento da célula (a pressão espalha os
-    // cheios). Os ativados com muitos vizinhos também são levados JUNTOS pela
+    // atração desaparece perto da capacidade da célula. Os ativados com muitos vizinhos também são levados JUNTOS pela
     // corrente (o grumo viaja inteiro).
     var p_bound = 0.0;
     var accept = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
@@ -233,7 +232,10 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         let fy = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
         // T = 1 na água à temperatura ambiente; no limiar da ativação térmica, 2.
         let t_rel = 1.0 + max(temp_in[fgrid(fx, fy)], 0.0) / TEMP_ACT_THRESHOLD;
-        let room = clamp(1.0 - 2.0 * f32(src_total) / f32(max(chem_capacity(idx), 1u)), 0.0, 1.0);
+        // Volume excluído só perto da capacidade: atração total até 80% de
+        // enchimento, a desaparecer até aos 100% (antes desligava acima de
+        // metade e uma sopa densa não agregava).
+        let room = clamp(5.0 * (1.0 - f32(src_total) / f32(max(chem_capacity(idx), 1u))), 0.0, 1.0);
         let k_e = params.aggregation * room / t_rel;
         for (var d = 0u; d < 4u; d++) {
             // No destino, a célula de origem (com o próprio) conta como vizinha: −1.

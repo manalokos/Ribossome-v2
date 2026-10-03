@@ -30,6 +30,7 @@ fn main() {
         let hot = world.load_terrain_png(std::path::Path::new(&t)).unwrap();
         println!("terreno {t}: {hot} células quentes");
     }
+    world.seed_density = env("DENS", world.seed_density);
     world.seed_matter(&gpu, 1);
     if env("FLAT", 0) == 1 {
         gpu.queue.write_buffer(&world.gamma_buf, 0, &vec![0u8; (cfg.cells() * 4) as usize]);

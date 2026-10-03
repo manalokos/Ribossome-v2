@@ -43,6 +43,9 @@ fn main() {
     let steps: u32 = std::env::var("STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(3000);
     for a in [0.0, agg] {
         let mut w = World::new(&gpu, WorldConfig::TEST, 9);
+        if let Some(d) = std::env::var("DENS").ok().and_then(|v| v.parse::<f32>().ok()) {
+            w.seed_density = d;
+        }
         let seeded = w.seed_matter(&gpu, 9);
         w.params.aggregation = a;
         let envf = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
