@@ -13,6 +13,30 @@ fn clumping(cells: &[u32]) -> f64 {
     var / mean.max(1e-9)
 }
 
+/// Agrupamento em blocos de 8×8 (manchas) e fração dos ativados em células
+/// acima de metade da capacidade (picos numa só célula).
+fn patches(cells: &[u32], grid: usize) -> (f64, f64) {
+    let act = |i: usize| -> f64 { (0..4).map(|c| (cells[i * 4 + c] & 0xFFFF) as f64).sum() };
+    let b = 8;
+    let nb = grid / b;
+    let mut blocks = vec![0.0; nb * nb];
+    let mut peak = 0.0;
+    let mut total = 0.0;
+    for y in 0..grid {
+        for x in 0..grid {
+            let a = act(y * grid + x);
+            blocks[(y / b) * nb + x / b] += a;
+            total += a;
+            if a > 24.0 {
+                peak += a;
+            }
+        }
+    }
+    let mean = blocks.iter().sum::<f64>() / blocks.len() as f64;
+    let var = blocks.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / blocks.len() as f64;
+    (var / mean.max(1e-9), 100.0 * peak / total.max(1.0))
+}
+
 fn main() {
     let gpu = Gpu::new_headless().unwrap();
     let agg: f32 = std::env::var("AGG").ok().and_then(|v| v.parse().ok()).unwrap_or(1.5);
@@ -33,8 +57,9 @@ fn main() {
         }
         let cells = w.read_cells_blocking(&gpu);
         let after = Ledger::from_cells(&cells);
+        let (blk, peak) = patches(&cells, WorldConfig::TEST.grid_size as usize);
         println!(
-            "agregação {a}: agrupamento {c0:.2} -> {:.2}   matéria {} -> {}",
+            "agregação {a}: por célula {c0:.2} -> {:.2}, em blocos 8×8 {blk:.1}, {peak:.1}% dos ativados em células > 24   matéria {} -> {}",
             clumping(&cells),
             seeded.total(),
             after.total()

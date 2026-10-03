@@ -148,27 +148,35 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     let light_t = uv_light_at_cell(x, y);
 
     // AGREGAÇÃO dos ativados (gás de rede com atração): cada ativado fica
-    // PRESO com probabilidade 1 − exp(−ε·n/T), n = ativados à volta (esta
-    // célula e as 4 vizinhas, todos os canais), T = temperatura local
-    // (o calor das fumarolas dissolve os grumos). Numa célula
+    // PRESO com probabilidade 1 − exp(−ε·n/T), n = ativados nas 8 células
+    // VIZINHAS (todos os canais; a própria não conta, senão tudo se
+    // concentrava numa célula em vez de formar manchas), T = temperatura
+    // local (o calor das fumarolas dissolve os grumos). Numa célula
     // acima da capacidade ninguém fica preso (a pressão tem de escoar).
     var p_bound = 0.0;
     if (params.aggregation > 0.0 && src_total <= chem_capacity(idx)) {
         var n_act = 0u;
-        for (var c2 = 0u; c2 < 4u; c2++) {
-            n_act += chem_act_count(idx, c2);
-            if (x + 1u < GRID_SIZE) { n_act += chem_act_count(idx + 1u, c2); }
-            if (x > 0u) { n_act += chem_act_count(idx - 1u, c2); }
-            if (y + 1u < GRID_SIZE) { n_act += chem_act_count(idx + GRID_SIZE, c2); }
-            if (y > 0u) { n_act += chem_act_count(idx - GRID_SIZE, c2); }
+        for (var dy = -1; dy <= 1; dy++) {
+            for (var dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) { continue; }
+                let nx = i32(x) + dx;
+                let ny = i32(y) + dy;
+                if (nx < 0 || ny < 0 || nx >= i32(GRID_SIZE) || ny >= i32(GRID_SIZE)) { continue; }
+                let ni = u32(ny) * GRID_SIZE + u32(nx);
+                for (var c2 = 0u; c2 < 4u; c2++) { n_act += chem_act_count(ni, c2); }
+            }
         }
-        if (n_act > 1u) {
+        if (n_act > 0u) {
             let fx = min((x * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
             let fy = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
             // T = 1 na água à temperatura ambiente (a temperatura do fluido é o
             // excesso sobre o ambiente); no limiar da ativação térmica, 2.
             let t_rel = 1.0 + max(temp_in[fgrid(fx, fy)], 0.0) / TEMP_ACT_THRESHOLD;
-            p_bound = 1.0 - exp(-params.aggregation * f32(min(n_act - 1u, 24u)) / t_rel);
+            // Volume excluído: a ligação enfraquece com o enchimento da própria
+            // célula (cheia, solta os seus e a pressão espalha-os): forma
+            // manchas de várias células em vez de picos numa só.
+            let room = clamp(1.0 - 2.0 * f32(src_total) / f32(max(chem_capacity(idx), 1u)), 0.0, 1.0);
+            p_bound = 1.0 - exp(-params.aggregation * f32(min(n_act, 48u)) * room / t_rel);
         }
     }
 
