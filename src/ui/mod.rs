@@ -363,6 +363,11 @@ fn tab_matter(ui: &mut egui::Ui, world: &mut World) {
     if p.reactivation_rate > 0.0 {
         ui.label(format!("  pousio médio de um gasto: {:.0} passos", 1.0 / p.reactivation_rate));
     }
+    ui.strong("Ativação abiótica (sem vida)");
+    ui.add(egui::Slider::new(&mut p.direct_photoactivation, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("pelo sol (fotoativação dos gastos)"))
+        .on_hover_text("a luz reativa gastos sozinha (segue o dia e a noite e as sombras). 1 = ~1,8% dos gastos por passo em sol pleno; 0,02 = um pingo. 0 = só os fotossistemas");
+    ui.add(egui::Slider::new(&mut p.thermal_activation, 0.0..=2.0).logarithmic(true).smallest_positive(0.01).text("pelo calor (acima de T = 2)"))
+        .on_hover_text("o calor reativa gastos sozinho, só na água acima de T = 2 (fumarolas). 0 = só os quimiossintéticos aproveitam as fumarolas");
     ui.add(egui::Slider::new(&mut p.settle, 0.0..=10.0).text("assentamento ×"));
     ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));
     ui.add(
@@ -386,8 +391,6 @@ fn tab_light(ui: &mut egui::Ui, world: &mut World) {
         let d = p.daylight(p.epoch);
         ui.label(format!("  agora: {} ({:.0}% do sol)", if d > 0.0 { "dia" } else { "noite" }, d * 100.0));
     }
-    ui.add(egui::Slider::new(&mut p.direct_photoactivation, 0.0..=1.0).text("fotoativação direta dos gastos"))
-        .on_hover_text("0 = a luz só vira comida pelos fotossistemas dos agentes");
     let light_changed =
         ui.add(egui::Slider::new(&mut p.uv_depth, 0.0..=30.0).text("atenuação UV pela água")).changed();
     ui.add(egui::Slider::new(&mut p.monomer_uv_absorb, 0.0..=5.0).text("absorção UV pelos monómeros"));
@@ -408,8 +411,6 @@ fn tab_water(ui: &mut egui::Ui, world: &mut World) {
     let p = &mut world.params;
     let st = &mut world.settings;
     ui.strong("Fumarolas: química");
-    ui.add(egui::Slider::new(&mut p.thermal_activation, 0.0..=2.0).text("ativação abiótica pelo calor"))
-        .on_hover_text("o calor reativa gastos sozinho (× a de sempre); 0 = só os quimiossintéticos aproveitam as fumarolas");
     ui.add(egui::Slider::new(&mut p.chemo_yield, 0.0..=5.0).text("rendimento da quimiossíntese"))
         .on_hover_text("energia por unidade de redutor consumido");
     ui.add(egui::Slider::new(&mut p.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("oxidação do redutor (1/s)"))

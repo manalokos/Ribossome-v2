@@ -22,6 +22,9 @@ fn main() {
     if let Some(v) = envf("DECAY") {
         w.params.redox_decay = v;
     }
+    if let Some(v) = envf("Q10") {
+        w.params.metabolic_q10 = v;
+    }
     let run = |w: &mut World, steps: u32| {
         let mut done = 0;
         while done < steps {
@@ -75,7 +78,37 @@ fn main() {
         }
         s / 16.0
     };
-    run(&mut w, 1500);
+    for _ in 0..5 {
+        run(&mut w, 128);
+        let a = w.read_agents_blocking(&gpu);
+        let c = w.life_counters_blocking(&gpu);
+        let e: Vec<f32> = a.iter().filter(|a| a.alive != 0).map(|a| a.energy).collect();
+        let tb = w.read_f32_blocking(&gpu, &w.temp_buf);
+        let hot = tb.iter().filter(|&&t| t > w.params.denature_temp).count();
+        let ta: Vec<f32> = a
+            .iter()
+            .filter(|a| a.alive != 0)
+            .map(|a| {
+                let fx = ((a.pos_x / wpc) / cfg.grid_size as f32 * cfg.fluid_size as f32) as usize;
+                let fy = ((a.pos_y / wpc) / cfg.grid_size as f32 * cfg.fluid_size as f32) as usize;
+                tb[fy.min(cfg.fluid_size as usize - 1) * cfg.fluid_size as usize + fx.min(cfg.fluid_size as usize - 1)]
+            })
+            .collect();
+        println!(
+            "  T > desnaturação em {:.2}% do fluido; T nos vivos: máx {:.2}",
+            100.0 * hot as f32 / tb.len() as f32,
+            ta.iter().cloned().fold(0.0f32, f32::max)
+        );
+        println!(
+            "epoch {}: vivos {}, energia média {:.2}, mortes {} (fome {})",
+            w.params.epoch,
+            e.len(),
+            e.iter().sum::<f32>() / e.len().max(1) as f32,
+            c.deaths,
+            c.starved
+        );
+    }
+    run(&mut w, 1500 - 640);
     let a1 = w.read_agents_blocking(&gpu);
     println!("fumarola mais quente em ({hx:.0}, {hy:.0}) células; oxidação do redutor {}", w.params.redox_decay);
     for &d in &dists {
