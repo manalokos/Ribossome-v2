@@ -212,6 +212,10 @@ pub struct World {
     heat_buf: wgpu::Buffer,
     /// Assinatura do que está no heat_buf (para só reenviar quando muda).
     heat_key: Vec<u8>,
+    /// O fluido estava ligado no último passo (ao desligar, as grelhas do
+    /// fluido são limpas: senão ficavam "fantasmas" congelados que os agentes
+    /// e os monómeros continuavam a ler).
+    fluid_was_on: bool,
     ledger_buf: wgpu::Buffer,
     ledger_staging: wgpu::Buffer,
     readback: Readback,
@@ -833,6 +837,7 @@ impl World {
             chem_image: None,
             fumarole_gain: 1.0,
             heat_key: Vec::new(),
+            fluid_was_on: true,
             snap: snapshot::snap_buffers(device, p_a, joint_angle, joint_base, joint_active, sensor_mem, bitten),
         }
     }
@@ -1108,6 +1113,14 @@ impl World {
         let st = self.settings;
         let substep = st.fluid_substep.clamp(1, 4);
         self.upload_heat(queue);
+        // Fluido desligado: água parada, à temperatura ambiente (0), sem
+        // redutor. Limpa uma vez, ao desligar.
+        if !st.fluid_enabled && self.fluid_was_on {
+            enc.clear_buffer(&self.velocity_buf, 0, None);
+            enc.clear_buffer(&self.temp_buf, 0, None);
+            enc.clear_buffer(&self.redox_buf, 0, None);
+        }
+        self.fluid_was_on = st.fluid_enabled;
         self.params.fumarole_count = self.fumaroles.len() as u32;
         self.params.fluid_dt = self.params.dt * substep as f32;
         self.params.fluid_enabled = st.fluid_enabled as u32;
