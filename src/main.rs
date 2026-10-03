@@ -627,6 +627,7 @@ impl Running {
             }
         }
         self.view.uv_depth.set(self.world.params.uv_depth);
+        self.view.daylight.set(self.world.params.daylight(self.world.params.epoch));
         self.view.update(
             &self.gpu.queue,
             &self.cam,

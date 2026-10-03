@@ -51,6 +51,8 @@ pub struct WorldView {
     pub focus: std::cell::Cell<u32>,
     /// Profundidade ótica da água (copiada de SimParams antes de desenhar).
     pub uv_depth: std::cell::Cell<f32>,
+    /// Fração do sol (escurece a vista de noite).
+    pub daylight: std::cell::Cell<f32>,
 }
 
 impl WorldView {
@@ -272,6 +274,7 @@ impl WorldView {
             draw_args: world.draw_args_buf.clone(),
             focus: std::cell::Cell::new(u32::MAX),
             uv_depth: std::cell::Cell::new(11.0),
+            daylight: std::cell::Cell::new(1.0),
         }
     }
 
@@ -295,7 +298,7 @@ impl WorldView {
             focus_slot: self.focus.get(),
             signal_view,
             uv_depth: self.uv_depth.get(),
-            _vpad1: 0,
+            daylight: self.daylight.get(),
             _vpad2: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));

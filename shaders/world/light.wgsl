@@ -57,11 +57,18 @@ fn light_transmit(lx: u32, ly: u32) -> f32 {
 // paredes a refletir (borda repetida). 7 vizinhos a meia resolução: sombras
 // difusas (o Filipe pediu mais difusas que com 5).
 const LIGHT_TAPS: i32 = 7;
+// A janela desloca-se params.sun_slope células por linha (o sol inclinado: a
+// luz de (x, y) vem de (x − inclinação, y + 1)), com interpolação linear da
+// parte fracionária: as sombras rodam com a hora do dia.
 fn light_above(x: u32, row: u32) -> f32 {
+    let sh = -params.sun_slope;
+    let base = i32(floor(sh));
+    let f = sh - f32(base);
     var s = 0.0;
     for (var d = 0; d < LIGHT_TAPS; d++) {
-        let xs = clamp(i32(x) + d - LIGHT_TAPS / 2, 0, i32(LIGHT_SIZE) - 1);
-        s += light_grid[row * LIGHT_SIZE + u32(xs)];
+        let x0 = clamp(i32(x) + d - LIGHT_TAPS / 2 + base, 0, i32(LIGHT_SIZE) - 1);
+        let x1 = clamp(x0 + 1, 0, i32(LIGHT_SIZE) - 1);
+        s += mix(light_grid[row * LIGHT_SIZE + u32(x0)], light_grid[row * LIGHT_SIZE + u32(x1)], f);
     }
     return s / f32(LIGHT_TAPS);
 }

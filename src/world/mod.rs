@@ -1089,7 +1089,8 @@ impl World {
             let epoch = self.params.epoch.wrapping_add(i);
             // Dia e noite: o sol deste passo.
             let uv_strength = self.params.uv_strength * self.params.daylight(epoch);
-            let p = SimParams { epoch, spawn_count, uv_strength, ..self.params };
+            let sun_slope = self.params.sun_slope_at(epoch);
+            let p = SimParams { epoch, spawn_count, uv_strength, sun_slope, ..self.params };
             let at = (PARAMS_STRIDE * i as u64) as usize;
             bytes[at..at + size_of::<SimParams>()].copy_from_slice(bytemuck::bytes_of(&p));
         }

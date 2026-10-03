@@ -255,7 +255,10 @@ gpu_struct! {
         /// DIA E NOITE: período do ciclo em epochs (0 = sempre dia). O sol
         /// (uv_strength) é × max(0, sen(2π·epoch/período)): noite metade do tempo.
         pub day_period: f32,
-        pub _pad_c2: u32,
+        /// Inclinação do sol neste passo (células de luz por linha; 0 = a
+        /// pique). Calculada pelo passo a partir da hora do dia: de manhã a
+        /// luz vem de um lado, à tarde do outro (as sombras rodam).
+        pub sun_slope: f32,
     }
 }
 
@@ -263,6 +266,19 @@ gpu_struct! {
 const DERIVED_PARAMS: [&str; 7] = ["epoch", "seed", "fluid_dt", "fluid_enabled", "max_agents", "fumarole_count", "spawn_count"];
 
 impl SimParams {
+    /// Inclinação do sol (tangente do ângulo ao zénite, ±60° do nascer ao pôr).
+    pub fn sun_slope_at(&self, epoch: u32) -> f32 {
+        if self.day_period < 1.0 {
+            return 0.0;
+        }
+        let phase = (epoch as f64 / self.day_period as f64).fract();
+        if phase >= 0.5 {
+            return 0.0;
+        }
+        let angle = (phase / 0.5 - 0.5) * 2.0 * 60f64.to_radians();
+        angle.tan() as f32
+    }
+
     /// Fração do sol neste epoch (1 = meio-dia; 0 = noite), pelo ciclo dia/noite.
     pub fn daylight(&self, epoch: u32) -> f32 {
         if self.day_period < 1.0 {
@@ -370,7 +386,7 @@ impl Default for SimParams {
             thermal_activation: 1.0,
             denature_temp: 6.0,
             day_period: 0.0,
-            _pad_c2: 0,
+            sun_slope: 0.0,
         }
     }
 }
@@ -593,7 +609,8 @@ gpu_struct! {
         /// Profundidade ótica da água (= SimParams::uv_depth), para a vista
         /// normal separar a sombra do terreno do escurecer com a profundidade.
         pub uv_depth: f32,
-        pub _vpad1: u32,
+        /// Fração do sol (1 = dia pleno; 0 = noite): a vista escurece de noite.
+        pub daylight: f32,
         pub _vpad2: u32,
     }
 }

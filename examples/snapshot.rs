@@ -24,6 +24,7 @@ fn main() {
     world.params.reactivation_rate = env("REACT", world.params.reactivation_rate);
     world.params.direct_photoactivation = env("PHOTO", world.params.direct_photoactivation);
     world.params.aggregation = env("AGG", world.params.aggregation);
+    world.params.day_period = env("DAY", world.params.day_period);
     world.params.uv_depth = env("UVDEPTH", world.params.uv_depth);
     world.params.monomer_uv_absorb = env("UVABS", world.params.monomer_uv_absorb);
     if let Ok(t) = std::env::var("TERRAIN") {
