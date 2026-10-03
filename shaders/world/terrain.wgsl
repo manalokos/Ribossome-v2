@@ -14,8 +14,19 @@ const GAMMA_STRAY_WALK_P: f32 = 0.05;
 // O entulho solto é levado pela corrente a esta fração da lei dos monómeros
 // (× params.sediment_transport), só acima da velocidade crítica de arranque.
 const GAMMA_SEDIMENT_FACTOR: f32 = 0.5;
-// Queda de um grão sem apoio por baixo, por passo (× params.sediment_settle).
-const GAMMA_FALL_P: f32 = 0.05;
+// Velocidade de queda de um grão na água (Stokes), em células do fluido por
+// segundo (× params.sediment_settle): a mesma unidade das correntes.
+const GAMMA_SETTLE_SPEED: f32 = 0.5;
+// Coesão no arranque: cada vizinho soma esta fração da velocidade crítica
+// (um grão agarrado precisa de mais corrente, mas não fica imune).
+const GAMMA_BOND_SHIELDS: f32 = 0.5;
+
+// Velocidade do fluido numa célula da grelha.
+fn fluid_vel_at_cell(cx: u32, cy: u32) -> vec2<f32> {
+    let fxi = min((cx * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
+    let fyi = min((cy * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
+    return sanitize_vec2(velocity_in[fgrid(fxi, fyi)]);
+}
 // Uma pilha de 2 ao lado de uma célula vazia deixa cair o quantum de cima.
 const GAMMA_SHED_P: f32 = 0.03;
 
@@ -176,28 +187,48 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
                 }
             }
         }
-        if (bonds >= 4u) { return; } // preso
         let mob = pow(0.25, f32(bonds));
 
+        // A corrente que o grão SENTE é a da água ao lado (a mais forte dos
+        // 4 vizinhos sem grãos): dentro do entulho o fluido quase não anda.
+        // Um grão enterrado (sem água à volta) não sente corrente nenhuma.
         var vs = vec2<f32>(0.0);
         if (params.fluid_enabled != 0u) {
-            let fxi = min((x * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
-            let fyi = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
-            vs = sanitize_vec2(velocity_in[fgrid(fxi, fyi)]);
+            var nb4 = array<vec2<i32>, 4>(vec2<i32>(1, 0), vec2<i32>(-1, 0), vec2<i32>(0, 1), vec2<i32>(0, -1));
+            for (var k = 0u; k < 4u; k++) {
+                let qx = i32(x) + nb4[k].x;
+                let qy = i32(y) + nb4[k].y;
+                if (qx < 0i || qy < 0i || qx >= i32(GRID_SIZE) || qy >= i32(GRID_SIZE)) { continue; }
+                if (gamma_count(u32(qy) * GRID_SIZE + u32(qx)) != 0u) { continue; }
+                let v = fluid_vel_at_cell(u32(qx), u32(qy));
+                if (dot(v, v) > dot(vs, vs)) { vs = v; }
+            }
         }
-        // ARRANQUE (Shields): só o excesso de velocidade acima da crítica
-        // arrasta; os grãos com vizinhos (mob) resistem mais, como um grumo.
-        let speed = length(vs);
-        let excess = max(speed - max(params.sediment_threshold, 0.0), 0.0);
-        let v_eff = select(vec2<f32>(0.0), vs * (excess / max(speed, 1e-6)), speed > 1e-6);
-        let p_sed = parcel_hop_p(v_eff) * GAMMA_SEDIMENT_FACTOR * max(params.sediment_transport, 0.0) * mob;
-        // QUEDA: sem nada por baixo, o grão assenta (os presos dos lados caem
-        // menos, pela mesma mobilidade). A corrente a subir pode vencê-la:
-        // é a suspensão.
+        let w_s = GAMMA_SETTLE_SPEED * max(params.sediment_settle, 0.0);
+        let unsupported = y > 0u && gamma_count(idx - GRID_SIZE) == 0u;
+        var v_move = vec2<f32>(0.0);
+        var p_sed = 0.0;
         var p_fall = 0.0;
-        if (y > 0u && gamma_count(idx - GRID_SIZE) == 0u) {
-            p_fall = GAMMA_FALL_P * max(params.sediment_settle, 0.0) * mob;
+        if (unsupported && bonds == 0u) {
+            // EM SUSPENSÃO (grão solto na água): anda com a corrente menos a
+            // velocidade de queda. Sobe se a corrente a subir vencer a queda;
+            // assenta onde ela abranda.
+            v_move = vs - vec2<f32>(0.0, w_s);
+            p_sed = parcel_hop_p(v_move);
+        } else {
+            // NO FUNDO, ARRANQUE (Shields): só o excesso de velocidade acima
+            // da crítica arrasta; a coesão sobe a crítica.
+            let speed = length(vs);
+            let crit = max(params.sediment_threshold, 0.0) * (1.0 + GAMMA_BOND_SHIELDS * f32(bonds));
+            let excess = max(speed - crit, 0.0);
+            v_move = select(vec2<f32>(0.0), vs * (excess / max(speed, 1e-6)), speed > 1e-6);
+            p_sed = parcel_hop_p(v_move) * GAMMA_SEDIMENT_FACTOR * max(params.sediment_transport, 0.0);
+            // Pendurado (vizinhos dos lados, nada por baixo): cai devagar,
+            // tanto menos quanto mais preso.
+            if (unsupported) { p_fall = parcel_hop_p(vec2<f32>(0.0, w_s)) * mob; }
         }
+        // Preso (muitos vizinhos) e sem corrente que o arranque: fica.
+        if (bonds >= 4u && p_sed <= 0.0) { return; }
         let hw = rr.y;
         let rw = f32(rr.z >> 8u) * (1.0 / 16777216.0);
         let rw2 = f32(rr.w >> 8u) * (1.0 / 16777216.0);
@@ -208,15 +239,16 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
         } else if (rw < p_fall) {
             dest = idx - GRID_SIZE;
         } else if (rw < p_fall + p_sed) {
-            // Salto a jusante (como o transporte dos monómeros), nunca a subir.
+            // Salto na direção do movimento (corrente, ou corrente − queda),
+            // nunca para cima de uma célula com mais grãos.
             var ddx = 0i;
             var ddy = 0i;
-            let ax = abs(vs.x);
-            let ay = abs(vs.y);
+            let ax = abs(v_move.x);
+            let ay = abs(v_move.y);
             if (f32(hw >> 8u) * (1.0 / 16777216.0) < ax / max(ax + ay, 1e-6)) {
-                ddx = select(-1i, 1i, vs.x > 0.0);
+                ddx = select(-1i, 1i, v_move.x > 0.0);
             } else {
-                ddy = select(-1i, 1i, vs.y > 0.0);
+                ddy = select(-1i, 1i, v_move.y > 0.0);
             }
             let wx = i32(x) + ddx;
             let wy = i32(y) + ddy;

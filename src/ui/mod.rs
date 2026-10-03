@@ -475,7 +475,7 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.add(egui::Slider::new(&mut world.params.sediment_threshold, 0.0..=5.0).text("velocidade crítica de arranque"))
         .on_hover_text("critério de Shields: abaixo desta velocidade (células do fluido/s) a corrente não arranca grãos; acima, arranca ∝ ao excesso");
     ui.add(egui::Slider::new(&mut world.params.sediment_settle, 0.0..=5.0).text("queda dos grãos (assentar)"))
-        .on_hover_text("grãos sem nada por baixo caem; a corrente a subir pode segurá-los (suspensão) e eles assentam onde ela abranda. 0 = flutuam");
+        .on_hover_text("velocidade de queda (×0,5 células do fluido/s): um grão solto anda com a corrente menos a queda — sobe onde a corrente a subir é mais forte (suspensão) e assenta onde ela abranda. 0 = flutuam");
     ui.add(egui::Slider::new(&mut world.params.bioturbation, 0.0..=0.5).text("bioturbação (empurrar entulho)"));
     ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("custo por grão empurrado"));
     ui.add(egui::Slider::new(&mut world.params.sedimentation, 0.0..=0.5).text("sedimentação (afundar ∝ √n)"));

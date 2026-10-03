@@ -290,9 +290,10 @@ gpu_struct! {
         /// do fluido por segundo: abaixo dela a corrente não arranca grãos;
         /// acima, arranca ∝ ao excesso. 0 = qualquer corrente mexe.
         pub sediment_threshold: f32,
-        /// Queda dos grãos sem apoio por baixo (velocidade de Stokes, × a
-        /// probabilidade base 0,05 por passo): o que a corrente levanta volta
-        /// a assentar onde ela abranda. 0 = os grãos flutuam (v3).
+        /// Velocidade de queda dos grãos na água (Stokes), × 0,5 células do
+        /// fluido por segundo: um grão solto anda com a corrente menos isto
+        /// (sobe se a corrente a subir for mais forte; assenta onde ela
+        /// abranda). 0 = os grãos flutuam (v3).
         pub sediment_settle: f32,
         pub _pad_e0: u32,
         pub _pad_e1: u32,
