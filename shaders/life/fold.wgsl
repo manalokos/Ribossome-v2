@@ -370,7 +370,9 @@ fn push_fluid(slot: u32, a: Agent, c: RftCtx, old: ptr<function, array<vec2<f32>
     let world_per_fluid = SIM_SIZE / f32(FLUID_SIZE);
     // Velocidade por passo (mundo) -> força do fluido (células do fluido / s²).
     // (Na experiência "só pelo fluido" o empurrão é sempre 1.)
-    let push = select(params.agent_fluid_push, 1.0, params.fluid_swim_only != 0u);
+    // × arrasto pela corrente (experiência): desacoplados da água nos dois
+    // sentidos (nem são levados nem a empurram).
+    let push = select(params.agent_fluid_push, 1.0, params.fluid_swim_only != 0u) * clamp(params.flow_coupling, 0.0, 1.0);
     let scale = push / (world_per_fluid * max(params.dt, 1e-4) * max(params.dt, 1e-4));
     let id = mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
     let n = c.n;

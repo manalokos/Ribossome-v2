@@ -505,7 +505,7 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.inertia, 0.0..=10.0).text("inércia dos pesados"))
         .on_hover_text("a velocidade aproxima-se da alvo (natação + corrente) com peso 1/(1 + isto × massa/massa de um corpo médio): os pesados aceleram devagar e perdem as rajadas; 0 = sem inércia");
     ui.add(egui::Slider::new(&mut p.flow_coupling, 0.0..=1.0).text("arrasto pela corrente"))
-        .on_hover_text("1 = físico (um corpo livre segue a água); menos = experiência: as correntes levam-nos menos");
+        .on_hover_text("1 = físico (um corpo livre segue a água); menos = experiência: as correntes levam-nos menos e eles também empurram menos a água");
     ui.add(egui::Slider::new(&mut p.agent_fluid_push, -1.0..=1.0).text("agentes empurram a água"))
         .on_hover_text("cada resíduo devolve ao fluido o seu arrasto (só no mundo com fluido)");
     let mut fso = p.fluid_swim_only != 0;
