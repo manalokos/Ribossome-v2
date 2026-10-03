@@ -1,21 +1,25 @@
-//! PLANETAS: um pequeno simulador de acreção num disco 2D, sobre a mesma
-//! ideia de "matéria em quanta numa grelha" do Ribossome, mas COM inércia.
+//! PLANETAS: uma nuvem de matéria em quanta numa grelha 2D, com inércia,
+//! gravidade e pressão. Não há estrela pré-feita: tudo é matéria; o que se
+//! forma (estrelas, discos, planetas) vem do colapso.
 //!
-//! Cada célula da grelha guarda um PACOTE: massa (quanta inteiros), velocidade
-//! e centro de massa dentro da célula (0..1). Em cada passo:
-//!   1. kick: a velocidade de cada pacote muda com a gravidade da estrela
-//!      central (exata, 1/r²) e dos pacotes vizinhos num raio (1/r²,
-//!      suavizada): a estrela domina; a formação de planetas vem dos
-//!      encontros próximos;
-//!   2. drift + recolha: cada pacote anda v·dt e cai INTEIRO na célula onde
-//!      fica o seu centro de massa (sem se partir: não há difusão numérica);
-//!      cada célula recolhe o que lhe cai das 9 vizinhas e junta: massa
-//!      somada (exata), momento somado (conservado), centro de massa pela
-//!      média pesada. Dois pacotes na mesma célula = colisão inelástica =
-//!      ACREÇÃO.
+//! Cada célula guarda um PACOTE: massa (quanta inteiros), velocidade e centro
+//! de massa dentro da célula (0..1). Em cada passo:
+//!   1. GRAVIDADE 1/r² (P³M): uma grelha grossa (blocos de B×B células) com a
+//!      massa e o centro de massa de cada bloco; cada bloco soma a atração de
+//!      TODOS os outros fora dos 3×3 à volta (campo distante); cada célula
+//!      soma, célula a célula, a das que estão nesses 3×3 blocos (campo
+//!      próximo). Cada massa conta uma vez.
+//!   2. PRESSÃO: P = K·mᵞ por célula; empurra as velocidades para longe das
+//!      zonas densas (−∇P/m).
+//!   3. MOVIMENTO + RECOLHA: cada pacote anda v·dt e cai INTEIRO na célula do
+//!      seu centro de massa; cada célula junta o que lhe cai (massa e momento
+//!      somados, centro de massa pela média pesada): colisão inelástica.
+//!   4. EXPANSÃO: uma célula com mais pressão do que uma vizinha passa-lhe
+//!      quanta inteiros (levam a sua velocidade). Sem isto um pacote nunca se
+//!      partia. Mais compressão (gravidade) = mais quanta por célula.
 //!
-//! Nada anda mais de uma célula por passo (CFL), por isso basta olhar para as
-//! 9 vizinhas. Unidades: células e passos (dt = 1).
+//! Massa e momento linear conservam-se exatamente. Nada anda mais de uma
+//! célula por passo (CFL). Unidades: células e passos.
 
 use std::sync::Arc;
 
@@ -27,18 +31,21 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
 const N: u32 = 1024;
+/// Lado do bloco da grelha grossa (células) e número de blocos por lado.
+const B: u32 = 8;
+const C: u32 = N / B;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct SimParams {
-    gm_star: f32,
-    g_quantum: f32,
+    g: f32,
+    k_press: f32,
+    gamma: f32,
+    expand: f32,
     soft: f32,
-    star_soft: f32,
-    center_x: f32,
-    center_y: f32,
-    radius: u32,
+    epoch: u32,
     n: u32,
+    c: u32,
 }
 
 #[repr(C)]
@@ -54,59 +61,132 @@ struct ViewParams {
     _p2: f32,
 }
 
-// VMAX: velocidade máxima (células por passo): o pacote nunca salta mais de uma.
 const COMMON: &str = r#"
-struct SimParams { gm_star: f32, g_quantum: f32, soft: f32, star_soft: f32, center_x: f32, center_y: f32, radius: u32, n: u32 }
+struct SimParams { g: f32, k_press: f32, gamma: f32, expand: f32, soft: f32, epoch: u32, n: u32, c: u32 }
+// Velocidade máxima (células por passo): um pacote nunca salta mais de uma.
 const VMAX: f32 = 0.95;
+const BLK: u32 = 8u;
 "#;
 
 const SIM_WGSL: &str = r#"
 @group(0) @binding(0) var<uniform> P: SimParams;
-@group(0) @binding(1) var<storage, read> mass_in: array<u32>;
-@group(0) @binding(2) var<storage, read> dyn_in: array<vec4<f32>>;   // (vx, vy, cx, cy)
+@group(0) @binding(1) var<storage, read_write> mass_a: array<u32>;
+@group(0) @binding(2) var<storage, read_write> dyn_a: array<vec4<f32>>;   // (vx, vy, cx, cy)
 @group(0) @binding(3) var<storage, read_write> dyn_tmp: array<vec4<f32>>;
-@group(0) @binding(4) var<storage, read_write> mass_out: array<u32>;
-@group(0) @binding(5) var<storage, read_write> dyn_out: array<vec4<f32>>;
-@group(0) @binding(6) var<storage, read_write> stats: array<atomic<u32>, 8>;
+@group(0) @binding(4) var<storage, read_write> mass_b: array<u32>;
+@group(0) @binding(5) var<storage, read_write> dyn_b: array<vec4<f32>>;
+@group(0) @binding(6) var<storage, read_write> coarse: array<vec4<f32>>;   // (m, x, y, _) centro de massa absoluto
+@group(0) @binding(7) var<storage, read_write> coarse_acc: array<vec2<f32>>;
+@group(0) @binding(8) var<storage, read_write> stats: array<atomic<u32>, 8>;
+// Contador de passos (para os sorteios), incrementado na GPU no fim de cada passo.
+@group(0) @binding(9) var<storage, read_write> step_counter: array<atomic<u32>, 1>;
 
-// 1. KICK: gravidade da estrela + dos vizinhos no raio.
+@compute @workgroup_size(1)
+fn tick() {
+    atomicAdd(&step_counter[0], 1u);
+}
+
+fn hash(a: u32, b: u32, c: u32) -> f32 {
+    var x = a * 0x9E3779B1u ^ (b + 0x7F4A7C15u) * 0x85EBCA77u ^ c * 0xC2B2AE3Du;
+    x ^= x >> 15u; x *= 0x2C1B3C6Du; x ^= x >> 12u; x *= 0x297A2D39u; x ^= x >> 15u;
+    return f32(x >> 8u) / 16777216.0;
+}
+
+fn pressure(m: u32) -> f32 {
+    return P.k_press * pow(f32(m), P.gamma);
+}
+
+fn mass_at(x: i32, y: i32) -> u32 {
+    if (x < 0 || y < 0 || x >= i32(P.n) || y >= i32(P.n)) { return 0u; }
+    return mass_a[u32(y) * P.n + u32(x)];
+}
+
+// 1a. Grelha grossa: massa e centro de massa de cada bloco.
+@compute @workgroup_size(8, 8)
+fn coarse_build(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= P.c || gid.y >= P.c) { return; }
+    var m = 0.0;
+    var s = vec2<f32>(0.0);
+    for (var dy = 0u; dy < BLK; dy++) {
+        for (var dx = 0u; dx < BLK; dx++) {
+            let x = gid.x * BLK + dx;
+            let y = gid.y * BLK + dy;
+            let i = y * P.n + x;
+            let mi = f32(mass_a[i]);
+            if (mi == 0.0) { continue; }
+            m += mi;
+            s += mi * (vec2<f32>(f32(x), f32(y)) + dyn_a[i].zw);
+        }
+    }
+    let c = select(vec2<f32>(f32(gid.x * BLK), f32(gid.y * BLK)) + 4.0, s / max(m, 1e-6), m > 0.0);
+    coarse[gid.y * P.c + gid.x] = vec4<f32>(m, c, 0.0);
+}
+
+// 1b. Campo distante: cada bloco soma a atração dos blocos fora dos 3×3 à volta.
+@compute @workgroup_size(8, 8)
+fn coarse_far(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= P.c || gid.y >= P.c) { return; }
+    let here = coarse[gid.y * P.c + gid.x];
+    let p = select(vec2<f32>(f32(gid.x * BLK), f32(gid.y * BLK)) + 4.0, here.yz, here.x > 0.0);
+    var a = vec2<f32>(0.0);
+    for (var jy = 0u; jy < P.c; jy++) {
+        let near_row = abs(i32(jy) - i32(gid.y)) <= 1;
+        for (var jx = 0u; jx < P.c; jx++) {
+            if (near_row && abs(i32(jx) - i32(gid.x)) <= 1) { continue; }
+            let o = coarse[jy * P.c + jx];
+            if (o.x == 0.0) { continue; }
+            let d = o.yz - p;
+            let r2 = dot(d, d) + P.soft * P.soft;
+            a += o.x * d / (r2 * sqrt(r2));
+        }
+    }
+    coarse_acc[gid.y * P.c + gid.x] = P.g * a;
+}
+
+// 2. KICK: campo distante + próximo (células dos 3×3 blocos) + pressão.
 @compute @workgroup_size(16, 16)
 fn kick(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = gid.x;
     let y = gid.y;
     if (x >= P.n || y >= P.n) { return; }
     let i = y * P.n + x;
-    let m = mass_in[i];
-    var d = dyn_in[i];
+    let m = mass_a[i];
+    let d = dyn_a[i];
     if (m == 0u) { dyn_tmp[i] = vec4<f32>(0.0); return; }
     let pos = vec2<f32>(f32(x), f32(y)) + d.zw;
-    let r = pos - vec2<f32>(P.center_x, P.center_y);
-    let r2 = dot(r, r) + P.star_soft * P.star_soft;
-    var a = -P.gm_star * r / (r2 * sqrt(r2));
-    let R = i32(P.radius);
-    for (var dy = -R; dy <= R; dy++) {
-        for (var dx = -R; dx <= R; dx++) {
-            if (dx == 0 && dy == 0) { continue; }
-            let nx = i32(x) + dx;
-            let ny = i32(y) + dy;
-            if (nx < 0 || ny < 0 || nx >= i32(P.n) || ny >= i32(P.n)) { continue; }
-            let j = u32(ny) * P.n + u32(nx);
-            let mj = mass_in[j];
+    let cx = i32(x / BLK);
+    let cy = i32(y / BLK);
+    var a = coarse_acc[u32(cy) * P.c + u32(cx)];
+    var near = vec2<f32>(0.0);
+    let x0 = max((cx - 1) * i32(BLK), 0);
+    let y0 = max((cy - 1) * i32(BLK), 0);
+    let x1 = min((cx + 2) * i32(BLK), i32(P.n));
+    let y1 = min((cy + 2) * i32(BLK), i32(P.n));
+    for (var yy = y0; yy < y1; yy++) {
+        for (var xx = x0; xx < x1; xx++) {
+            if (xx == i32(x) && yy == i32(y)) { continue; }
+            let j = u32(yy) * P.n + u32(xx);
+            let mj = mass_a[j];
             if (mj == 0u) { continue; }
-            let pj = vec2<f32>(f32(nx), f32(ny)) + dyn_in[j].zw;
-            let dd = pj - pos;
-            let s2 = dot(dd, dd) + P.soft * P.soft;
-            a += P.g_quantum * f32(mj) * dd / (s2 * sqrt(s2));
+            let dd = vec2<f32>(f32(xx), f32(yy)) + dyn_a[j].zw - pos;
+            let r2 = dot(dd, dd) + P.soft * P.soft;
+            near += f32(mj) * dd / (r2 * sqrt(r2));
         }
     }
+    a += P.g * near;
+    // Pressão: −∇P / m (diferenças centradas entre vizinhas).
+    let ix = i32(x);
+    let iy = i32(y);
+    let gp = vec2<f32>(pressure(mass_at(ix + 1, iy)) - pressure(mass_at(ix - 1, iy)),
+                       pressure(mass_at(ix, iy + 1)) - pressure(mass_at(ix, iy - 1))) * 0.5;
+    a -= gp / f32(m);
     var v = d.xy + a;
     let sp = length(v);
     if (sp > VMAX) { v *= VMAX / sp; }
     dyn_tmp[i] = vec4<f32>(v, d.zw);
 }
 
-// Onde cai o pacote da célula s (e com que velocidade): contra a parede do
-// mundo fica e a velocidade reflete-se.
+// Onde cai o pacote da célula s: contra a parede do mundo fica e reflete.
 fn landing(s: vec2<i32>, d: vec4<f32>) -> vec4<f32> {
     var v = d.xy;
     var p = vec2<f32>(s) + d.zw + v;
@@ -115,7 +195,7 @@ fn landing(s: vec2<i32>, d: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(p, v);
 }
 
-// 2. DRIFT + RECOLHA: cada célula junta os pacotes que lhe caem.
+// 3. MOVIMENTO + RECOLHA (a -> b).
 @compute @workgroup_size(16, 16)
 fn gather(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = gid.x;
@@ -130,7 +210,7 @@ fn gather(@builtin(global_invocation_id) gid: vec3<u32>) {
             let s = here + vec2<i32>(dx, dy);
             if (s.x < 0 || s.y < 0 || s.x >= i32(P.n) || s.y >= i32(P.n)) { continue; }
             let j = u32(s.y) * P.n + u32(s.x);
-            let ms = mass_in[j];
+            let ms = mass_a[j];
             if (ms == 0u) { continue; }
             let l = landing(s, dyn_tmp[j]);
             if (any(vec2<i32>(floor(l.xy)) != here)) { continue; }
@@ -140,33 +220,103 @@ fn gather(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     let i = y * P.n + x;
-    mass_out[i] = mt;
+    mass_b[i] = mt;
     if (mt == 0u) {
-        dyn_out[i] = vec4<f32>(0.0);
+        dyn_b[i] = vec4<f32>(0.0);
     } else {
-        let c = clamp(com / f32(mt), vec2<f32>(0.0), vec2<f32>(0.99999));
-        dyn_out[i] = vec4<f32>(mom / f32(mt), c);
+        dyn_b[i] = vec4<f32>(mom / f32(mt), clamp(com / f32(mt), vec2<f32>(0.0), vec2<f32>(0.99999)));
     }
 }
 
-// Estatísticas: massa total, corpos, maior massa, momento (ponto fixo).
+// 4. EXPANSÃO (b -> a): quanta da célula s para a vizinha na direção k,
+// ∝ à diferença RELATIVA de pressão (no máximo metade da massa no total).
+// Calcula-se igual no emissor e no recetor (o mesmo sorteio): sem atómicas.
+fn mass_b_at(x: i32, y: i32) -> u32 {
+    if (x < 0 || y < 0 || x >= i32(P.n) || y >= i32(P.n)) { return 0xFFFFFFFFu; }
+    return mass_b[u32(y) * P.n + u32(x)];
+}
+
+fn outflow(s: vec2<i32>) -> vec4<u32> {
+    let ms = mass_b_at(s.x, s.y);
+    var q = vec4<u32>(0u);
+    if (ms == 0u || ms == 0xFFFFFFFFu || P.expand <= 0.0) { return q; }
+    let ps = pressure(ms);
+    var dirs = array<vec2<i32>, 4>(vec2<i32>(1, 0), vec2<i32>(-1, 0), vec2<i32>(0, 1), vec2<i32>(0, -1));
+    var raw = vec4<f32>(0.0);
+    for (var k = 0u; k < 4u; k++) {
+        let t = s + dirs[k];
+        let mt = mass_b_at(t.x, t.y);
+        if (mt == 0xFFFFFFFFu) { continue; } // parede
+        let pt = pressure(mt);
+        if (ps > pt) { raw[k] = P.expand * (ps - pt) / ps * f32(ms) * 0.25; }
+    }
+    var tot = 0u;
+    for (var k = 0u; k < 4u; k++) {
+        let r = hash(u32(s.y) * P.n + u32(s.x), k, atomicLoad(&step_counter[0]));
+        q[k] = u32(floor(raw[k] + r));
+        tot += q[k];
+    }
+    let cap = ms / 2u;
+    if (tot > cap) {
+        for (var k = 0u; k < 4u; k++) { q[k] = q[k] * cap / tot; }
+    }
+    return q;
+}
+
+@compute @workgroup_size(16, 16)
+fn expand(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let x = gid.x;
+    let y = gid.y;
+    if (x >= P.n || y >= P.n) { return; }
+    let i = y * P.n + x;
+    let here = vec2<i32>(i32(x), i32(y));
+    let own = dyn_b[i];
+    let out = outflow(here);
+    let m0 = mass_b[i];
+    let keep = m0 - (out.x + out.y + out.z + out.w);
+    var mt = keep;
+    var mom = f32(keep) * own.xy;
+    var com = f32(keep) * own.zw;
+    // Entradas: a vizinha na direção k manda-me o que sai dela na direção oposta.
+    var dirs = array<vec2<i32>, 4>(vec2<i32>(1, 0), vec2<i32>(-1, 0), vec2<i32>(0, 1), vec2<i32>(0, -1));
+    var opp = array<u32, 4>(1u, 0u, 3u, 2u);
+    // Onde entram (perto do lado de onde vêm).
+    var entry = array<vec2<f32>, 4>(vec2<f32>(0.95, 0.5), vec2<f32>(0.05, 0.5), vec2<f32>(0.5, 0.95), vec2<f32>(0.5, 0.05));
+    for (var k = 0u; k < 4u; k++) {
+        let s = here + dirs[k];
+        if (s.x < 0 || s.y < 0 || s.x >= i32(P.n) || s.y >= i32(P.n)) { continue; }
+        let qin = outflow(s)[opp[k]];
+        if (qin == 0u) { continue; }
+        let ds = dyn_b[u32(s.y) * P.n + u32(s.x)];
+        mt += qin;
+        mom += f32(qin) * ds.xy;
+        com += f32(qin) * entry[k];
+    }
+    mass_a[i] = mt;
+    if (mt == 0u) {
+        dyn_a[i] = vec4<f32>(0.0);
+    } else {
+        dyn_a[i] = vec4<f32>(mom / f32(mt), clamp(com / f32(mt), vec2<f32>(0.0), vec2<f32>(0.99999)));
+    }
+}
+
+// Estatísticas: massa total, células com massa, maior massa, momento angular
+// em torno do centro da grelha, células com >= 50 quanta.
 @compute @workgroup_size(16, 16)
 fn reduce(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = gid.x;
     let y = gid.y;
     if (x >= P.n || y >= P.n) { return; }
     let i = y * P.n + x;
-    let m = mass_in[i];
+    let m = mass_a[i];
     if (m == 0u) { return; }
     atomicAdd(&stats[0], m);
     atomicAdd(&stats[1], 1u);
     atomicMax(&stats[2], m);
-    // Momento angular em torno da estrela (L = r × m v), ponto fixo com sinal.
-    let d = dyn_in[i];
-    let r = vec2<f32>(f32(x), f32(y)) + d.zw - vec2<f32>(P.center_x, P.center_y);
-    let l = f32(m) * (r.x * d.y - r.y * d.x);
-    atomicAdd(&stats[3], bitcast<u32>(i32(round(l))));
-    if (m >= 30u) { atomicAdd(&stats[4], 1u); }
+    let d = dyn_a[i];
+    let r = vec2<f32>(f32(x), f32(y)) + d.zw - vec2<f32>(f32(P.n) * 0.5);
+    atomicAdd(&stats[3], bitcast<u32>(i32(round(f32(m) * (r.x * d.y - r.y * d.x)))));
+    if (m >= 50u) { atomicAdd(&stats[4], 1u); }
 }
 "#;
 
@@ -189,23 +339,18 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    // Pixel -> células (y para cima).
     let w = vec2<f32>(V.center_x + in.uv.x * V.scale * V.aspect, V.center_y + in.uv.y * V.scale);
-    let star = length(w - vec2<f32>(P.center_x, P.center_y));
-    var col = vec3<f32>(0.0);
+    var col = vec3<f32>(0.03);
     if (w.x >= 0.0 && w.y >= 0.0 && w.x < f32(P.n) && w.y < f32(P.n)) {
+        col = vec3<f32>(0.0);
         let m = f32(mass_v[u32(w.y) * P.n + u32(w.x)]);
         if (m > 0.0) {
+            // Gás ténue avermelhado -> denso dourado -> núcleos brancos.
             let t = clamp(log2(1.0 + m) / V.max_log, 0.0, 1.0);
-            // Poeira acastanhada -> planetesimais -> planetas brancos.
-            col = mix(vec3<f32>(0.35, 0.22, 0.12), vec3<f32>(1.0, 0.85, 0.55), sqrt(t));
-            col = mix(col, vec3<f32>(1.0), smoothstep(0.7, 1.0, t));
+            col = mix(vec3<f32>(0.25, 0.08, 0.06), vec3<f32>(1.0, 0.75, 0.35), sqrt(t));
+            col = mix(col, vec3<f32>(1.0, 1.0, 0.95), smoothstep(0.75, 1.0, t));
         }
-    } else {
-        col = vec3<f32>(0.03);
     }
-    // A estrela.
-    col += vec3<f32>(1.0, 0.8, 0.4) * exp(-star * star / 30.0);
     return vec4<f32>(col, 1.0);
 }
 "#;
@@ -233,16 +378,16 @@ impl SplitMix {
     }
 }
 
-/// Disco inicial: anel de planetesimais em órbita quase circular.
-struct DiscSettings {
-    r_in: f32,
-    r_out: f32,
+/// Nuvem inicial: disco de raio `radius`, com rotação e agitação ao acaso.
+struct Cloud {
+    radius: f32,
     fill: f32,
+    spin: f32,
     dispersion: f32,
     seed: u64,
 }
 
-fn make_disc(s: &DiscSettings, gm: f32) -> (Vec<u32>, Vec<[f32; 4]>) {
+fn make_cloud(s: &Cloud) -> (Vec<u32>, Vec<[f32; 4]>) {
     let n = N as usize;
     let c = N as f32 * 0.5;
     let mut rng = SplitMix(s.seed);
@@ -252,16 +397,16 @@ fn make_disc(s: &DiscSettings, gm: f32) -> (Vec<u32>, Vec<[f32; 4]>) {
         for x in 0..n {
             let (px, py) = (x as f32 + 0.5 - c, y as f32 + 0.5 - c);
             let r = (px * px + py * py).sqrt();
-            if r < s.r_in || r > s.r_out || rng.f32() > s.fill {
+            if r > s.radius || rng.f32() > s.fill {
                 continue;
             }
-            let vc = (gm / r).sqrt();
-            let (tx, ty) = (-py / r, px / r);
-            let jx = (rng.f32() - 0.5) * 2.0 * s.dispersion * vc;
-            let jy = (rng.f32() - 0.5) * 2.0 * s.dispersion * vc;
+            // Rotação de corpo rígido (spin = velocidade na borda) + agitação.
+            let w = s.spin / s.radius;
+            let vx = -py * w + (rng.f32() - 0.5) * 2.0 * s.dispersion;
+            let vy = px * w + (rng.f32() - 0.5) * 2.0 * s.dispersion;
             let i = y * n + x;
             mass[i] = 1 + (rng.f32() * 3.0) as u32;
-            dynv[i] = [tx * vc + jx, ty * vc + jy, rng.f32() * 0.99, rng.f32() * 0.99];
+            dynv[i] = [vx, vy, rng.f32() * 0.99, rng.f32() * 0.99];
         }
     }
     (mass, dynv)
@@ -270,14 +415,17 @@ fn make_disc(s: &DiscSettings, gm: f32) -> (Vec<u32>, Vec<[f32; 4]>) {
 struct Sim {
     params: SimParams,
     params_buf: wgpu::Buffer,
-    mass: [wgpu::Buffer; 2],
-    dynb: [wgpu::Buffer; 2],
+    mass_a: wgpu::Buffer,
+    dyn_a: wgpu::Buffer,
     stats: wgpu::Buffer,
-    bg: [wgpu::BindGroup; 2],
+    bg: wgpu::BindGroup,
+    coarse_build: wgpu::ComputePipeline,
+    coarse_far: wgpu::ComputePipeline,
     kick: wgpu::ComputePipeline,
     gather: wgpu::ComputePipeline,
+    expand: wgpu::ComputePipeline,
     reduce: wgpu::ComputePipeline,
-    cur: usize,
+    tick: wgpu::ComputePipeline,
     step: u64,
 }
 
@@ -285,10 +433,15 @@ impl Sim {
     fn new(gpu: &Gpu, params: SimParams) -> Self {
         let device = &gpu.device;
         let cells = (N * N) as u64;
-        let mass = [storage(device, "mass a", cells * 4), storage(device, "mass b", cells * 4)];
-        let dynb = [storage(device, "dyn a", cells * 16), storage(device, "dyn b", cells * 16)];
-        let tmp = storage(device, "dyn tmp", cells * 16);
+        let mass_a = storage(device, "mass a", cells * 4);
+        let dyn_a = storage(device, "dyn a", cells * 16);
+        let dyn_tmp = storage(device, "dyn tmp", cells * 16);
+        let mass_b = storage(device, "mass b", cells * 4);
+        let dyn_b = storage(device, "dyn b", cells * 16);
+        let coarse = storage(device, "coarse", (C * C) as u64 * 16);
+        let coarse_acc = storage(device, "coarse acc", (C * C) as u64 * 8);
         let stats = storage(device, "stats", 32);
+        let step_counter = storage(device, "step counter", 4);
         let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("sim params"),
             contents: bytemuck::bytes_of(&params),
@@ -298,53 +451,32 @@ impl Sim {
             label: Some("planetas sim"),
             source: wgpu::ShaderSource::Wgsl(format!("{COMMON}{SIM_WGSL}").into()),
         });
-        let st = |b: u32, ro: bool| wgpu::BindGroupLayoutEntry {
+        let st = |b: u32| wgpu::BindGroupLayoutEntry {
             binding: b,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: ro },
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
                 has_dynamic_offset: false,
                 min_binding_size: None,
             },
             count: None,
         };
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("planetas"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                st(1, true),
-                st(2, true),
-                st(3, false),
-                st(4, false),
-                st(5, false),
-                st(6, false),
-            ],
-        });
-        let mk = |a: usize, b: usize| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("planetas"),
-                layout: &layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: mass[a].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: dynb[a].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: tmp.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 4, resource: mass[b].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 5, resource: dynb[b].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 6, resource: stats.as_entire_binding() },
-                ],
-            })
-        };
-        let bg = [mk(0, 1), mk(1, 0)];
+        let mut entries = vec![wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }];
+        entries.extend((1..=9).map(st));
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("planetas"), entries: &entries });
+        let bufs = [&mass_a, &dyn_a, &dyn_tmp, &mass_b, &dyn_b, &coarse, &coarse_acc, &stats, &step_counter];
+        let mut bge = vec![wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() }];
+        bge.extend(bufs.iter().enumerate().map(|(k, b)| wgpu::BindGroupEntry { binding: k as u32 + 1, resource: b.as_entire_binding() }));
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("planetas"), layout: &layout, entries: &bge });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("planetas"),
             bind_group_layouts: &[Some(&layout)],
@@ -363,47 +495,57 @@ impl Sim {
         Self {
             params,
             params_buf,
+            coarse_build: compute("coarse_build"),
+            coarse_far: compute("coarse_far"),
             kick: compute("kick"),
             gather: compute("gather"),
+            expand: compute("expand"),
             reduce: compute("reduce"),
-            mass,
-            dynb,
+            tick: compute("tick"),
+            mass_a,
+            dyn_a,
             stats,
             bg,
-            cur: 0,
             step: 0,
         }
     }
 
     fn upload(&mut self, gpu: &Gpu, mass: &[u32], dynv: &[[f32; 4]]) {
-        gpu.queue.write_buffer(&self.mass[0], 0, bytemuck::cast_slice(mass));
-        gpu.queue.write_buffer(&self.dynb[0], 0, bytemuck::cast_slice(dynv));
-        self.cur = 0;
+        gpu.queue.write_buffer(&self.mass_a, 0, bytemuck::cast_slice(mass));
+        gpu.queue.write_buffer(&self.dyn_a, 0, bytemuck::cast_slice(dynv));
         self.step = 0;
     }
 
-    fn encode(&mut self, queue: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, steps: u32) {
-        queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&self.params));
+    fn encode(&mut self, gpu: &Gpu, enc: &mut wgpu::CommandEncoder, steps: u32) {
+        gpu.queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&self.params));
         let g = N.div_ceil(16);
+        let gc = C.div_ceil(8);
         let mut pass = enc.begin_compute_pass(&Default::default());
+        pass.set_bind_group(0, &self.bg, &[]);
         for _ in 0..steps {
-            pass.set_bind_group(0, &self.bg[self.cur], &[]);
+            pass.set_pipeline(&self.coarse_build);
+            pass.dispatch_workgroups(gc, gc, 1);
+            pass.set_pipeline(&self.coarse_far);
+            pass.dispatch_workgroups(gc, gc, 1);
             pass.set_pipeline(&self.kick);
             pass.dispatch_workgroups(g, g, 1);
             pass.set_pipeline(&self.gather);
             pass.dispatch_workgroups(g, g, 1);
-            self.cur ^= 1;
+            pass.set_pipeline(&self.expand);
+            pass.dispatch_workgroups(g, g, 1);
+            pass.set_pipeline(&self.tick);
+            pass.dispatch_workgroups(1, 1, 1);
             self.step += 1;
         }
     }
 
-    /// (massa total, corpos, maior massa, momento angular, corpos >= 30).
+    /// (massa total, células com massa, maior massa, momento angular, células >= 50).
     fn read_stats(&self, gpu: &Gpu) -> [u32; 8] {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         enc.clear_buffer(&self.stats, 0, None);
         {
             let mut pass = enc.begin_compute_pass(&Default::default());
-            pass.set_bind_group(0, &self.bg[self.cur], &[]);
+            pass.set_bind_group(0, &self.bg, &[]);
             pass.set_pipeline(&self.reduce);
             let g = N.div_ceil(16);
             pass.dispatch_workgroups(g, g, 1);
@@ -417,15 +559,23 @@ impl Sim {
     }
 }
 
+fn default_params() -> SimParams {
+    SimParams { g: 3.0e-5, k_press: 2.0e-4, gamma: 2.0, expand: 0.3, soft: 1.0, epoch: 0, n: N, c: C }
+}
+
+fn default_cloud() -> Cloud {
+    Cloud { radius: 380.0, fill: 0.5, spin: 0.15, dispersion: 0.03, seed: 1 }
+}
+
 struct Running {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     surface_cfg: wgpu::SurfaceConfiguration,
     gpu: Gpu,
     sim: Sim,
-    disc: DiscSettings,
+    cloud: Cloud,
     view_buf: wgpu::Buffer,
-    view_bg: [wgpu::BindGroup; 2],
+    view_bg: wgpu::BindGroup,
     view_pipeline: wgpu::RenderPipeline,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -470,21 +620,9 @@ impl Running {
         };
         surface.configure(&gpu.device, &surface_cfg);
 
-        // Unidades: com GM = 25, a velocidade circular a 100 células é 0,5
-        // células/passo (dentro da CFL) e a 450 é 0,24.
-        let params = SimParams {
-            gm_star: 25.0,
-            g_quantum: 3.0e-6,
-            soft: 0.7,
-            star_soft: 20.0,
-            center_x: N as f32 * 0.5,
-            center_y: N as f32 * 0.5,
-            radius: 6,
-            n: N,
-        };
-        let disc = DiscSettings { r_in: 110.0, r_out: 460.0, fill: 0.35, dispersion: 0.02, seed: 1 };
-        let mut sim = Sim::new(&gpu, params);
-        let (m, d) = make_disc(&disc, params.gm_star);
+        let cloud = default_cloud();
+        let mut sim = Sim::new(&gpu, default_params());
+        let (m, d) = make_cloud(&cloud);
         sim.upload(&gpu, &m, &d);
 
         let device = &gpu.device;
@@ -525,18 +663,15 @@ impl Running {
                 uni(2),
             ],
         });
-        let mk = |i: usize| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("view"),
-                layout: &layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: view_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: sim.mass[i].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: sim.params_buf.as_entire_binding() },
-                ],
-            })
-        };
-        let view_bg = [mk(0), mk(1)];
+        let view_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("view"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: view_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: sim.mass_a.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: sim.params_buf.as_entire_binding() },
+            ],
+        });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("view"),
             bind_group_layouts: &[Some(&layout)],
@@ -580,7 +715,7 @@ impl Running {
             surface_cfg,
             gpu,
             sim,
-            disc,
+            cloud,
             view_buf,
             view_bg,
             view_pipeline,
@@ -591,7 +726,7 @@ impl Running {
             cursor: [0.0; 2],
             dragging: false,
             paused: false,
-            steps_per_frame: 8,
+            steps_per_frame: 4,
             stats: [0; 8],
             stats_l0: None,
             frame: 0,
@@ -599,7 +734,7 @@ impl Running {
     }
 
     fn reset(&mut self) {
-        let (m, d) = make_disc(&self.disc, self.sim.params.gm_star);
+        let (m, d) = make_cloud(&self.cloud);
         self.sim.upload(&self.gpu, &m, &d);
         self.stats_l0 = None;
     }
@@ -633,31 +768,32 @@ impl Running {
                     if ui.button(if self.paused { "▶ continuar" } else { "⏸ pausa" }).clicked() {
                         self.paused = !self.paused;
                     }
-                    if ui.button("disco novo").clicked() {
+                    if ui.button("nuvem nova").clicked() {
                         reset = true;
                     }
                 });
-                ui.add(egui::Slider::new(&mut self.steps_per_frame, 1..=64).text("passos/frame"));
-                ui.add(
-                    egui::Slider::new(&mut self.sim.params.g_quantum, 0.0..=0.01)
-                        .logarithmic(true)
-                        .smallest_positive(1e-6)
-                        .text("gravidade entre corpos"),
-                );
-                ui.add(egui::Slider::new(&mut self.sim.params.radius, 1..=12).text("raio da gravidade (células)"));
+                ui.add(egui::Slider::new(&mut self.steps_per_frame, 1..=32).text("passos/frame"));
+                let p = &mut self.sim.params;
+                ui.add(egui::Slider::new(&mut p.g, 0.0..=1e-3).logarithmic(true).smallest_positive(1e-7).text("gravidade G"));
+                ui.add(egui::Slider::new(&mut p.k_press, 0.0..=0.1).logarithmic(true).smallest_positive(1e-6).text("pressão K"))
+                    .on_hover_text("P = K·mᵞ: mais pressão, mais difícil comprimir");
+                ui.add(egui::Slider::new(&mut p.gamma, 1.0..=3.0).text("γ (rigidez)"));
+                ui.add(egui::Slider::new(&mut p.expand, 0.0..=1.0).text("expansão (fluxo de quanta)"))
+                    .on_hover_text("quanta passam para vizinhas com menos pressão");
                 ui.separator();
-                ui.label("disco novo:");
-                ui.add(egui::Slider::new(&mut self.disc.fill, 0.02..=1.0).text("densidade"));
-                ui.add(egui::Slider::new(&mut self.disc.dispersion, 0.0..=0.2).text("agitação"));
-                ui.add(egui::Slider::new(&mut self.disc.r_in, 40.0..=400.0).text("raio interior"));
-                ui.add(egui::Slider::new(&mut self.disc.r_out, 60.0..=500.0).text("raio exterior"));
+                ui.label("nuvem nova:");
+                let c = &mut self.cloud;
+                ui.add(egui::Slider::new(&mut c.radius, 50.0..=500.0).text("raio"));
+                ui.add(egui::Slider::new(&mut c.fill, 0.02..=1.0).text("densidade"));
+                ui.add(egui::Slider::new(&mut c.spin, 0.0..=0.6).text("rotação (vel. na borda)"));
+                ui.add(egui::Slider::new(&mut c.dispersion, 0.0..=0.3).text("agitação"));
                 ui.separator();
                 ui.label(format!("passo {step}"));
-                ui.label(format!("massa total {} quanta (conserva-se exatamente)", st[0]));
-                ui.label(format!("corpos {}  maior {} quanta  com ≥ 30: {}", st[1], st[2], st[4]));
+                ui.label(format!("massa total {} quanta (exata)", st[0]));
+                ui.label(format!("células com massa {}  maior {} quanta  com ≥ 50: {}", st[1], st[2], st[4]));
                 let l = st[3] as i32;
                 ui.label(format!(
-                    "momento angular {} ({:+.3}% desde o início)",
+                    "momento angular {} ({:+.2}%)",
                     l,
                     if l0 != 0 { 100.0 * (l - l0) as f64 / l0 as f64 } else { 0.0 }
                 ));
@@ -665,7 +801,7 @@ impl Running {
             });
         });
         if reset {
-            self.disc.seed += 1;
+            self.cloud.seed += 1;
             self.reset();
         }
         self.egui_state.handle_platform_output(&self.window, out.platform_output);
@@ -694,7 +830,7 @@ impl Running {
         self.gpu.queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&view));
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         if !self.paused {
-            self.sim.encode(&self.gpu.queue, &mut enc, self.steps_per_frame);
+            self.sim.encode(&self.gpu, &mut enc, self.steps_per_frame);
         }
         let mut extra = self.egui_renderer.update_buffers(&self.gpu.device, &self.gpu.queue, &mut enc, &jobs, &sd);
         {
@@ -714,7 +850,7 @@ impl Running {
                 })
                 .forget_lifetime();
             pass.set_pipeline(&self.view_pipeline);
-            pass.set_bind_group(0, &self.view_bg[self.sim.cur], &[]);
+            pass.set_bind_group(0, &self.view_bg, &[]);
             pass.draw(0..3, 0..1);
             self.egui_renderer.render(&mut pass, &jobs, &sd);
         }
@@ -800,22 +936,11 @@ impl ApplicationHandler for App {
     }
 }
 
-/// Sem janela: `planetas --teste [passos]` corre o disco e mostra a evolução.
+/// Sem janela: `planetas --teste [passos]` corre a nuvem e mostra a evolução.
 fn headless(steps: u64) {
     let gpu = Gpu::new_headless().expect("GPU");
-    let params = SimParams {
-        gm_star: 25.0,
-        g_quantum: 3.0e-6,
-        soft: 0.7,
-        star_soft: 20.0,
-        center_x: N as f32 * 0.5,
-        center_y: N as f32 * 0.5,
-        radius: 6,
-        n: N,
-    };
-    let disc = DiscSettings { r_in: 110.0, r_out: 460.0, fill: 0.35, dispersion: 0.02, seed: 1 };
-    let mut sim = Sim::new(&gpu, params);
-    let (m, d) = make_disc(&disc, params.gm_star);
+    let mut sim = Sim::new(&gpu, default_params());
+    let (m, d) = make_cloud(&default_cloud());
     sim.upload(&gpu, &m, &d);
     let l0 = sim.read_stats(&gpu)[3] as i32;
     let t = std::time::Instant::now();
@@ -823,32 +948,32 @@ fn headless(steps: u64) {
     for k in 0..=report {
         let target = steps * k / report;
         while sim.step < target {
-            let n = (target - sim.step).min(64) as u32;
+            let n = (target - sim.step).min(32) as u32;
             let mut enc = gpu.device.create_command_encoder(&Default::default());
-            sim.encode(&gpu.queue, &mut enc, n);
+            sim.encode(&gpu, &mut enc, n);
             gpu.queue.submit([enc.finish()]);
             gpu.wait_idle();
         }
         let st = sim.read_stats(&gpu);
         let l = st[3] as i32;
         println!(
-            "passo {:7}: massa {} corpos {:7} maior {:6} (≥30: {:5})  L {:+.3}%",
+            "passo {:6}: massa {} células {:7} maior {:6} (≥50: {:5})  L {:+.2}%",
             sim.step,
             st[0],
             st[1],
             st[2],
             st[4],
-            100.0 * (l - l0) as f64 / l0 as f64
+            if l0 != 0 { 100.0 * (l - l0) as f64 / l0 as f64 } else { 0.0 }
         );
     }
-    println!("{:.1} ms por passo", t.elapsed().as_secs_f64() * 1000.0 / steps.max(1) as f64);
+    println!("{:.2} ms por passo", t.elapsed().as_secs_f64() * 1000.0 / steps.max(1) as f64);
 }
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,planetas=info")).init();
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(|a| a == "--teste").unwrap_or(false) {
-        headless(args.get(2).and_then(|v| v.parse().ok()).unwrap_or(20_000));
+        headless(args.get(2).and_then(|v| v.parse().ok()).unwrap_or(5_000));
         return;
     }
     let event_loop = EventLoop::new().expect("event loop");
