@@ -239,12 +239,16 @@ fn agent_matter(slot: u32) -> vec4<u32> {
     return m;
 }
 
-// MORTE: toda a matéria (genoma + complementos capturados) volta ao meio,
-// GASTA, repartida pelas células onde estão os resíduos do corpo (os restos
-// ficam onde o corpo estava, sem despejar tudo numa célula só).
+// MORTE: toda a matéria volta ao meio, repartida pelas células onde estão
+// os resíduos do corpo (os restos ficam onde o corpo estava, sem despejar
+// tudo numa célula só). O genoma volta GASTO; os complementos já capturados
+// para a cópia em curso voltam ATIVADOS: foram tirados ativados e ainda só
+// estavam emparelhados, não ligados (a ativação não foi gasta).
 fn die(slot: u32, a_in: Agent) {
     var a = a_in;
-    let m = agent_matter(slot);
+    var m_act = vec4<u32>(0u);
+    for (var i = 0u; i < min(a.pair_count, a.gene_len); i++) { m_act[genome_get(slot, i) ^ 1u] += 1u; }
+    let m_spent = agent_matter(slot) - m_act;
     let n = max(a.body_len, 1u);
     for (var k = 0u; k < n; k++) {
         var pk = vec2<f32>(a.pos_x, a.pos_y);
@@ -252,8 +256,10 @@ fn die(slot: u32, a_in: Agent) {
         let cell = chem_open_cell(world_to_cell(pk));
         for (var ch = 0u; ch < 4u; ch++) {
             // Parte igual por resíduo; o resto da divisão vai para os primeiros.
-            let share = m[ch] / n + select(0u, 1u, k < m[ch] % n);
-            if (share > 0u) { chem_add_state(cell, ch, share, true); }
+            let s_sp = m_spent[ch] / n + select(0u, 1u, k < m_spent[ch] % n);
+            if (s_sp > 0u) { chem_add_state(cell, ch, s_sp, true); }
+            let s_ac = m_act[ch] / n + select(0u, 1u, k < m_act[ch] % n);
+            if (s_ac > 0u) { chem_add_state(cell, ch, s_ac, false); }
         }
     }
     a.alive = 0u;
