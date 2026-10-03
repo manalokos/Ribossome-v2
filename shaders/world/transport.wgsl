@@ -99,7 +99,12 @@ fn lattice_rand(ix: u32, iy: u32) -> vec2<f32> {
     return rng_f4(ix * 73856093u ^ iy * 19349663u, params.epoch, S_MOVE + MAX_MOVERS_PER_CH + 1u).xy;
 }
 
-fn smooth_start(x: u32, y: u32) -> vec2<f32> {
+fn smooth_start(x0: u32, y0: u32) -> vec2<f32> {
+    // A grelha do ruído desloca-se ao acaso a cada passo: as fronteiras entre
+    // nós mudam de sítio e não deixam um padrão fixo.
+    let jit = rng_f4(0x85EBCA6Bu, params.epoch, S_MOVE + MAX_MOVERS_PER_CH + 2u).xy;
+    let x = x0 + u32(jit.x * f32(SMOOTH_CELL));
+    let y = y0 + u32(jit.y * f32(SMOOTH_CELL));
     let gx = x / SMOOTH_CELL;
     let gy = y / SMOOTH_CELL;
     let t = smoothstep(vec2<f32>(0.0), vec2<f32>(1.0), (vec2<f32>(f32(x % SMOOTH_CELL), f32(y % SMOOTH_CELL)) + 0.5) / f32(SMOOTH_CELL));
