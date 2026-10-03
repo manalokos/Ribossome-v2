@@ -88,11 +88,10 @@ fn agg_neighbours(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 // SORTEIO SUAVE para arredondar a deslocação dos grumos: ruído de valor
 // (um valor por passo a cada SMOOTH_CELL células, interpolado suavemente) +
-// um deslocamento global aleatório, módulo 1. Cada célula continua com um
-// sorteio UNIFORME em [0, 1) (sem viés no transporte), mas células próximas
-// sorteiam quase igual (o grumo move-se inteiro) e zonas afastadas não (sem
-// sincronia no mundo todo). A costura (onde dá a volta 1 -> 0) muda de sítio a
-// cada passo.
+// um deslocamento global aleatório, dobrado numa onda triangular. Cada célula
+// continua com um sorteio UNIFORME em [0, 1] (sem viés no transporte), mas
+// células próximas sorteiam quase igual (o grumo move-se inteiro) e zonas
+// afastadas não (sem sincronia no mundo todo), e o campo é contínuo.
 const SMOOTH_CELL: u32 = 16u;
 
 fn lattice_rand(ix: u32, iy: u32) -> vec2<f32> {
@@ -111,7 +110,10 @@ fn smooth_start(x0: u32, y0: u32) -> vec2<f32> {
     let n = mix(mix(lattice_rand(gx, gy), lattice_rand(gx + 1u, gy), t.x),
                 mix(lattice_rand(gx, gy + 1u), lattice_rand(gx + 1u, gy + 1u), t.x), t.y);
     let g = rng_f4(0x9E3779B9u, params.epoch, S_MOVE + MAX_MOVERS_PER_CH).xy;
-    return fract(n + g);
+    // Onda TRIANGULAR em vez de fract: se v é uniforme, 1 − |2v − 1| também
+    // é, e não salta (na volta 1 -> 0 passa de 0 para 0): sem costuras duras.
+    let v = fract(n + g);
+    return vec2<f32>(1.0) - abs(2.0 * v - vec2<f32>(1.0));
 }
 
 @compute @workgroup_size(16, 16)
