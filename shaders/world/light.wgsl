@@ -70,7 +70,11 @@ fn light_above(x: u32, row: u32) -> f32 {
         let x1 = clamp(x0 + 1, 0, i32(LIGHT_SIZE) - 1);
         s += mix(light_grid[row * LIGHT_SIZE + u32(x0)], light_grid[row * LIGHT_SIZE + u32(x1)], f);
     }
-    return s / f32(LIGHT_TAPS);
+    // As paredes do lado são opacas: se a luz viria de fora do mundo (sol
+    // inclinado junto à parede), não entra. A média de 7 só usa o bordo.
+    let cpos = f32(x) + sh;
+    let inside = clamp(cpos + 1.0, 0.0, 1.0) * clamp(f32(LIGHT_SIZE) - cpos, 0.0, 1.0);
+    return s / f32(LIGHT_TAPS) * inside;
 }
 
 @compute @workgroup_size(256)
