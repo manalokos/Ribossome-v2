@@ -11,8 +11,11 @@ const SANDPILE_DIFF: u32 = 3u;
 const GAMMA_RELAX_P: f32 = 0.12;
 // Grãos soltos isolados fazem passeio aleatório à procura de companhia.
 const GAMMA_STRAY_WALK_P: f32 = 0.05;
-// O entulho solto é levado pela corrente a esta fração da lei dos monómeros.
+// O entulho solto é levado pela corrente a esta fração da lei dos monómeros
+// (× params.sediment_transport), só acima da velocidade crítica de arranque.
 const GAMMA_SEDIMENT_FACTOR: f32 = 0.5;
+// Queda de um grão sem apoio por baixo, por passo (× params.sediment_settle).
+const GAMMA_FALL_P: f32 = 0.05;
 // Uma pilha de 2 ao lado de uma célula vazia deixa cair o quantum de cima.
 const GAMMA_SHED_P: f32 = 0.03;
 
@@ -182,7 +185,19 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
             let fyi = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
             vs = sanitize_vec2(velocity_in[fgrid(fxi, fyi)]);
         }
-        let p_sed = parcel_hop_p(vs) * GAMMA_SEDIMENT_FACTOR * mob;
+        // ARRANQUE (Shields): só o excesso de velocidade acima da crítica
+        // arrasta; os grãos com vizinhos (mob) resistem mais, como um grumo.
+        let speed = length(vs);
+        let excess = max(speed - max(params.sediment_threshold, 0.0), 0.0);
+        let v_eff = select(vec2<f32>(0.0), vs * (excess / max(speed, 1e-6)), speed > 1e-6);
+        let p_sed = parcel_hop_p(v_eff) * GAMMA_SEDIMENT_FACTOR * max(params.sediment_transport, 0.0) * mob;
+        // QUEDA: sem nada por baixo, o grão assenta (os presos dos lados caem
+        // menos, pela mesma mobilidade). A corrente a subir pode vencê-la:
+        // é a suspensão.
+        var p_fall = 0.0;
+        if (y > 0u && gamma_count(idx - GRID_SIZE) == 0u) {
+            p_fall = GAMMA_FALL_P * max(params.sediment_settle, 0.0) * mob;
+        }
         let hw = rr.y;
         let rw = f32(rr.z >> 8u) * (1.0 / 16777216.0);
         let rw2 = f32(rr.w >> 8u) * (1.0 / 16777216.0);
@@ -190,7 +205,9 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
         if (n >= 2u && em_found && rw2 < GAMMA_SHED_P) {
             // Mini-falésia: o quantum de cima desce para a vaga mais aninhada.
             dest = em_idx;
-        } else if (rw < p_sed) {
+        } else if (rw < p_fall) {
+            dest = idx - GRID_SIZE;
+        } else if (rw < p_fall + p_sed) {
             // Salto a jusante (como o transporte dos monómeros), nunca a subir.
             var ddx = 0i;
             var ddy = 0i;
@@ -207,7 +224,7 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
                 let wi = u32(wy) * GRID_SIZE + u32(wx);
                 if (gamma_count(wi) <= n) { dest = wi; }
             }
-        } else if (rw < p_sed + GAMMA_STRAY_WALK_P * mob) {
+        } else if (rw < p_fall + p_sed + GAMMA_STRAY_WALK_P * mob) {
             if (best_score > i32(bonds)) {
                 dest = best_idx;
             } else if (bonds == 0u) {

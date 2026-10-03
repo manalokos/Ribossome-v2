@@ -448,7 +448,7 @@ fn tab_water(ui: &mut egui::Ui, world: &mut World) {
 }
 
 fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
-    ui.small("PNG: AZUL = terreno (0 água, fraco entulho, forte rocha, 255 rocha maciça); VERMELHO = calor por píxel (vermelho − verde). Cinzentos também servem.");
+    ui.small("PNG: AZUL = terreno (0 água, fraco entulho, forte rocha, 255 rocha maciça); VERMELHO = calor e VERDE = química (redutor) das fumarolas, por píxel e independentes (verde sem vermelho = exsudação fria). Sem verde na imagem, a química segue o calor. Cinzentos (r = g = b) só dão terreno.");
     ui.horizontal(|ui| {
         ui.label("ficheiro");
         ui.text_edit_singleline(&mut st.terrain_path);
@@ -469,6 +469,13 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     }
     ui.separator();
     ui.checkbox(&mut world.settings.terrain_enabled, "física do terreno ligada");
+    ui.strong("Sedimentos (entulho solto)");
+    ui.add(egui::Slider::new(&mut world.params.sediment_transport, 0.0..=5.0).text("arrasto pela corrente ×"))
+        .on_hover_text("quanto a corrente leva o entulho solto (1 = o do v3)");
+    ui.add(egui::Slider::new(&mut world.params.sediment_threshold, 0.0..=5.0).text("velocidade crítica de arranque"))
+        .on_hover_text("critério de Shields: abaixo desta velocidade (células do fluido/s) a corrente não arranca grãos; acima, arranca ∝ ao excesso");
+    ui.add(egui::Slider::new(&mut world.params.sediment_settle, 0.0..=5.0).text("queda dos grãos (assentar)"))
+        .on_hover_text("grãos sem nada por baixo caem; a corrente a subir pode segurá-los (suspensão) e eles assentam onde ela abranda. 0 = flutuam");
     ui.add(egui::Slider::new(&mut world.params.bioturbation, 0.0..=0.5).text("bioturbação (empurrar entulho)"));
     ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("custo por grão empurrado"));
     ui.add(egui::Slider::new(&mut world.params.sedimentation, 0.0..=0.5).text("sedimentação (afundar ∝ √n)"));

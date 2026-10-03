@@ -283,7 +283,19 @@ gpu_struct! {
         /// Aquecimento solar (multiplica o calor da luz absorvida e o do
         /// infravermelho que a água absorve à superfície). 0 = o sol não aquece.
         pub sun_heat: f32,
-        pub _pad_m2: u32,
+        /// SEDIMENTOS: multiplicador do arrasto do entulho solto pela
+        /// corrente (1 = metade da lei dos monómeros, o valor do v3).
+        pub sediment_transport: f32,
+        /// Velocidade crítica de arranque (critério de Shields), em células
+        /// do fluido por segundo: abaixo dela a corrente não arranca grãos;
+        /// acima, arranca ∝ ao excesso. 0 = qualquer corrente mexe.
+        pub sediment_threshold: f32,
+        /// Queda dos grãos sem apoio por baixo (velocidade de Stokes, × a
+        /// probabilidade base 0,05 por passo): o que a corrente levanta volta
+        /// a assentar onde ela abranda. 0 = os grãos flutuam (v3).
+        pub sediment_settle: f32,
+        pub _pad_e0: u32,
+        pub _pad_e1: u32,
     }
 }
 
@@ -427,7 +439,11 @@ impl Default for SimParams {
             metabolic_span: 3.0,
             metabolic_ref: 0.0,
             sun_heat: 1.0,
-            _pad_m2: 0,
+            sediment_transport: 1.0,
+            sediment_threshold: 0.5,
+            sediment_settle: 1.0,
+            _pad_e0: 0,
+            _pad_e1: 0,
         }
     }
 }
