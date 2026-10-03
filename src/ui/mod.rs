@@ -503,6 +503,10 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.checkbox(&mut hunger, "regulação pela carga energética (cheio não come)");
     p.hunger_regulation = hunger as u32;
     ui.add(egui::Slider::new(&mut p.maintenance_cost, 0.0..=0.01).text("manutenção por resíduo"));
+    ui.add(egui::Slider::new(&mut p.metabolic_q10, 1.0..=4.0).text("metabolismo: Q10"))
+        .on_hover_text("quanto a química da vida acelera por cada 'escala' de temperatura (1 = não depende da temperatura). Multiplica manutenção, comer, quimiossíntese e emparelhamento; a luz não");
+    ui.add(egui::Slider::new(&mut p.metabolic_span, 0.5..=12.0).text("metabolismo: escala (unidades de T por Q10)"));
+    ui.add(egui::Slider::new(&mut p.metabolic_ref, 0.0..=8.0).text("metabolismo: temperatura de referência (m = 1)"));
     ui.add(egui::Slider::new(&mut p.pairing_rate, 0.0..=8.0).text("emparelhamento (bases/passo)"));
     ui.add(egui::Slider::new(&mut p.pairing_cost, 0.0..=2.0).text("custo por base copiada"));
     ui.add(egui::Slider::new(&mut p.mutation_rate, 0.0..=0.05).text("taxa de mutação"));

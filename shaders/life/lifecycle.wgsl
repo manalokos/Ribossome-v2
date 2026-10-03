@@ -288,7 +288,12 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     a.energy -= signals_step(slot, a, cap);
 
     // ---- JUNTAS: dobragem ao nascer, depois agitação térmica e músculos ----
-    let kt_here = params.thermal_kt * (1.0 + temp_in[fluid_index_at_world(vec2<f32>(a.pos_x, a.pos_y))] / 12.0);
+    let t_here = temp_in[fluid_index_at_world(vec2<f32>(a.pos_x, a.pos_y))];
+    let kt_here = params.thermal_kt * (1.0 + t_here / 12.0);
+    // METABOLISMO (Q10): toda a química do agente (comer, quimiossíntese,
+    // copiar, manter-se) anda mais depressa no quente e mais devagar no frio.
+    // A luz não depende da temperatura. m = 1 em T = metabolic_ref.
+    let metab = pow(max(params.metabolic_q10, 1e-3), (t_here - params.metabolic_ref) / max(params.metabolic_span, 1e-3));
     // O ganho de natação escala SÓ a translação. A rotação fica a física:
     // escalá-la exagerava o balanço de cada abrir-e-fechar (o corpo rodava
     // muito para um lado e para o outro) e a orientação errada estragava a
@@ -418,7 +423,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // catalisa sempre que há substrato e a energia a mais perde-se como
         // calor. (A regulação pela fome do v3 fica como opção.)
         let hunger = select(1.0, clamp(1.0 - a.energy / cap, 0.0, 1.0), params.hunger_regulation != 0u);
-        let pe = clamp(params.uptake_rate * prk.catalytic * organ_catalysis_mult(slot, k) * eff * hunger, 0.0, 1.0);
+        let pe = clamp(params.uptake_rate * metab * prk.catalytic * organ_catalysis_mult(slot, k) * eff * hunger, 0.0, 1.0);
         let si = slot * MAX_BODY + k;
         let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
@@ -457,7 +462,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (organ_type(oc) == ORGAN_CHEMO && params.fluid_enabled != 0u) {
             let fi = fluid_index_at_world(rw);
             let cv = organ_var(oc);
-            let take = CHEMO_TAKE * redox_in[fi] * organ_gain(oc) * max(cv.p1, 0.0);
+            let take = min(CHEMO_TAKE * metab, 1.0) * redox_in[fi] * organ_gain(oc) * max(cv.p1, 0.0);
             if (take > 0.0) {
                 atomicAdd(&redox_eaten[fi], u32(take * REDOX_FP));
                 let rec = clamp(cv.p0, 0.0, 1.0);
@@ -519,7 +524,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     }
-    a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * (f32(a.body_len) + organ_upkeep(slot, a.body_len));
+    a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * metab * (f32(a.body_len) + organ_upkeep(slot, a.body_len));
 
     // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n × massa média por resíduo (os
     // órgãos pesados, como o armazenamento, afundam mais), só a parte em
@@ -593,8 +598,9 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // do próprio agente, se for RNA nu). Base a base, pela ordem do genoma.
     if (a.pair_count < a.gene_len && a.energy > 1.0 + params.pairing_cost) {
         let rr = rng_f4(a.id, params.epoch, S_PAIR);
-        var attempts = u32(params.pairing_rate);
-        if (rr.x < fract(params.pairing_rate)) { attempts += 1u; }
+        let pr = params.pairing_rate * metab;
+        var attempts = u32(pr);
+        if (rr.x < fract(pr)) { attempts += 1u; }
         attempts = min(attempts, PAIRING_MAX_PER_STEP);
         for (var t = 0u; t < attempts && a.pair_count < a.gene_len; t++) {
             let q = rng_f4(a.id, params.epoch, (S_PAIR << 16u) + t);

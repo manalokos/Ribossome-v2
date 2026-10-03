@@ -270,7 +270,18 @@ gpu_struct! {
         /// Fração do período que é dia (0,5 = dia e noite iguais; 0,75 =
         /// dia de 3/4 do ciclo, noite curta).
         pub day_fraction: f32,
-        pub _pad_s2: u32,
+        /// METABOLISMO (Q10): a química da vida acelera com a temperatura.
+        /// Fator m = q10^((T − ref)/escala), que multiplica a manutenção, a
+        /// absorção de comida, a quimiossíntese e as tentativas de
+        /// emparelhamento (a luz não). 1 = sem efeito.
+        pub metabolic_q10: f32,
+        /// Quantas unidades de temperatura valem um passo de Q10 ("10 °C").
+        pub metabolic_span: f32,
+        /// Temperatura onde m = 1 (0 = a água ambiente: o mundo frio fica
+        /// como era; o que o sol e as fumarolas aquecem acelera).
+        pub metabolic_ref: f32,
+        pub _pad_m1: u32,
+        pub _pad_m2: u32,
     }
 }
 
@@ -414,7 +425,11 @@ impl Default for SimParams {
             sun_now: 1.0,
             sun_angle: 80.0,
             day_fraction: 0.75,
-            _pad_s2: 0,
+            metabolic_q10: 2.0,
+            metabolic_span: 3.0,
+            metabolic_ref: 0.0,
+            _pad_m1: 0,
+            _pad_m2: 0,
         }
     }
 }
