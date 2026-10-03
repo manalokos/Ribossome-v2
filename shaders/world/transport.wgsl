@@ -218,6 +218,10 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     // corrente (o grumo viaja inteiro).
     var p_bound = 0.0;
     var accept = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
+    // Os GASTOS são empurrados para fora dos grumos (desmistura: numa mistura
+    // em que uma espécie se atrai, a outra enche os espaços livres): um gasto
+    // só salta para mais ativados à volta com exp(−ε·aumento/T).
+    var accept_spent = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
     if (params.aggregation > 0.0 && src_total <= chem_capacity(idx)) {
         // Vizinhos ativados aqui e nos 4 destinos (pré-calculados em agg_nb).
         var e = array<f32, 5>(f32(agg_nb[idx]), 0.0, 0.0, 0.0, 0.0);
@@ -235,6 +239,8 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
             // No destino, a célula de origem (com o próprio) conta como vizinha: −1.
             let drop = e[0] - (e[d + 1u] - 1.0);
             if (drop > 0.0) { accept[d] = exp(-k_e * drop); }
+            let rise = e[d + 1u] - e[0];
+            if (rise > 0.0) { accept_spent[d] = exp(-k_e * rise); }
         }
         p_bound = 1.0 - exp(-k_e * min(e[0], 48.0));
     }
@@ -324,8 +330,10 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (u < w[cd]) { d = cd; break; }
                     u -= w[cd];
                 }
-                // Kawasaki: um ativado só sai para menos vizinhos com exp(−ε·Δ/T).
-                let stay_put = k < act_n && fract(rf.w * 13.73 + rf.x * 5.31) >= accept[d];
+                // Kawasaki: um ativado só sai para menos vizinhos com exp(−ε·Δ/T);
+                // um gasto só entra num grumo com exp(−ε·aumento/T).
+                let acc_d = select(accept_spent[d], accept[d], k < act_n);
+                let stay_put = fract(rf.w * 13.73 + rf.x * 5.31) >= acc_d;
                 if (!stay_put) {
                     if (d == 0u) { p.x += 1.0; } else if (d == 1u) { p.x -= 1.0; }
                     else if (d == 2u) { p.y += 1.0; } else { p.y -= 1.0; }
