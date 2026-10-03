@@ -23,6 +23,12 @@ const TEMP_HEAT_RATE: f32 = 0.01;   // T por unidade de força da fumarola por s
 const TEMP_COOL_RATE: f32 = 0.12;   // relaxação para o ambiente local (1/s)
 const TEMP_MAX: f32 = 12.0;
 const SUN_HEAT_RATE: f32 = 0.15;
+// INFRAVERMELHO: a água é transparente à luz visível e ao UV mas absorve o
+// infravermelho do sol logo à superfície (cai a 1/e em SUN_IR_DEPTH da altura
+// do mundo). Não tira luz aos fotossistemas: só aquece. Com SUN_IR 1,2 a
+// superfície fica ~1,5 acima do ambiente ao meio-dia.
+const SUN_IR: f32 = 1.2;
+const SUN_IR_DEPTH: f32 = 0.08;
 const TEMP_BUOYANCY: f32 = 12.0;    // força por unidade de desvio ao ambiente
 const TEMP_AMBIENT_SURFACE: f32 = 0.0;
 const TEMP_AMBIENT_ATTEN: f32 = 4.0;
@@ -291,7 +297,9 @@ fn update_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     // estratifica (estável); a CONVECÇÃO nasce onde a absorção é desigual na
     // horizontal: rocha iluminada, manchas densas de monómeros, colónias.
     let env = env_cell_for_fluid(x, y);
-    t += SUN_HEAT_RATE * light_absorbed_at(env) * dt;
+    let depth = 1.0 - (f32(y) + 0.5) / f32(FLUID_SIZE);
+    let ir = params.sun_now * SUN_IR * exp(-depth / SUN_IR_DEPTH);
+    t += max(params.sun_heat, 0.0) * SUN_HEAT_RATE * (light_absorbed_at(env) + ir) * dt;
 
     let amb = temp_ambient_at(y);
     t = amb + (t - amb) * exp(-TEMP_COOL_RATE * dt);

@@ -280,7 +280,9 @@ gpu_struct! {
         /// Temperatura onde m = 1 (0 = a água ambiente: o mundo frio fica
         /// como era; o que o sol e as fumarolas aquecem acelera).
         pub metabolic_ref: f32,
-        pub _pad_m1: u32,
+        /// Aquecimento solar (multiplica o calor da luz absorvida e o do
+        /// infravermelho que a água absorve à superfície). 0 = o sol não aquece.
+        pub sun_heat: f32,
         pub _pad_m2: u32,
     }
 }
@@ -423,7 +425,7 @@ impl Default for SimParams {
             metabolic_q10: 2.0,
             metabolic_span: 3.0,
             metabolic_ref: 0.0,
-            _pad_m1: 0,
+            sun_heat: 1.0,
             _pad_m2: 0,
         }
     }

@@ -374,6 +374,8 @@ fn tab_matter(ui: &mut egui::Ui, world: &mut World) {
 fn tab_light(ui: &mut egui::Ui, world: &mut World) {
     let p = &mut world.params;
     ui.add(egui::Slider::new(&mut p.uv_strength, 0.0..=10.0).text("força UV (sol)"));
+    ui.add(egui::Slider::new(&mut p.sun_heat, 0.0..=5.0).text("aquecimento solar"))
+        .on_hover_text("o sol aquece a superfície (infravermelho absorvido pela água) e o que absorve luz (rocha, agentes, monómeros). Segue o dia e a noite");
     ui.add(egui::Slider::new(&mut p.day_period, 0.0..=200_000.0).text("dia e noite: período (epochs; 0 = sempre dia)"))
         .on_hover_text("durante o dia o sol sobe e desce como meio seno (amanhecer e anoitecer); no resto do ciclo é noite");
     if p.day_period >= 1.0 {
