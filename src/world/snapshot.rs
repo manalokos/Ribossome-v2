@@ -312,6 +312,12 @@ impl World {
         if let Some(h) = &self.heat_image {
             blocks.push(("heat_image", bytemuck::cast_slice(h).to_vec()));
         }
+        if let Some(c) = &self.custom_chem {
+            blocks.push(("custom_chem", bytemuck::cast_slice(c).to_vec()));
+        }
+        if let Some(c) = &self.chem_image {
+            blocks.push(("chem_image", bytemuck::cast_slice(c).to_vec()));
+        }
         blocks.extend(extra_blocks);
 
         let header = json!({
@@ -440,6 +446,9 @@ impl World {
         };
         self.custom_terrain = grid_u32("custom_gamma").zip(grid_f32("custom_heat"));
         self.heat_image = grid_f32("heat_image");
+        // Cenas de antes do canal verde não têm estes blocos: a química segue o calor.
+        self.custom_chem = grid_f32("custom_chem");
+        self.chem_image = grid_f32("chem_image");
         self.heat_key.clear();
 
         // Grelhas.

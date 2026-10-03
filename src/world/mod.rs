@@ -252,6 +252,8 @@ pub struct World {
     /// (grãos por célula, calor por célula em fração de
     /// FUMAROLE_PIXEL_STRENGTH), ambos à resolução da grelha.
     pub custom_terrain: Option<(Vec<u32>, Vec<f32>)>,
+    /// Química (verde) do terreno carregado; None = segue o calor.
+    pub custom_chem: Option<Vec<f32>>,
     /// Tabela dos aminoácidos em uso e de onde veio.
     pub amino: Vec<crate::life::table::AminoRow>,
     pub amino_source: String,
@@ -275,6 +277,9 @@ pub struct World {
     pub variant_buf: wgpu::Buffer,
     /// Calor por píxel do terreno carregado (grelha; None = só as pontuais).
     pub heat_image: Option<Vec<f32>>,
+    /// Química (redutor) por píxel do terreno carregado; None = a química
+    /// segue o calor (fumarolas quentes e químicas ao mesmo tempo).
+    pub chem_image: Option<Vec<f32>>,
     /// Multiplicador de todo o calor das fumarolas.
     pub fumarole_gain: f32,
     /// Buffers de estado sem campo próprio, para as cenas gravadas.
@@ -406,7 +411,7 @@ impl World {
         let temp_b = storage_buffer(device, "temperature out", fcells * 4);
         let force_vec = storage_buffer(device, "force vectors", fcells * 8);
         let forces = storage_buffer(device, "fluid forces", fcells * 8);
-        let heat_buf = storage_buffer(device, "fumarole heat", fcells * 4);
+        let heat_buf = storage_buffer(device, "fumarole heat and chemistry", fcells * 8);
         // Organismos: slots fixos; todos começam livres.
         let max_agents = cfg.max_agents as u64;
         let agents_buf = storage_buffer(device, "agents", max_agents * size_of::<Agent>() as u64);
@@ -807,6 +812,7 @@ impl World {
             seed_density: SEED_DENSITY_DEFAULT,
             kernel_timing: None,
             custom_terrain: None,
+            custom_chem: None,
             amino,
             amino_source,
             aa_buf,
@@ -822,6 +828,7 @@ impl World {
             stats_readback: Readback::Idle,
             variant_buf,
             heat_image: None,
+            chem_image: None,
             fumarole_gain: 1.0,
             heat_key: Vec::new(),
             snap: snapshot::snap_buffers(device, p_a, joint_angle, joint_base, joint_active, sensor_mem, bitten),
@@ -837,7 +844,9 @@ impl World {
         self.fumarole_gain = 1.0;
         self.seed_density = SEED_DENSITY_DEFAULT;
         self.custom_terrain = None;
+        self.custom_chem = None;
         self.heat_image = None;
+        self.chem_image = None;
     }
 
     /// Pede sementes (geração 0); são processadas no início do próximo `encode_steps`.
@@ -866,6 +875,7 @@ impl World {
                 // Terreno de imagem: as fumarolas são os píxeis vermelhos.
                 self.fumaroles.clear();
                 self.heat_image = Some(h.clone());
+                self.chem_image = self.custom_chem.clone();
                 g.clone()
             }
             None => terrain::generate(&self.cfg, seed as u32, &self.fumaroles),
@@ -1000,23 +1010,27 @@ impl World {
     /// Carrega um terreno de um PNG (ver `terrain::load_png`); entra na
     /// próxima sementeira. Devolve quantas células aquecem.
     pub fn load_terrain_png(&mut self, path: &std::path::Path) -> Result<usize, String> {
-        let (g, h) = terrain::load_png(path, &self.cfg)?;
+        let (g, h, c) = terrain::load_png(path, &self.cfg)?;
         let hot = h.iter().filter(|&&v| v > 0.0).count();
         self.custom_terrain = Some((g, h));
+        self.custom_chem = c;
         Ok(hot)
     }
 
     /// Volta ao terreno gerado (com a fumarola por omissão) na próxima sementeira.
     pub fn use_generated_terrain(&mut self) {
         self.custom_terrain = None;
+        self.custom_chem = None;
         self.heat_image = None;
+        self.chem_image = None;
         self.fumaroles = vec![Fumarole::v3_default()];
     }
 
     /// Grava o terreno ATUAL (lido da GPU) e as fumarolas num PNG.
     pub fn save_terrain_png(&self, gpu: &Gpu, path: &std::path::Path) -> Result<(), String> {
         let g = self.read_gamma_blocking(gpu);
-        terrain::save_png(path, &self.cfg, &g, &self.heat_grid())
+        let chem = self.chem_image.as_ref().map(|_| self.chem_grid());
+        terrain::save_png(path, &self.cfg, &g, &self.heat_grid(), chem.as_deref())
     }
 
     /// Calor total à resolução da grelha (fração de FUMAROLE_PIXEL_STRENGTH,
@@ -1031,23 +1045,41 @@ impl World {
         h
     }
 
-    /// Reenvia o calor das fumarolas se mudou (fumarolas, imagem ou ganho):
-    /// média da grelha para o fluido, × força de um píxel × ganho.
+    /// Química (redutor) à resolução da grelha: as fumarolas pontuais são
+    /// químicas como são quentes; os píxeis, pelo verde (ou pelo calor, se a
+    /// imagem não tiver verde).
+    pub fn chem_grid(&self) -> Vec<f32> {
+        let mut c = terrain::rasterize_fumaroles(&self.cfg, &self.fumaroles);
+        if let Some(img) = self.chem_image.as_ref().or(self.heat_image.as_ref()) {
+            for (a, b) in c.iter_mut().zip(img) {
+                *a += b;
+            }
+        }
+        c
+    }
+
+    /// Reenvia o calor e a química das fumarolas se mudaram (fumarolas,
+    /// imagens ou ganho): média da grelha para o fluido, × força de um píxel
+    /// × ganho. No fluido: (calor, química) por célula.
     fn upload_heat(&mut self, queue: &wgpu::Queue) {
         let mut key: Vec<u8> = bytemuck::cast_slice(&self.fumaroles).to_vec();
         key.extend_from_slice(&self.fumarole_gain.to_le_bytes());
         key.extend_from_slice(&(self.heat_image.as_ref().map_or(0, |v| v.as_ptr() as usize)).to_le_bytes());
+        key.extend_from_slice(&(self.chem_image.as_ref().map_or(0, |v| v.as_ptr() as usize)).to_le_bytes());
         if key == self.heat_key {
             return;
         }
         let grid = self.heat_grid();
+        let chem = self.chem_grid();
         let (n, f) = (self.cfg.grid_size as usize, self.cfg.fluid_size as usize);
         let k = (n / f).max(1);
         let scale = terrain::FUMAROLE_PIXEL_STRENGTH * self.fumarole_gain.max(0.0) / (k * k) as f32;
-        let mut fl = vec![0f32; f * f];
+        let mut fl = vec![0f32; f * f * 2];
         for y in 0..n.min(f * k) {
             for x in 0..n.min(f * k) {
-                fl[(y / k) * f + x / k] += grid[y * n + x] * scale;
+                let o = ((y / k) * f + x / k) * 2;
+                fl[o] += grid[y * n + x] * scale;
+                fl[o + 1] += chem[y * n + x] * scale;
             }
         }
         queue.write_buffer(&self.heat_buf, 0, bytemuck::cast_slice(&fl));

@@ -8,6 +8,6 @@ fn main() {
     let fum = vec![Fumarole::v3_default()];
     let g = terrain::generate(&cfg, 1, &fum);
     let out = std::env::var("OUT").unwrap_or_else(|_| "terreno.png".into());
-    terrain::save_png(std::path::Path::new(&out), &cfg, &g, &terrain::rasterize_fumaroles(&cfg, &fum)).unwrap();
+    terrain::save_png(std::path::Path::new(&out), &cfg, &g, &terrain::rasterize_fumaroles(&cfg, &fum), None).unwrap();
     println!("{out}");
 }

@@ -97,19 +97,24 @@ pub fn generate(cfg: &WorldConfig, seed: u32, fumaroles: &[Fumarole]) -> Vec<u32
 //
 // Canal AZUL = terreno: 0 = água (0 grãos), 255 = rocha maciça (ROCK grãos),
 // linear (azul fraco = entulho, 1–2; a partir de ~metade = rocha, >= 3).
-// VERMELHO = fumarolas, POR PÍXEL: o calor do píxel é (vermelho − verde)/255
-// vezes a força de uma fumarola v3 no centro (`FUMAROLE_PIXEL_STRENGTH`).
-// Vermelho puro aquece ao máximo; um cinzento (vermelho = verde) não aquece,
-// por isso imagens em cinzentos também servem (só terreno). A imagem pode ter
+// VERMELHO = CALOR e VERDE = QUÍMICA (redutor) das fumarolas, POR PÍXEL e
+// independentes: calor = r/255 e química = g/255 vezes a força de uma
+// fumarola v3 no centro (`FUMAROLE_PIXEL_STRENGTH`). Vermelho puro =
+// fumarola quente; amarelo = quente e química (fumarola negra); verde =
+// exsudação fria (química sem calor). Um píxel CINZENTO (r = g = b) não faz
+// nada, por isso imagens em cinzentos também servem (só terreno). Se a
+// imagem não tiver verde nenhum, a química segue o calor (como antes). A imagem pode ter
 // qualquer tamanho: é reamostrada (vizinho mais próximo) para a grelha.
 // A linha de cima da imagem é o cimo do mundo (+y no mundo = cima no ecrã).
 
 /// Força de aquecimento de um píxel vermelho puro (= centro da fumarola v3).
 pub const FUMAROLE_PIXEL_STRENGTH: f32 = 5000.0;
 
-/// Lê um PNG. Devolve (grãos por célula, calor por célula em fração de
-/// `FUMAROLE_PIXEL_STRENGTH`), ambos à resolução da grelha.
-pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<(Vec<u32>, Vec<f32>), String> {
+/// Lê um PNG. Devolve (grãos por célula, calor por célula, química por
+/// célula ou None se a imagem não tiver verde), calor e química em fração de
+/// `FUMAROLE_PIXEL_STRENGTH`, à resolução da grelha.
+pub type TerrainImage = (Vec<u32>, Vec<f32>, Option<Vec<f32>>);
+pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<TerrainImage, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut dec = png::Decoder::new(std::io::BufReader::new(file));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -127,6 +132,7 @@ pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<(Vec<u32>, 
     let n = cfg.grid_size as usize;
     let mut g = vec![0u32; n * n];
     let mut heat = vec![0f32; n * n];
+    let mut chem = vec![0f32; n * n];
     for y in 0..n {
         // Linha 0 da imagem = cimo do mundo.
         let iy = ((n - 1 - y) * h) / n;
@@ -135,21 +141,29 @@ pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<(Vec<u32>, 
             let i = (iy * w + ix) * ch;
             let (r, gg, b) = if ch < 3 { (buf[i], buf[i], buf[i]) } else { (buf[i], buf[i + 1], buf[i + 2]) };
             g[y * n + x] = ((b as f32 / 255.0) * ROCK as f32).round() as u32;
-            heat[y * n + x] = (r as f32 - gg as f32).max(0.0) / 255.0;
+            if !(r == gg && gg == b) {
+                heat[y * n + x] = r as f32 / 255.0;
+                chem[y * n + x] = gg as f32 / 255.0;
+            }
         }
     }
-    Ok((g, heat))
+    let has_chem = chem.iter().any(|&c| c > 0.0);
+    Ok((g, heat, has_chem.then_some(chem)))
 }
 
-/// Grava o terreno em PNG: azul = grãos, vermelho = calor (fração de
-/// `FUMAROLE_PIXEL_STRENGTH`, à resolução da grelha).
-pub fn save_png(path: &std::path::Path, cfg: &WorldConfig, gamma: &[u32], heat: &[f32]) -> Result<(), String> {
+/// Grava o terreno em PNG: azul = grãos, vermelho = calor, verde = química
+/// (fração de `FUMAROLE_PIXEL_STRENGTH`, à resolução da grelha; sem química
+/// própria o verde fica a 0 e, ao ler, a química volta a seguir o calor).
+pub fn save_png(path: &std::path::Path, cfg: &WorldConfig, gamma: &[u32], heat: &[f32], chem: Option<&[f32]>) -> Result<(), String> {
     let n = cfg.grid_size as usize;
     let mut rgb = vec![0u8; n * n * 3];
     for y in 0..n {
         for x in 0..n {
             let o = ((n - 1 - y) * n + x) * 3;
             rgb[o] = (heat[y * n + x].clamp(0.0, 1.0) * 255.0).round() as u8;
+            if let Some(c) = chem {
+                rgb[o + 1] = (c[y * n + x].clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
             rgb[o + 2] = ((gamma[y * n + x].min(ROCK) * 255) / ROCK) as u8;
         }
     }

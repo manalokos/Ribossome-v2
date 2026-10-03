@@ -289,7 +289,7 @@ fn update_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     t = mix(t, (tl + tr + tb + tt) * 0.25, TEMP_DIFFUSE);
 
     // Fumarolas: mapa de calor por célula (CPU: pontuais + píxeis vermelhos).
-    t += heat_src[idx] * TEMP_HEAT_RATE * dt;
+    t += heat_src[idx].x * TEMP_HEAT_RATE * dt;
 
     // SOL: o calor que entra é a luz ABSORVIDA nesta célula (energia
     // conservada): a que chega de cima × (1 − transmissão), com terreno,
@@ -315,7 +315,7 @@ fn update_temperature(@builtin(global_invocation_id) gid: vec3<u32>) {
     let rb = redox_in[fgrid(x, u32(max(i32(y) - 1, 0)))];
     let rt = redox_in[fgrid(x, min(y + 1u, FLUID_SIZE - 1u))];
     r = mix(r, (rl + rr + rb + rt) * 0.25, TEMP_DIFFUSE);
-    r += heat_src[idx] * REDOX_RATE * dt;
+    r += heat_src[idx].y * REDOX_RATE * dt;
     r = max(r - f32(atomicLoad(&redox_eaten[idx])) / REDOX_FP, 0.0);
     r *= exp(-max(params.redox_decay, 0.0) * dt);
     redox_out[idx] = clamp(r, 0.0, REDOX_MAX);
