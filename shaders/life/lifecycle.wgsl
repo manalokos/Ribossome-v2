@@ -18,7 +18,9 @@ const SPAWN_GATHER_RADIUS: i32 = 16;
 // Emparelhamento (v3): no máximo 8 tentativas por passo; alcance 2,5 (na
 // prática "a célula debaixo do resíduo").
 const PAIRING_MAX_PER_STEP: u32 = 8u;
-const PAIRING_REACH: f32 = 2.5;
+// Alcance da captura à volta do resíduo (mundo): ~1 célula (30 unidades).
+// (Era 2,5: na prática só a célula do próprio resíduo.)
+const PAIRING_REACH: f32 = 30.0;
 // Mortalidade (v3): frio ×0,1, quente ×10 (T >= 8); risco UV independente da energia.
 const COLD_DEATH_MULT: f32 = 0.1;
 const HOT_DEATH_MULT: f32 = 10.0;
@@ -617,7 +619,9 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             site += vec2<f32>(cos(ang), sin(ang)) * q.z * PAIRING_REACH;
             let comp = genome_get(slot, a.pair_count) ^ 1u;
             if (a.energy < 1.0 + params.pairing_cost) { break; }
-            if (!chem_take_state_one(world_to_cell(site) * 4u + comp, false)) { break; }
+            // Tentativas independentes: uma falha (não havia o complemento
+            // ali) não impede as outras deste passo, noutros sítios.
+            if (!chem_take_state_one(world_to_cell(site) * 4u + comp, false)) { continue; }
             a.pair_count += 1u;
             a.energy -= params.pairing_cost;
         }
