@@ -18,7 +18,7 @@ fn main() {
     if let Some(v) = envf("SETTLE") { w.params.settle = v; }
     if let Some(v) = envf("AGG") { w.params.aggregation = v; }
     if let Some(v) = envf("PRESS") { w.params.monomer_pressure = v; }
-    if let Some(v) = envf("SUNHEAT0") { if v > 0.0 { w.params.uv_strength = 0.0; } }
+    if envf("SUNHEAT0").is_some_and(|v| v > 0.0) { w.params.uv_strength = 0.0; }
     let steps = envf("STEPS").unwrap_or(1.0) as u32;
     let mut done = 0;
     while done < steps.max(1) {
