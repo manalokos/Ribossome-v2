@@ -107,7 +107,7 @@ const LIGHT_SENSOR_PROPS: &[PropDef] = &[
     pd("ganho", "multiplica o que sente (negativo inverte)"),
     pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
     pd("memoria", "0..1: na variação, quanto a referência demora a seguir o sentido (0 = passo anterior)"),
-    pd("alvo", "0 = luz, 1 = temperatura, 2 = redutor das fumarolas"),
+    pd("alvo", "0 = luz, 1 = temperatura, 2 = redutor das fumarolas, 3 = terreno (grãos)"),
 ];
 
 /// Sensores "de comida": as mesmas propriedades e o que sentem.
@@ -173,6 +173,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
     let alvo_fisico = || match v("alvo").round() as i32 {
         1 => "TEMPERATURA",
         2 => "REDUTOR das fumarolas",
+        3 => "TERRENO (grãos: entulho e rocha)",
         _ => "luz",
     };
     let sensor = |o_que: &str, aspeto: &str| {

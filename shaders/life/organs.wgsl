@@ -132,8 +132,9 @@ fn body_count(@builtin(global_invocation_id) gid: vec3<u32>) {
 // Amostra as células num disco de raio SENSOR_RADIUS à volta de `pos`:
 // `what` 0 = comida (ativados, 4 canais), 1 = luz UV, 2 = gastos (4
 // canais), 3 = corpos de agentes (a grelha dos corpos), 4 = temperatura,
-// 5 = redutor das fumarolas. Total: média do disco. Direcional: média do
-// lado esquerdo da cadeia (+perp) − a do direito.
+// 5 = redutor das fumarolas, 6 = terreno (grãos por célula, 0 água .. 1
+// rocha). Total: média do disco. Direcional: média do lado esquerdo da
+// cadeia (+perp) − a do direito.
 fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> f32 {
     let w = f32(WORLD_UNITS_PER_CELL);
     let r = i32(ceil(SENSOR_RADIUS / w));
@@ -162,6 +163,8 @@ fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> 
                 // Temperatura (÷ 4) ou redutor (÷ 5) no fluido sob a célula.
                 let fi = fluid_index_at_world((vec2<f32>(c) + 0.5) * w);
                 v = select(temp_in[fi] / 4.0, redox_in[fi] / 5.0, what == 5u);
+            } else if (what == 6u) {
+                v = f32(min(gamma_count(idx), GAMMA_SOLID_THRESHOLD)) / f32(GAMMA_SOLID_THRESHOLD);
             } else if (what == 3u) {
                 // Residuos por célula do ambiente (a grelha dos corpos é BODY_DIV² maior).
                 let b = atomicLoad(&body_grid[(u32(c.y) / BODY_DIV) * BODY_SIZE + u32(c.x) / BODY_DIV]);
@@ -239,12 +242,12 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             case ORGAN_FOOD_SENSOR, ORGAN_LIGHT_SENSOR, ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: {
                 var what = select(0u, 1u, t == ORGAN_LIGHT_SENSOR || t == ORGAN_LIGHT_SENSOR_DIR);
                 // O alvo vem da variante (p4): comida 0 ativados, 1 gastos,
-                // 2 corpos; físicos 0 luz, 1 temperatura, 2 redutor.
+                // 2 corpos; físicos 0 luz, 1 temperatura, 2 redutor, 3 terreno.
                 let alvo = organ_var(o).p4;
                 if (what == 0u) {
                     if (alvo > 1.5) { what = 3u; } else if (alvo > 0.5) { what = 2u; }
                 } else {
-                    if (alvo > 1.5) { what = 5u; } else if (alvo > 0.5) { what = 4u; }
+                    if (alvo > 2.5) { what = 6u; } else if (alvo > 1.5) { what = 5u; } else if (alvo > 0.5) { what = 4u; }
                 }
                 let dir = t == ORGAN_FOOD_SENSOR_DIR || t == ORGAN_LIGHT_SENSOR_DIR;
                 let here = residue_world(slot, a, k);
