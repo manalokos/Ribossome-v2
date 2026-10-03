@@ -29,13 +29,10 @@ const S_BIOTURB: u32 = 10u;
 // Passos da média da velocidade de natação (o avanço que o ganho amplifica).
 const SWIM_AVG_STEPS: f32 = 100.0;
 const S_PHOTOSYS: u32 = 7u << 16u;   // + índice do resíduo
-// Fotossistema: energia por passo com luz plena e sol 1 (por órgão, × ganho) e
-// probabilidade de reativar um gasto por passo com luz plena.
-// (Por luz ABSORVIDA: um fotossistema sozinho absorve 1 − e^−0,15 ≈ 14% da
-// luz que lhe chega, por isso 0,036 dá os 0,005 de antes.) O modo
-// reciclador reativa com probabilidade PHOTO_YIELD·potência/food_power: a
-// mesma energia por luz nos dois modos.
-const PHOTO_YIELD: f32 = 0.036;
+// Fotossistema: o rendimento (energia por unidade de luz absorvida) é
+// params.photo_yield. Um fotossistema sozinho absorve 1 − e^−0,15 ≈ 14% da
+// luz que lhe chega. O modo reciclador reativa com probabilidade
+// photo_yield·potência/food_power: a mesma energia por luz nos dois modos.
 // Ciclo catalítico: probabilidade por passo de hidrolisar o ligando ligado e
 // de soltar o produto (taxas globais, iguais para todos).
 const MOTOR_P_HYDROLYSIS: f32 = 0.2;
@@ -451,13 +448,13 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let power = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0);
             // Variante: p0 = fração da luz para reciclar, p1 = eficiência.
             let recycle = clamp(pv.p0, 0.0, 1.0);
-            a.energy += (1.0 - recycle) * PHOTO_YIELD * power;
+            a.energy += (1.0 - recycle) * params.photo_yield * power;
             if (recycle > 0.0) {
                 let q = rng_f4(a.id, params.epoch, S_PHOTOSYS + k);
                 // Reativar um monómero guarda food_power de energia: custa a
                 // luz que daria essa energia no modo produtor (senão
                 // reciclar + comer criava energia do nada).
-                if (q.x < clamp(recycle * PHOTO_YIELD * power / max(params.food_power, 1e-3), 0.0, 1.0)) {
+                if (q.x < clamp(recycle * params.photo_yield * power / max(params.food_power, 1e-3), 0.0, 1.0)) {
                     let ch0 = min(u32(q.y * 4.0), 3u);
                     for (var t = 0u; t < 4u; t++) {
                         if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }

@@ -374,6 +374,8 @@ fn tab_light(ui: &mut egui::Ui, world: &mut World) {
     let light_changed =
         ui.add(egui::Slider::new(&mut p.uv_depth, 0.0..=30.0).text("atenuação UV pela água")).changed();
     ui.add(egui::Slider::new(&mut p.monomer_uv_absorb, 0.0..=5.0).text("absorção UV pelos monómeros"));
+    ui.add(egui::Slider::new(&mut p.photo_yield, 0.0..=0.5).logarithmic(true).smallest_positive(0.005).text("rendimento fotossintético"))
+        .on_hover_text("energia por unidade de luz absorvida por um fotossistema (o reciclador converte a mesma energia em ativados)");
     ui.add(egui::Slider::new(&mut p.uv_damage, 1.0..=50.0).text("dano UV"));
     ui.add(
         egui::Slider::new(&mut world.settings.light_rows_per_step, 0..=16)

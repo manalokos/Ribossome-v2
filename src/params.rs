@@ -222,7 +222,10 @@ gpu_struct! {
         /// probabilidade 1 − exp(−isto · vizinhos ativados / T). Presos não
         /// difundem e a corrente leva-os juntos. 0 = desligada.
         pub aggregation: f32,
-        pub _pad_g0: u32,
+        /// Rendimento do fotossistema: energia por passo por unidade de luz
+        /// absorvida (o reciclador reativa com probabilidade isto·potência/
+        /// food_power: a mesma energia nos dois modos).
+        pub photo_yield: f32,
         pub _pad_g1: u32,
         pub _pad_g2: u32,
     }
@@ -320,7 +323,7 @@ impl Default for SimParams {
             bond_energy_share: 0.01,
             bond_signal: 0.5,
             aggregation: 0.0,
-            _pad_g0: 0,
+            photo_yield: 0.1,
             _pad_g1: 0,
             _pad_g2: 0,
         }
