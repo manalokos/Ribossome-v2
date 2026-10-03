@@ -147,6 +147,31 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     p_diff = clamp(p_diff + PRESSURE_HOP_P * params.monomer_pressure * max_drop, 0.0, 0.5);
     let light_t = uv_light_at_cell(x, y);
 
+    // AGREGAÇÃO dos ativados (gás de rede com atração): cada ativado fica
+    // PRESO com probabilidade 1 − exp(−ε·n/T), n = ativados à volta (esta
+    // célula e as 4 vizinhas, todos os canais), T = temperatura local
+    // (o calor das fumarolas dissolve os grumos). Numa célula
+    // acima da capacidade ninguém fica preso (a pressão tem de escoar).
+    var p_bound = 0.0;
+    if (params.aggregation > 0.0 && src_total <= chem_capacity(idx)) {
+        var n_act = 0u;
+        for (var c2 = 0u; c2 < 4u; c2++) {
+            n_act += chem_act_count(idx, c2);
+            if (x + 1u < GRID_SIZE) { n_act += chem_act_count(idx + 1u, c2); }
+            if (x > 0u) { n_act += chem_act_count(idx - 1u, c2); }
+            if (y + 1u < GRID_SIZE) { n_act += chem_act_count(idx + GRID_SIZE, c2); }
+            if (y > 0u) { n_act += chem_act_count(idx - GRID_SIZE, c2); }
+        }
+        if (n_act > 1u) {
+            let fx = min((x * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
+            let fy = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
+            // T = 1 na água à temperatura ambiente (a temperatura do fluido é o
+            // excesso sobre o ambiente); no limiar da ativação térmica, 2.
+            let t_rel = 1.0 + max(temp_in[fgrid(fx, fy)], 0.0) / TEMP_ACT_THRESHOLD;
+            p_bound = 1.0 - exp(-params.aggregation * f32(min(n_act - 1u, 24u)) / t_rel);
+        }
+    }
+
     for (var ch = 0u; ch < 4u; ch++) {
         let slot = idx * 4u + ch;
         let v_ch = atomicLoad(&chem_grid[slot]);
@@ -201,11 +226,17 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         let movers = min(n, MAX_MOVERS_PER_CH);
         let act_stay = act_n - min(act_n, movers);
         stay += act_stay + (n - movers - act_stay) * CHEM_SPENT_ONE;
+        // Ponto de partida comum dos ativados presos: a corrente leva o grumo
+        // inteiro (com pontos ao acaso, cada um ia para a sua célula e o
+        // grumo desfazia-se ao primeiro passo).
+        let bound_start = rng_f4(slot, params.epoch, S_MOVE + MAX_MOVERS_PER_CH).xy;
         for (var k = 0u; k < movers; k++) {
             let unit = select(CHEM_SPENT_ONE, 1u, k < act_n);
             // 4 números: ponto de partida (x, y), evento, direção do salto.
             let rf = rng_f4(slot, params.epoch, S_MOVE + k);
-            var p = rf.xy + disp;
+            // Preso (só ativados): não difunde e parte do ponto comum.
+            let bound = k < act_n && p_bound > 0.0 && fract(rf.z * 7.31 + rf.w * 3.17) < p_bound;
+            var p = select(rf.xy, bound_start, bound) + disp;
             if (g_src > 0u && any(disp != vec2<f32>(0.0))) {
                 // DISPERSÃO MECÂNICA no entulho: caminhos tortuosos entre os
                 // grãos; cada monómero desvia-se ao acaso ∝ à velocidade.
@@ -213,7 +244,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let jitter = (rj.xy * 2.0 - 1.0) * length(disp) * RUBBLE_DISPERSION;
                 p += clamp(jitter, vec2<f32>(-0.9), vec2<f32>(0.9));
             }
-            let r = rf.z;
+            let r = select(rf.z, 1.0, bound);
             if (r < p_diff) {
                 // Direção: pressão × coesão (esta só para os ativados).
                 var w = press;

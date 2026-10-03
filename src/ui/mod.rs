@@ -360,6 +360,10 @@ fn tab_matter(ui: &mut egui::Ui, world: &mut World) {
     }
     ui.add(egui::Slider::new(&mut p.settle, 0.0..=10.0).text("assentamento ×"));
     ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));
+    ui.add(
+        egui::Slider::new(&mut p.aggregation, 0.0..=1.0).logarithmic(true).smallest_positive(0.01).text("agregação dos ativados"),
+    )
+        .on_hover_text("energia de ligação entre ativados vizinhos (÷ temperatura): formam grumos que a corrente leva inteiros; o calor dissolve-os");
 }
 
 fn tab_light(ui: &mut egui::Ui, world: &mut World) {

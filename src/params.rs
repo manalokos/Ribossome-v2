@@ -217,6 +217,14 @@ gpu_struct! {
         pub bond_energy_share: f32,
         /// Condutância dos sinais α/β pela ligação.
         pub bond_signal: f32,
+        /// AGREGAÇÃO dos monómeros ativados (energia de ligação entre
+        /// vizinhos, ÷ temperatura local): cada ativado fica preso com
+        /// probabilidade 1 − exp(−isto · vizinhos ativados / T). Presos não
+        /// difundem e a corrente leva-os juntos. 0 = desligada.
+        pub aggregation: f32,
+        pub _pad_g0: u32,
+        pub _pad_g1: u32,
+        pub _pad_g2: u32,
     }
 }
 
@@ -311,6 +319,10 @@ impl Default for SimParams {
             bond_rate: 0.2,
             bond_energy_share: 0.01,
             bond_signal: 0.5,
+            aggregation: 0.0,
+            _pad_g0: 0,
+            _pad_g1: 0,
+            _pad_g2: 0,
         }
     }
 }
