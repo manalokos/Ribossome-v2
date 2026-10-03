@@ -57,6 +57,29 @@ fn parcel_hop_p(v: vec2<f32>) -> f32 {
     return clamp(l1 * env_per_fluid * max(params.dt, 1e-3), 0.0, GRAIN_ADV_CAP);
 }
 
+// SORTEIO SUAVE para arredondar a deslocação dos grumos: ruído de valor
+// (um valor por passo a cada SMOOTH_CELL células, interpolado suavemente) +
+// um deslocamento global aleatório, módulo 1. Cada célula continua com um
+// sorteio UNIFORME em [0, 1) (sem viés no transporte), mas células próximas
+// sorteiam quase igual (o grumo move-se inteiro) e zonas afastadas não (sem
+// sincronia no mundo todo). A costura (onde dá a volta 1 -> 0) muda de sítio a
+// cada passo.
+const SMOOTH_CELL: u32 = 16u;
+
+fn lattice_rand(ix: u32, iy: u32) -> vec2<f32> {
+    return rng_f4(ix * 73856093u ^ iy * 19349663u, params.epoch, S_MOVE + MAX_MOVERS_PER_CH + 1u).xy;
+}
+
+fn smooth_start(x: u32, y: u32) -> vec2<f32> {
+    let gx = x / SMOOTH_CELL;
+    let gy = y / SMOOTH_CELL;
+    let t = smoothstep(vec2<f32>(0.0), vec2<f32>(1.0), (vec2<f32>(f32(x % SMOOTH_CELL), f32(y % SMOOTH_CELL)) + 0.5) / f32(SMOOTH_CELL));
+    let n = mix(mix(lattice_rand(gx, gy), lattice_rand(gx + 1u, gy), t.x),
+                mix(lattice_rand(gx, gy + 1u), lattice_rand(gx + 1u, gy + 1u), t.x), t.y);
+    let g = rng_f4(0x9E3779B9u, params.epoch, S_MOVE + MAX_MOVERS_PER_CH).xy;
+    return fract(n + g);
+}
+
 @compute @workgroup_size(16, 16)
 fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = gid.x;
@@ -256,12 +279,12 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         let movers = min(n, MAX_MOVERS_PER_CH);
         let act_stay = act_n - min(act_n, movers);
         stay += act_stay + (n - movers - act_stay) * CHEM_SPENT_ONE;
-        // Ponto de partida dos ativados presos: o MESMO em todo o mundo neste
-        // passo (sorteado por passo, sem viés). Com um sorteio por célula,
-        // células vizinhas do mesmo grumo arredondavam a deslocação de forma
-        // diferente e o grumo rasgava-se a cada passo (difusão numérica);
-        // assim só o cisalhamento real da corrente o deforma.
-        let bound_start = rng_f4(0x9E3779B9u, params.epoch, S_MOVE + MAX_MOVERS_PER_CH).xy;
+        // Ponto de partida dos ativados presos: um sorteio SUAVE no espaço
+        // (ver smooth_start). Com um sorteio por célula, células vizinhas do
+        // mesmo grumo arredondavam a deslocação de forma diferente e o grumo
+        // rasgava-se (difusão numérica); com um sorteio global, o mundo todo
+        // andava em sincronia e abria fendas direitas.
+        let bound_start = smooth_start(x, y);
         for (var k = 0u; k < movers; k++) {
             let unit = select(CHEM_SPENT_ONE, 1u, k < act_n);
             // 4 números: ponto de partida (x, y), evento, direção do salto.
