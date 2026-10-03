@@ -618,6 +618,8 @@ fn fluid_index_at_world(p: vec2<f32>) -> u32 {
 // com a matéria reconciliada AO QUANTUM: a base nova é tirada do meio e a
 // velha devolvida (gasta); inserções e duplicações tiram as bases do meio;
 // remoções devolvem-nas. Se o meio não tiver a base, a mutação não acontece.
+// Tipos: pontuais, indels de 1–3 bases (1–2 = frameshift) e duplicações em
+// tandem de 3–24 bases.
 @compute @workgroup_size(64)
 fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     let slot = gid.x;
@@ -647,30 +649,61 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
             gset(&g, i, nb);
         }
     }
-    // Remoção de 3 bases (probabilidade 4m), se ficar >= MIN_GENE_LEN.
-    if (mr.x < 4.0 * m && n >= MIN_GENE_LEN + 3u) {
-        let at = min(u32(mr.y * f32(n - 2u)), n - 3u);
-        for (var k = 0u; k < 3u; k++) { chem_add_state(cell, gget(&g, at + k), 1u, true); }
-        for (var i = at; i + 3u < n; i++) { gset(&g, i, gget(&g, i + 3u)); }
-        n -= 3u;
-        for (var i = n; i < n + 3u; i++) { gset(&g, i, 0u); }
+    // INDELS (cada um com probabilidade 4m): metade das vezes 3 bases (um
+    // codão, mantém a fase de leitura); na outra metade 1 ou 2 bases
+    // (FRAMESHIFT: muda a leitura de tudo o que vem a seguir).
+    let qi = rng_f4(a.id, params.epoch, S_BIRTH + 20u);
+    // Remoção: as bases voltam ao meio, gastas. Fica >= MIN_GENE_LEN.
+    let del_len = select(1u + u32(qi.y * 2.0), 3u, qi.x < 0.5);
+    if (mr.x < 4.0 * m && n >= MIN_GENE_LEN + del_len) {
+        let at = min(u32(mr.y * f32(n - del_len + 1u)), n - del_len);
+        for (var k = 0u; k < del_len; k++) { chem_add_state(cell, gget(&g, at + k), 1u, true); }
+        for (var i = at; i + del_len < n; i++) { gset(&g, i, gget(&g, i + del_len)); }
+        n -= del_len;
+        for (var i = n; i < n + del_len; i++) { gset(&g, i, 0u); }
     }
-    // Inserção de 3 bases ao acaso (probabilidade 4m), tiradas do meio.
-    if (mr.z < 4.0 * m && n + 3u <= MAX_GENE_LEN) {
+    // Inserção de bases ao acaso, tiradas do meio.
+    let ins_len = select(1u + u32(qi.w * 2.0), 3u, qi.z < 0.5);
+    if (mr.z < 4.0 * m && n + ins_len <= MAX_GENE_LEN) {
         let q = rng_f4(a.id, params.epoch, S_BIRTH + 1u);
         let at = min(u32(q.x * f32(n + 1u)), n);
         let nb = vec3<u32>(min(u32(q.y * 4.0), 3u), min(u32(q.z * 4.0), 3u), min(u32(q.w * 4.0), 3u));
         var got = 0u;
-        for (var k = 0u; k < 3u; k++) {
+        for (var k = 0u; k < ins_len; k++) {
             if (!take_around(cell, nb[k])) { break; }
             got += 1u;
         }
-        if (got == 3u) {
-            for (var i = n; i > at; i--) { gset(&g, i + 2u, gget(&g, i - 1u)); }
-            for (var k = 0u; k < 3u; k++) { gset(&g, at + k, nb[k]); }
-            n += 3u;
+        if (got == ins_len) {
+            for (var i = n; i > at; i--) { gset(&g, i + ins_len - 1u, gget(&g, i - 1u)); }
+            for (var k = 0u; k < ins_len; k++) { gset(&g, at + k, nb[k]); }
+            n += ins_len;
         } else {
             for (var k = 0u; k < got; k++) { chem_add_state(cell, nb[k], 1u, true); }
+        }
+    }
+    // DUPLICAÇÃO EM TANDEM (probabilidade 2m): um troço de 3 a 24 bases é
+    // copiado logo a seguir a si próprio, com bases tiradas do meio (se faltar
+    // alguma, nada acontece e o que se tirou volta). É assim que nascem genes
+    // novos: uma cópia mantém a função, a outra pode mudar.
+    let qd = rng_f4(a.id, params.epoch, S_BIRTH + 21u);
+    if (qd.x < 2.0 * m && n >= 3u) {
+        let max_len = min(24u, min(n, MAX_GENE_LEN - n));
+        if (max_len >= 3u) {
+            let len = 3u + min(u32(qd.y * f32(max_len - 2u)), max_len - 3u);
+            let at = min(u32(qd.z * f32(n - len + 1u)), n - len);
+            var got = 0u;
+            for (var k = 0u; k < len; k++) {
+                if (!take_around(cell, gget(&g, at + k))) { break; }
+                got += 1u;
+            }
+            if (got == len) {
+                // Abre espaço depois do troço e copia-o.
+                for (var i = n; i > at + len; i--) { gset(&g, i + len - 1u, gget(&g, i - 1u)); }
+                for (var k = 0u; k < len; k++) { gset(&g, at + len + k, gget(&g, at + k)); }
+                n += len;
+            } else {
+                for (var k = 0u; k < got; k++) { chem_add_state(cell, gget(&g, at + k), 1u, true); }
+            }
         }
     }
 
