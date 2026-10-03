@@ -466,10 +466,15 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (take > 0.0) {
                 atomicAdd(&redox_eaten[fi], u32(take * REDOX_FP));
                 let rec = clamp(cv.p0, 0.0, 1.0);
-                a.energy += (1.0 - rec) * params.chemo_yield * take;
-                if (rec > 0.0) {
+                // TRANSBORDO (como no fotossistema): o que já não cabe no
+                // agente cheio vai reativar gastos da célula.
+                let gain = (1.0 - rec) * params.chemo_yield * take;
+                let kept = min(gain, max(cap - a.energy, 0.0));
+                a.energy += kept;
+                let to_food = rec * params.chemo_yield * take + (gain - kept);
+                if (to_food > 0.0) {
                     let q = rng_f4(a.id, params.epoch, S_CHEMO + k);
-                    if (q.x < clamp(rec * params.chemo_yield * take / max(params.food_power, 1e-3), 0.0, 1.0)) {
+                    if (q.x < clamp(to_food / max(params.food_power, 1e-3), 0.0, 1.0)) {
                         let ch0 = min(u32(q.y * 4.0), 3u);
                         for (var t = 0u; t < 4u; t++) {
                             if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
