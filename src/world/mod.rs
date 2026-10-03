@@ -173,6 +173,8 @@ struct Pipelines {
     bond_accept: wgpu::ComputePipeline,
     stats_reduce: wgpu::ComputePipeline,
     kinship: wgpu::ComputePipeline,
+    body_clear: wgpu::ComputePipeline,
+    body_count: wgpu::ComputePipeline,
 }
 
 /// Suavizações por nível do multigrid (antes, depois) e no nível mais grosso.
@@ -420,6 +422,7 @@ impl World {
         log::info!("código dos órgãos: {code_source}");
         let code_buf = storage_buffer(device, "organ code", 400 * 4);
         let kin_target = storage_buffer(device, "kin target", 257 * 4);
+        let body_grid = storage_buffer(device, "body grid", cells / 4 * 4);
         let kin_buf = storage_buffer(device, "kinship", max_agents * 4);
         let stats_buf = storage_buffer(device, "population stats", (crate::stats::STAT_WORDS * 4) as u64);
         let stats_staging = device.create_buffer(&wgpu::BufferDescriptor {
@@ -499,7 +502,7 @@ impl World {
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
         let life_entries: Vec<_> =
-            (0..31).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
+            (0..32).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -653,6 +656,7 @@ impl World {
                 &kin_target,
                 &kin_buf,
                 &stats_buf,
+                &body_grid,
             ],
         );
 
@@ -743,6 +747,8 @@ impl World {
             bond_accept: compute("bond_accept_pass"),
             stats_reduce: compute("stats_reduce"),
             kinship: compute("kinship"),
+            body_clear: compute("body_clear"),
+            body_count: compute("body_count"),
         };
 
         Self {
@@ -1230,6 +1236,10 @@ impl World {
                 run(&mut pass, "bond_accept", &pl.bond_accept, ab, [ag, 1]);
                 run(&mut pass, "contact_apply", &pl.contact_apply, ab, [ag, 1]);
             }
+            // Grelha dos corpos para os sensores de corpos (lida no passo seguinte).
+            let bcells = (self.cfg.grid_size / 2).pow(2);
+            run(&mut pass, "body_clear", &pl.body_clear, ab, [bcells.div_ceil(256), 1]);
+            run(&mut pass, "body_count", &pl.body_count, ab, [ag, 1]);
             // Nascimentos num passe à parte: a morte devolve slots (push) e o
             // nascimento tira-os (pop); nunca no mesmo despacho.
             run(&mut pass, "agents_birth", &pl.agents_birth, ab, [ag, 1]);

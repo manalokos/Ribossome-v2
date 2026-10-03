@@ -102,6 +102,8 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("bond_accept_pass", Stage::Compute),
         ("stats_reduce", Stage::Compute),
         ("kinship", Stage::Compute),
+        ("body_clear", Stage::Compute),
+        ("body_count", Stage::Compute),
     ],
 };
 

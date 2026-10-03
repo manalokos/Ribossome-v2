@@ -102,9 +102,37 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     return lim * tanh(SIGNAL_GAIN * (s.x * pr.sens_alpha * amp_a + s.y * pr.sens_beta * amp_b) / lim);
 }
 
+// GRELHA DOS CORPOS: resíduos de agentes por célula (BODY_DIV × BODY_DIV
+// células do ambiente), para os sensores de corpos.
+const BODY_DIV: u32 = 2u;
+const BODY_SIZE: u32 = GRID_SIZE / BODY_DIV;
+
+@compute @workgroup_size(256)
+fn body_clear(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.y * 65535u * 256u + gid.x;
+    if (i < BODY_SIZE * BODY_SIZE) { atomicStore(&body_grid[i], 0u); }
+}
+
+@compute @workgroup_size(64)
+fn body_count(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let slot = gid.x;
+    if (slot >= params.max_agents) { return; }
+    let a = agents[slot];
+    if (a.alive == 0u) { return; }
+    for (var k = 0u; k < max(a.body_len, 1u); k++) {
+        var pk = vec2<f32>(a.pos_x, a.pos_y);
+        if (a.body_len > 0u) { pk = residue_world(slot, a, k); }
+        let c = world_to_cell(pk);
+        let bx = (c % GRID_SIZE) / BODY_DIV;
+        let by = (c / GRID_SIZE) / BODY_DIV;
+        atomicAdd(&body_grid[by * BODY_SIZE + bx], 1u);
+    }
+}
+
 // Amostra as células num disco de raio SENSOR_RADIUS à volta de `pos`:
-// `what` 0 = comida (ativados, 4 canais), 1 = luz UV. Total: média do disco.
-// Direcional: média do lado esquerdo da cadeia (+perp) − média do direito.
+// `what` 0 = comida (ativados, 4 canais), 1 = luz UV, 2 = gastos (4
+// canais), 3 = corpos de agentes (a grelha dos corpos). Total: média do
+// disco. Direcional: média do lado esquerdo da cadeia (+perp) − a do direito.
 fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> f32 {
     let w = f32(WORLD_UNITS_PER_CELL);
     let r = i32(ceil(SENSOR_RADIUS / w));
@@ -125,6 +153,14 @@ fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> 
                 var cnt = 0u;
                 for (var ch = 0u; ch < 4u; ch++) { cnt += chem_act_count(idx, ch); }
                 v = f32(cnt) / 12.0;
+            } else if (what == 2u) {
+                var cnt = 0u;
+                for (var ch = 0u; ch < 4u; ch++) { cnt += atomicLoad(&chem_grid[idx * 4u + ch]) >> 16u; }
+                v = f32(cnt) / 12.0;
+            } else if (what == 3u) {
+                // Residuos por célula do ambiente (a grelha dos corpos é BODY_DIV² maior).
+                let b = atomicLoad(&body_grid[(u32(c.y) / BODY_DIV) * BODY_SIZE + u32(c.x) / BODY_DIV]);
+                v = f32(b) / f32(BODY_DIV * BODY_DIV);
             } else {
                 v = uv_light_at_cell(u32(c.x), u32(c.y)) * 4.0;
             }
@@ -140,6 +176,25 @@ fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> 
     }
     if (!directional) { return sum_l / max(n_l, 1.0); }
     return sum_l / max(n_l, 1.0) - sum_r / max(n_r, 1.0);
+}
+
+// O que o próprio corpo conta no disco do sensor de corpos (para o
+// descontar: o agente não se sente a si mesmo), na mesma escala de sense_disc.
+fn own_body_in_disc(slot: u32, a: Agent, pos: vec2<f32>, perp: vec2<f32>, directional: bool) -> f32 {
+    let w = f32(WORLD_UNITS_PER_CELL);
+    let r = ceil(SENSOR_RADIUS / w);
+    // Células no disco (como em sense_disc, aproximado pela área).
+    let cells = max(3.14159265 * r * r, 1.0);
+    var l = 0.0;
+    var rt = 0.0;
+    for (var k = 0u; k < a.body_len; k++) {
+        let d = residue_world(slot, a, k) - pos;
+        if (length(d) > SENSOR_RADIUS) { continue; }
+        let side = dot(d, perp);
+        if (!directional || side > 0.25 * w) { l += 1.0; } else if (side < -0.25 * w) { rt += 1.0; }
+    }
+    if (!directional) { return l / cells; }
+    return (l - rt) / (0.5 * cells);
 }
 
 // Normal (lado esquerdo) da cadeia no resíduo k, no MUNDO.
@@ -177,9 +232,17 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         var is_sensor = true;
         switch t {
             case ORGAN_FOOD_SENSOR, ORGAN_LIGHT_SENSOR, ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: {
-                let what = select(0u, 1u, t == ORGAN_LIGHT_SENSOR || t == ORGAN_LIGHT_SENSOR_DIR);
+                var what = select(0u, 1u, t == ORGAN_LIGHT_SENSOR || t == ORGAN_LIGHT_SENSOR_DIR);
+                if (what == 0u) {
+                    // Sensores "de comida": o alvo vem da variante (p4).
+                    let alvo = organ_var(o).p4;
+                    if (alvo > 1.5) { what = 3u; } else if (alvo > 0.5) { what = 2u; }
+                }
                 let dir = t == ORGAN_FOOD_SENSOR_DIR || t == ORGAN_LIGHT_SENSOR_DIR;
-                sensed = sense_disc(residue_world(slot, a, k), chain_normal(slot, a, k), what, dir);
+                let here = residue_world(slot, a, k);
+                let perp = chain_normal(slot, a, k);
+                sensed = sense_disc(here, perp, what, dir);
+                if (what == 3u) { sensed -= own_body_in_disc(slot, a, here, perp, dir); }
             }
             case ORGAN_ENERGY_SENSOR: {
                 sensed = clamp(a.energy / max(cap, 1e-3), 0.0, 1.0) * 2.0;

@@ -99,11 +99,20 @@ const SENSOR_PROPS: &[PropDef] = &[
     pd("memoria", "0..1: na variação, quanto a referência demora a seguir o sentido (0 = passo anterior)"),
 ];
 
+/// Sensores "de comida": as mesmas propriedades e o que sentem.
+const FOOD_SENSOR_PROPS: &[PropDef] = &[
+    pd("canal", "0 = emite em α, 1 = em β"),
+    pd("ganho", "multiplica o que sente (negativo inverte)"),
+    pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
+    pd("memoria", "0..1: na variação, quanto a referência demora a seguir o sentido (0 = passo anterior)"),
+    pd("alvo", "0 = comida (ativados), 1 = gastos (rasto de quem come), 2 = corpos de outros agentes"),
+];
+
 /// Propriedades de cada tipo de órgão, por ordem (a mesma na GPU).
 pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     &[pd("forca", "multiplica a catálise do promotor"), pd("vies_AU", "-1..1: prefere A/U (+) ou G/C (−)")],
     &[pd("amplificacao", "multiplica a dobra da junta pelos sinais"), pd("canal", "0 = só α, 1 = só β, 2 = ambos")],
-    SENSOR_PROPS,
+    FOOD_SENSOR_PROPS,
     SENSOR_PROPS,
     SENSOR_PROPS,
     &[
@@ -119,7 +128,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("limiar", "só passa o que estiver acima deste nível (porta)"),
     ],
     &[pd("capacidade", "energia extra que guarda")],
-    SENSOR_PROPS,
+    FOOD_SENSOR_PROPS,
     SENSOR_PROPS,
     &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],
     &[pd("forca", "multiplica a mordida"), pd("alcance", "unidades do mundo além do contacto")],
@@ -141,6 +150,11 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
     let t = t as usize;
     let Some(row) = table.get(t) else { return format!("órgão {t}") };
     let v = |name: &str| row.variantes.get(p as usize).and_then(|m| m.get(name)).copied().unwrap_or(0.0);
+    let alvo = || match v("alvo").round() as i32 {
+        1 => "GASTOS (rasto de quem come)",
+        2 => "CORPOS de outros agentes",
+        _ => "comida (ativados)",
+    };
     let sensor = |o_que: &str, aspeto: &str| {
         format!(
             "{o_que} [{aspeto}]: emite em {}, ganho ×{:.2}, {}",
@@ -168,7 +182,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             v("amplificacao") * g,
             ["α", "β", "α e β"][(v("canal").round().clamp(0.0, 2.0)) as usize]
         ),
-        2 => sensor("sensor de comida TOTAL", "coroa de antenas verdes"),
+        2 => format!("{} · sente {}", sensor("sensor de comida TOTAL", "coroa de antenas verdes"), alvo()),
         3 => sensor("sensor de luz TOTAL", "coroa de antenas amarelas"),
         4 => sensor("sensor de energia interna", "disco com anel dourado"),
         5 => format!(
@@ -189,7 +203,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             if v("limiar") > 0.0 { format!(", só acima de {:.2}", v("limiar")) } else { String::new() }
         ),
         7 => format!("armazenamento [disco com anéis]: +{:.1} de capacidade de energia", v("capacidade") * g),
-        8 => sensor("sensor de comida DIRECIONAL (esquerda − direita)", "2 antenas verdes"),
+        8 => format!("{} · sente {}", sensor("sensor de comida DIRECIONAL (esquerda − direita)", "2 antenas verdes"), alvo()),
         9 => sensor("sensor de luz DIRECIONAL (esquerda − direita)", "2 antenas amarelas"),
         10 => format!(
             "fotossistema [disco verde com raios]: {:.0}% da luz para reativar gastos, {:.0}% para energia, eficiência ×{:.2}",

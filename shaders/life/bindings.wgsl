@@ -63,6 +63,10 @@
 @group(3) @binding(28) var<storage, read> kin_target: array<u32>;
 @group(3) @binding(29) var<storage, read_write> kin_out: array<f32>;
 @group(3) @binding(30) var<storage, read_write> stats_out: array<atomic<u32>>;
+// Resíduos de agentes por célula da grelha dos corpos (BODY_DIV células do
+// ambiente por lado), refeita no fim de cada passo; os sensores de corpos
+// leem-na no passo seguinte.
+@group(3) @binding(31) var<storage, read_write> body_grid: array<atomic<u32>>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;
