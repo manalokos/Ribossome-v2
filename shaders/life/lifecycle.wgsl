@@ -734,18 +734,28 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     for (var w = 0u; w < GENOME_WORDS; w++) { genomes[child * GENOME_WORDS + w] = g[w]; }
-    // Posição: 5–15 unidades ao lado, fora da rocha (8 tentativas).
+    // Posição: 5–15 unidades ao lado, fora da rocha (8 tentativas). Com uma
+    // âncora livre (gemulação), nasce ao pé dela, para fora do corpo do pai.
+    let bk = bud_anchor(slot, a);
     var cp = vec2<f32>(a.pos_x, a.pos_y);
+    var out_dir = -1.0;
+    if (bk != BOND_NONE) {
+        let ap = residue_world(slot, a, bk);
+        let d = ap - cp;
+        out_dir = select(atan2(d.y, d.x), -1.0, dot(d, d) < 1e-6);
+        cp = ap;
+    }
     for (var t = 0u; t < 8u; t++) {
         let q = rng_f4(a.id, params.epoch, S_BIRTH + 2u + t);
-        let ang = q.x * 6.2831853;
+        // Gemulação: para fora (±45°); senão em qualquer direção.
+        let ang = select(q.x * 6.2831853, out_dir + (q.x - 0.5) * 1.5708, out_dir > -1.0);
         let tp = clamp(cp + vec2<f32>(cos(ang), sin(ang)) * (5.0 + 10.0 * q.y), vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(tp)) < GAMMA_SOLID_THRESHOLD) { cp = tp; break; }
     }
     // Energia (v3): metade para o filho, metade fica com o pai.
     let half = a.energy * 0.5;
     new_agent(child, cp, mr.w * 6.2831853, half, n, a.generation + 1u, a.id);
-    birth_bond(slot, a, child);
+    birth_bond(slot, a, child, bk);
     a.energy -= half;
     a.pair_count = 0u;
     agents[slot] = a;

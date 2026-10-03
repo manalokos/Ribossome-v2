@@ -6,8 +6,10 @@
 // ligação esticar demais ou o outro morrer). Nenhuma regra olha para o
 // genoma: só para os órgãos que o corpo tem.
 //
-// Nascimento: se o pai tiver uma âncora livre e o filho uma de polaridade
-// oposta, nascem ligados (colónias, filamentos).
+// Nascimento (GEMULAÇÃO): se o pai tiver uma âncora livre, o filho nasce ao
+// pé dela e agarrado a ela (só o pai precisa do órgão; o filho agarra-se com
+// uma âncora sua de polaridade oposta, se tiver, senão pela ponta do corpo).
+// Uma âncora na ponta faz filamentos; várias, ramos e colónias.
 //
 // A ligação é uma mola sobreamortecida entre os dois resíduos, com binário,
 // não leva matéria, e por ela passam energia (por gradiente) e os sinais
@@ -264,8 +266,27 @@ fn bond_accept_pass(@builtin(global_invocation_id) gid: vec3<u32>) {
 // LIGAÇÃO DE NASCIMENTO (chamada em agents_birth): uma âncora livre do pai
 // e uma de polaridade oposta do filho ligam-se logo (sem lugar livre no
 // pai, ou sem âncoras compatíveis, separam-se).
-fn birth_bond(parent: u32, pa: Agent, child: u32) {
-    if (pa.body_len == 0u) { return; }
+// Âncora do pai onde o filho vai nascer: a primeira livre, se o pai tiver
+// um lugar de ligação livre. BOND_NONE = nasce solto.
+fn bud_anchor(parent: u32, pa: Agent) -> u32 {
+    var found = BOND_NONE;
+    var has_slot = false;
+    for (var i = 0u; i < MAX_BONDS; i++) {
+        if (bond_at(parent, i).x == BOND_NONE) { has_slot = true; }
+    }
+    if (!has_slot) { return BOND_NONE; }
+    for (var k = 0u; k < pa.body_len; k++) {
+        if (anchor_polarity(parent, k) != 0.0 && !anchor_busy(parent, k)) {
+            found = k;
+            break;
+        }
+    }
+    return found;
+}
+
+// Liga o filho acabado de nascer à âncora `k` do pai (ver bud_anchor).
+fn birth_bond(parent: u32, pa: Agent, child: u32, k: u32) {
+    if (k == BOND_NONE || pa.body_len == 0u) { return; }
     let ca = agents[child];
     if (ca.body_len == 0u) { return; }
     var slot_i = BOND_NONE;
@@ -276,15 +297,17 @@ fn birth_bond(parent: u32, pa: Agent, child: u32) {
         }
     }
     if (slot_i == BOND_NONE) { return; }
-    for (var k = 0u; k < pa.body_len; k++) {
-        let pol = anchor_polarity(parent, k);
-        if (pol == 0.0 || anchor_busy(parent, k)) { continue; }
-        for (var j = 0u; j < ca.body_len; j++) {
-            if (anchor_polarity(child, j) != -pol) { continue; }
-            let pb = max(anchor_break(parent, k), anchor_break(child, j));
-            bond_write(parent, slot_i, child, ca.id, k, j, BOND_KIND_BIRTH, pb);
-            bond_write(child, 0u, parent, pa.id, j, k, BOND_KIND_BIRTH, pb);
-            return;
+    let pol = anchor_polarity(parent, k);
+    // O filho agarra-se com uma âncora oposta, se tiver; senão pela ponta.
+    var j = 0u;
+    var pb = anchor_break(parent, k);
+    for (var q = 0u; q < ca.body_len; q++) {
+        if (anchor_polarity(child, q) == -pol) {
+            j = q;
+            pb = max(pb, anchor_break(child, q));
+            break;
         }
     }
+    bond_write(parent, slot_i, child, ca.id, k, j, BOND_KIND_BIRTH, pb);
+    bond_write(child, 0u, parent, pa.id, j, k, BOND_KIND_BIRTH, pb);
 }
