@@ -1123,7 +1123,9 @@ impl World {
             let spawn_count = if i == 0 { spawns.len() as u32 } else { 0 };
             let epoch = self.params.epoch.wrapping_add(i);
             // Dia e noite: o sol deste passo.
-            let sun_now = self.params.daylight(epoch);
+            // Sol desligado (força 0): não entra luz nenhuma no topo (nem
+            // brilho, nem aquecimento, nem sensores de luz).
+            let sun_now = if self.params.uv_strength > 0.0 { self.params.daylight(epoch) } else { 0.0 };
             let sun_slope = self.params.sun_slope_at(epoch);
             let p = SimParams { epoch, spawn_count, sun_now, sun_slope, ..self.params };
             let at = (PARAMS_STRIDE * i as u64) as usize;
