@@ -1086,7 +1086,10 @@ impl World {
         for i in 0..steps {
             // As sementes só entram no primeiro passo do lote.
             let spawn_count = if i == 0 { spawns.len() as u32 } else { 0 };
-            let p = SimParams { epoch: self.params.epoch.wrapping_add(i), spawn_count, ..self.params };
+            let epoch = self.params.epoch.wrapping_add(i);
+            // Dia e noite: o sol deste passo.
+            let uv_strength = self.params.uv_strength * self.params.daylight(epoch);
+            let p = SimParams { epoch, spawn_count, uv_strength, ..self.params };
             let at = (PARAMS_STRIDE * i as u64) as usize;
             bytes[at..at + size_of::<SimParams>()].copy_from_slice(bytemuck::bytes_of(&p));
         }

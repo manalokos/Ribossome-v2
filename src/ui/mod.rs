@@ -196,6 +196,10 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
             st.reseed = true;
         }
     });
+    if world.params.day_period >= 1.0 {
+        let d = world.params.daylight(world.params.epoch);
+        ui.label(if d > 0.0 { format!("☀ dia ({:.0}% do sol)", d * 100.0) } else { "☾ noite".to_string() });
+    }
     ui.label(format!(
         "epoch {}   ({:.0} epochs/s)   frame {:.1} ms ({:.0} fps)",
         world.params.epoch,
@@ -370,6 +374,12 @@ fn tab_matter(ui: &mut egui::Ui, world: &mut World) {
 fn tab_light(ui: &mut egui::Ui, world: &mut World) {
     let p = &mut world.params;
     ui.add(egui::Slider::new(&mut p.uv_strength, 0.0..=10.0).text("força UV (sol)"));
+    ui.add(egui::Slider::new(&mut p.day_period, 0.0..=200_000.0).text("dia e noite: período (epochs; 0 = sempre dia)"))
+        .on_hover_text("o sol segue max(0, sen(2π·t/período)): noite metade do tempo, com amanhecer e anoitecer");
+    if p.day_period >= 1.0 {
+        let d = p.daylight(p.epoch);
+        ui.label(format!("  agora: {} ({:.0}% do sol)", if d > 0.0 { "dia" } else { "noite" }, d * 100.0));
+    }
     ui.add(egui::Slider::new(&mut p.direct_photoactivation, 0.0..=1.0).text("fotoativação direta dos gastos"))
         .on_hover_text("0 = a luz só vira comida pelos fotossistemas dos agentes");
     let light_changed =

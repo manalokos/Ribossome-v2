@@ -252,7 +252,9 @@ gpu_struct! {
         /// Temperatura a partir da qual o calor desnatura (o miolo das
         /// fumarolas chega a 12; a pluma morna anda por 3–6).
         pub denature_temp: f32,
-        pub _pad_c1: u32,
+        /// DIA E NOITE: período do ciclo em epochs (0 = sempre dia). O sol
+        /// (uv_strength) é × max(0, sen(2π·epoch/período)): noite metade do tempo.
+        pub day_period: f32,
         pub _pad_c2: u32,
     }
 }
@@ -261,6 +263,15 @@ gpu_struct! {
 const DERIVED_PARAMS: [&str; 7] = ["epoch", "seed", "fluid_dt", "fluid_enabled", "max_agents", "fumarole_count", "spawn_count"];
 
 impl SimParams {
+    /// Fração do sol neste epoch (1 = meio-dia; 0 = noite), pelo ciclo dia/noite.
+    pub fn daylight(&self, epoch: u32) -> f32 {
+        if self.day_period < 1.0 {
+            return 1.0;
+        }
+        let phase = (epoch as f64 / self.day_period as f64).fract();
+        (std::f64::consts::TAU * phase).sin().max(0.0) as f32
+    }
+
     /// Os parâmetros diferentes dos valores do código: (nome, atual, código).
     pub fn changed_from_default(&self) -> Vec<(&'static str, f64, f64)> {
         let d = SimParams { seed: self.seed, ..Default::default() }.to_named();
@@ -358,7 +369,7 @@ impl Default for SimParams {
             redox_decay: 0.02,
             thermal_activation: 1.0,
             denature_temp: 6.0,
-            _pad_c1: 0,
+            day_period: 0.0,
             _pad_c2: 0,
         }
     }
