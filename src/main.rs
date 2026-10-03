@@ -584,6 +584,10 @@ impl Running {
                 self.world.seed_matter(&self.gpu, self.seed)
             };
             self.ui.ledger = None;
+            // Mundo semeado de novo: os gráficos recomeçam (o CSV fica, com
+            // uma linha de cabeçalho nova a marcar o recomeço).
+            self.ui.history = ribossome::stats::History::default();
+            self.ui.history.next_epoch = self.world.params.epoch;
         }
         let want_vsync = matches!(self.surface_cfg.present_mode, wgpu::PresentMode::AutoVsync);
         if want_vsync != self.ui.vsync {

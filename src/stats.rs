@@ -59,6 +59,9 @@ pub struct History {
     pub every: u32,
     pub next_epoch: u32,
     csv_ok: bool,
+    /// Este histórico já escreveu o cabeçalho no CSV (cada recomeço escreve
+    /// um novo: marca a fronteira entre corridas no ficheiro).
+    csv_header: bool,
     /// Versão reduzida para os gráficos (refeita quando muda o número de amostras).
     plot_cache: Option<(usize, Vec<Vec<[f64; 2]>>)>,
 }
@@ -75,6 +78,7 @@ impl Default for History {
             every: 2000,
             next_epoch: 0,
             csv_ok: true,
+            csv_header: false,
             plot_cache: None,
         }
     }
@@ -154,10 +158,10 @@ impl History {
             if std::fs::metadata(CSV_PATH).is_ok_and(|m| m.len() > CSV_MAX_BYTES) {
                 let _ = std::fs::rename(CSV_PATH, CSV_OLD);
             }
-            let new = !std::path::Path::new(CSV_PATH).exists();
             let mut f = std::fs::OpenOptions::new().create(true).append(true).open(CSV_PATH)?;
-            if new {
+            if !self.csv_header {
                 writeln!(f, "epoch,{}", self.names.join(","))?;
+                self.csv_header = true;
             }
             let row: Vec<String> = v.iter().map(|x| format!("{x:.4}")).collect();
             writeln!(f, "{epoch},{}", row.join(","))
