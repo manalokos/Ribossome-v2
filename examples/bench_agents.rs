@@ -20,7 +20,7 @@ fn main() {
     world.params.maintenance_cost = 0.0;
     world.params.pairing_rate = 0.0;
     world.params.spawn_energy = 1000.0;
-    let text = format!("AUG UGU UCU {} UAA", "GGU GCU CUG ".repeat(15));
+    let text = format!("AUG CAU CUU {} UAA", "GGU GCU CUG ".repeat(15));
     let g: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
     let s = cfg.sim_size();
     let mut rng = ribossome::life::SplitMix(5);

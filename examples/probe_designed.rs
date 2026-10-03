@@ -77,7 +77,7 @@ fn trial(gpu: &Gpu, name: &str, genome: &str) {
 
 fn main() {
     let gpu = Gpu::new_headless().unwrap();
-    let clock = "UGU UCU";
+    let clock = "CAU CUU";
     let gly = format!("AUG {clock} {} UAA", "GGU ".repeat(15));
     trial(&gpu, "relógio + 15 glicinas", &gly);
     let gly_noclock = format!("AUG GCU GCU {} UAA", "GGU ".repeat(15));

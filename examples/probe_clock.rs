@@ -19,7 +19,7 @@ fn run(gpu: &Gpu, world: &mut World, steps: u32) {
 
 fn main() {
     let gpu = Gpu::new_headless().unwrap();
-    let text = format!("AUG UGU UCU {} UAA", "GGU ".repeat(15));
+    let text = format!("AUG CAU CUU {} UAA", "GGU ".repeat(15));
     let g: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
     for period in [160.0f32, 80.0, 40.0, 20.0, 12.0, 8.0, 5.0] {
         let cfg = WorldConfig { grid_size: 1024, fluid_size: 512, max_agents: 20_000, ..WorldConfig::DEFAULT };
@@ -42,6 +42,7 @@ fn main() {
         world.params.maintenance_cost = 0.0;
         world.params.sedimentation = 0.0;
         world.params.spawn_energy = 1000.0;
+        world.params.inertia = std::env::var("INERTIA").ok().and_then(|v| v.parse().ok()).unwrap_or(world.params.inertia);
         world.params.motion_cost = std::env::var("MC").ok().and_then(|v| v.parse().ok()).unwrap_or(world.params.motion_cost);
         let s = cfg.sim_size();
         let mut rng = ribossome::life::SplitMix(5);
@@ -58,6 +59,11 @@ fn main() {
             a.iter().sum::<f32>() / a.len().max(1) as f32
         };
         let e0 = mean_e(&start);
+        if std::env::var("DEBUG").is_ok() {
+            let alive = start.iter().filter(|a| a.alive != 0).count();
+            let c = world.life_counters_blocking(&gpu);
+            eprintln!("vivos {alive}, {c:?}");
+        }
         run(&gpu, &mut world, 600);
         let end = world.read_agents_blocking(&gpu);
         let e1 = mean_e(&end);

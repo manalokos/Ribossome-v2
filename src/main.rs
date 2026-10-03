@@ -80,7 +80,7 @@ fn test_scenario(world: &mut World) {
     let text = if control {
         format!("AUG {} UAA", "GGU ".repeat(16))
     } else {
-        format!("AUG UGU UCU {} UAA", "GGU ".repeat(15))
+        format!("AUG CAU CUU {} UAA", "GGU ".repeat(15))
     };
     let g: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
     let s = world.cfg.sim_size();

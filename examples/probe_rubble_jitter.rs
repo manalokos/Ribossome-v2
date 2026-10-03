@@ -24,7 +24,7 @@ fn main() {
     let g = world.read_gamma_blocking(&gpu);
     let n = cfg.grid_size as usize;
     let w = cfg.world_units_per_cell as f32;
-    let genome = bases(&format!("AUG UGU UCU {} UAA", "GGU ".repeat(15)));
+    let genome = bases(&format!("AUG CAU CUU {} UAA", "GGU ".repeat(15)));
     let mut rng = ribossome::life::SplitMix(9);
     let (mut rub, mut wat) = (Vec::new(), Vec::new());
     while rub.len() < 150 || wat.len() < 150 {

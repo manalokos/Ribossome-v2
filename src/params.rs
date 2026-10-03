@@ -234,6 +234,14 @@ gpu_struct! {
         /// agentes (1 = físico: a baixo Reynolds um corpo livre segue a
         /// corrente; 0 = ignoram as correntes e só nadam).
         pub flow_coupling: f32,
+        /// INÉRCIA dos corpos pesados: a velocidade do agente (natação +
+        /// corrente) aproxima-se da velocidade alvo com peso 1/(1 + isto ×
+        /// massa relativa a um corpo médio de 16 resíduos). 0 = sobreamortecido
+        /// puro (sem inércia). Os pesados aceleram devagar e perdem as rajadas.
+        pub inertia: f32,
+        pub _pad_i0: u32,
+        pub _pad_i1: u32,
+        pub _pad_i2: u32,
     }
 }
 
@@ -332,6 +340,10 @@ impl Default for SimParams {
             photo_yield: 0.1,
             heat_kill: 0.05,
             flow_coupling: 1.0,
+            inertia: 1.0,
+            _pad_i0: 0,
+            _pad_i1: 0,
+            _pad_i2: 0,
         }
     }
 }

@@ -24,7 +24,7 @@ fn main() {
     world.params.sedimentation = env("SED", world.params.sedimentation);
     world.params.uptake_rate = env("UPTAKE", world.params.uptake_rate);
     world.settings.fluid_enabled = env("FLUID", 1u32) != 0;
-    let text = format!("AUG UGU UCU {} UAA", "GGU GCU CUG ".repeat(15));
+    let text = format!("AUG CAU CUU {} UAA", "GGU GCU CUG ".repeat(15));
     let g: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
     let s = cfg.sim_size();
     let mut rng = ribossome::life::SplitMix(5);

@@ -310,14 +310,27 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Sem corpo articulado (RNA nu, um resíduo): levado pela água no centro.
         flow_w = fc * water_at(vec2<f32>(a.pos_x, a.pos_y), true);
     }
-    let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + sv + flow_w, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
+    // INÉRCIA: a deslocação do passo aproxima-se da alvo (natação +
+    // corrente) com peso 1/(1 + inércia × massa relativa). vel guarda a
+    // velocidade do passo anterior. Sem inércia (0) é a de sempre.
+    let mass = body_mass(slot, a.body_len);
+    let dt_s = max(params.dt, 1e-6);
+    let want = sv + flow_w;
+    var step = want;
+    if (params.inertia > 0.0 && a.age > 0u) {
+        let alpha = 1.0 / (1.0 + params.inertia * mass / MASS_BODY_REF);
+        step = mix(vec2<f32>(a.vel_x, a.vel_y) * dt_s, want, alpha);
+    }
+    let np0 = clamp(vec2<f32>(a.pos_x, a.pos_y) + step, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
     if (gamma_count(world_to_cell(np0)) < GAMMA_SOLID_THRESHOLD) {
         a.pos_x = np0.x;
         a.pos_y = np0.y;
+    } else {
+        step = vec2<f32>(0.0); // bateu na rocha: para
     }
     a.rot += js.swim.z + fc * js.flow.z + js.phi;
-    a.vel_x = flow_w.x / max(params.dt, 1e-6);
-    a.vel_y = flow_w.y / max(params.dt, 1e-6);
+    a.vel_x = step.x / dt_s;
+    a.vel_y = step.y / dt_s;
     a.age += 1u;
     // (zw = média da velocidade de natação; xy = curvatura dos fios, a seguir)
     rna_tail[slot * 2u + 1u] = aux;
@@ -470,10 +483,14 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * (f32(a.body_len) + organ_upkeep(slot, a.body_len));
 
-    // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n, só a parte em água livre. ----
+    // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n × massa média por resíduo (os
+    // órgãos pesados, como o armazenamento, afundam mais), só a parte em
+    // água livre. ----
     if (params.sedimentation > 0.0) {
         let free_frac = select(1.0, f32(in_water) / f32(max(a.body_len, 1u)), a.body_len > 0u);
-        let fall = params.sedimentation * sqrt(f32(max(a.body_len, 1u))) * free_frac;
+        let nb = f32(max(a.body_len, 1u));
+        let dens = body_mass(slot, a.body_len) / (nb * MASS_RESIDUE_REF);
+        let fall = params.sedimentation * sqrt(nb) * dens * free_frac;
         let ns = vec2<f32>(p.x, max(p.y - fall, 0.0));
         if (gamma_count(world_to_cell(ns)) < GAMMA_SOLID_THRESHOLD) {
             p = ns;

@@ -35,7 +35,7 @@ fn main() {
     let g = if control {
         bases(&format!("AUG {} UAA", "GGU ".repeat(16)))
     } else {
-        bases(&format!("AUG UGU UCU {} UAA", "GGU ".repeat(15)))
+        bases(&format!("AUG CAU CUU {} UAA", "GGU ".repeat(15)))
     };
     let s = cfg.sim_size();
     let mut rng = ribossome::life::SplitMix(5);

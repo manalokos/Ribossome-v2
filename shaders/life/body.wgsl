@@ -29,6 +29,17 @@ fn residue_mass(slot: u32, k: u32) -> f32 {
     return m;
 }
 
+// Massa de um resíduo médio (118 Da) e de um corpo médio (16 resíduos).
+const MASS_RESIDUE_REF: f32 = 0.02;
+const MASS_BODY_REF: f32 = 0.32;
+
+// Massa do corpo (resíduos × órgãos).
+fn body_mass(slot: u32, n: u32) -> f32 {
+    var m = 0.0;
+    for (var k = 0u; k < n; k++) { m += residue_mass(slot, k); }
+    return max(m, MASS_RESIDUE_REF);
+}
+
 fn residue_len(slot: u32, k: u32) -> f32 {
     var l = aa_props[body_get(slot, k)].seg_len;
     let o = organ_get(slot, k);
