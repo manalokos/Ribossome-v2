@@ -9,6 +9,8 @@
 //! Índice de avanço = média do cosseno entre o deslocamento e a direção da
 //! comida (enviesado para + em todos: quem come deixa um rasto vazio atrás).
 //! MODE = params.signal_mode (0 por aminoácido, 1 isotrópico, 2 direcional).
+//! TARGET=terrain: mede a viragem em relação ao ENTULHO (centroide dos grãos)
+//! e agrupa pelo sensor físico direcional (variante 1 = terreno).
 use std::collections::HashMap;
 
 use ribossome::gpu::Gpu;
@@ -36,7 +38,30 @@ fn main() {
     // com resposta uniforme = sinal do ganho × canal (α +, β −): 1 = deve
     // virar PARA a comida, 2 = deve FUGIR; 3 = outros sensores.
     let names = ["cegos (sem sensor de disco)", "comida direcional, previsto +", "comida direcional, previsto −", "outros sensores"];
+    let terrain = std::env::var("TARGET").is_ok_and(|v| v == "terrain");
+    let names = if terrain {
+        ["sem sensor físico direcional", "físico direcional: TERRENO (var. 1)", "físico direcional: outras variantes", "(vazio)"]
+    } else {
+        names
+    };
     let food_dir_row = &w.organ_table[8];
+    let gamma0 = w.read_gamma_blocking(&gpu);
+    // Comida no entulho e na água (ativados por célula).
+    {
+        let c = w.read_cells_blocking(&gpu);
+        let (mut fr, mut nr, mut fw, mut nw) = (0u64, 0u64, 0u64, 0u64);
+        for (i, &gm) in gamma0.iter().enumerate() {
+            let a: u64 = (0..4).map(|ch| (c[i * 4 + ch] & 0xFFFF) as u64).sum();
+            if gm == 0 {
+                fw += a;
+                nw += 1;
+            } else if gm < 3 {
+                fr += a;
+                nr += 1;
+            }
+        }
+        println!("ativados por célula: água {:.3} ({nw} células), entulho solto {:.3} ({nr} células)", fw as f64 / nw.max(1) as f64, fr as f64 / nr.max(1) as f64);
+    }
     let organs: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.organs_buf)).to_vec();
     let mut group: HashMap<u32, usize> = HashMap::new();
     for (slot, a) in w.read_agents_blocking(&gpu).iter().enumerate().filter(|(_, a)| a.alive != 0) {
@@ -57,7 +82,20 @@ fn main() {
                 }
             }
         }
-        let gi = if predicted > 0.0 { 1 } else if predicted < 0.0 { 2 } else if has[8] || has[9] || has[2] || has[3] { 3 } else { 0 };
+        let mut gi = if predicted > 0.0 { 1 } else if predicted < 0.0 { 2 } else if has[8] || has[9] || has[2] || has[3] { 3 } else { 0 };
+        if terrain {
+            // Pelo sensor físico direcional (tipo 9) e a sua variante.
+            gi = 0;
+            for r in 0..a.body_len as usize {
+                let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
+                if o != 0 && (o & 0xF) - 1 == 9 {
+                    gi = if (o >> 4) & 0xF == 1 { 1 } else { 2.max(gi) };
+                    if gi == 1 {
+                        break;
+                    }
+                }
+            }
+        }
         group.insert(a.id, gi);
     }
 
@@ -75,7 +113,7 @@ fn main() {
                     continue;
                 }
                 let i = (yy * g + xx) as usize;
-                let c = (0..4).map(|ch| cells[i * 4 + ch] & 0xFFFF).sum::<u32>() as f32;
+                let c = if terrain { gamma0[i].min(3) as f32 } else { (0..4).map(|ch| cells[i * 4 + ch] & 0xFFFF).sum::<u32>() as f32 };
                 sx += c * dx as f32;
                 sy += c * dy as f32;
                 tot += c;
@@ -83,7 +121,7 @@ fn main() {
         }
         // Só conta se houver comida e uma assimetria clara.
         let n = (sx * sx + sy * sy).sqrt();
-        (tot >= 4.0 && n / tot > 0.5).then(|| [sx / n, sy / n])
+        (tot >= 4.0 && n / tot > if terrain { 0.3 } else { 0.5 }).then(|| [sx / n, sy / n])
     };
 
     // Por grupo: Σ viragem×lado, n; Σ cos(deslocamento, comida), n; percurso.
@@ -138,10 +176,11 @@ fn main() {
         prev = now;
     }
     println!("{steps} passos, intervalos de {dt}:");
+    let alvo = if terrain { "o entulho" } else { "a comida" };
     for gi in 0..4 {
         let n = group.values().filter(|&&x| x == gi).count();
         println!(
-            "  {:30} {n:6} agentes: viragem para a comida {:+.3} (n={}), avanço para a comida {:+.3} (n={}), {:.2} células por intervalo",
+            "  {:36} {n:6} agentes: viragem para {alvo} {:+.3} (n={}), avanço para {alvo} {:+.3} (n={}), {:.2} células por intervalo",
             names[gi],
             turn[gi].0 / turn[gi].1.max(1) as f64,
             turn[gi].1,
