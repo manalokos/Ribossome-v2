@@ -295,7 +295,11 @@ gpu_struct! {
         /// (sobe se a corrente a subir for mais forte; assenta onde ela
         /// abranda). 0 = os grãos flutuam (v3).
         pub sediment_settle: f32,
-        pub _pad_e0: u32,
+        /// SINAIS: 0 = condução e resposta das juntas por aminoácido (v3);
+        /// 1 = difusão ISOTRÓPICA (metade de cada vizinho) e resposta igual
+        /// em todas as juntas (α dobra para um lado, β para o outro);
+        /// 2 = condução DIRECIONAL (do lado N para o C) com a mesma resposta.
+        pub signal_mode: f32,
         pub _pad_e1: u32,
     }
 }
@@ -443,7 +447,7 @@ impl Default for SimParams {
             sediment_transport: 1.0,
             sediment_threshold: 0.5,
             sediment_settle: 1.0,
-            _pad_e0: 0,
+            signal_mode: 0.0,
             _pad_e1: 0,
         }
     }

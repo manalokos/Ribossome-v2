@@ -1,12 +1,14 @@
 //! Os sensores direcionais viram o agente para a comida? Carrega uma cena
-//! (por omissão o autosave) e, de DT em DT passos, mede para cada agente:
-//! - rumo antes (deslocamento no intervalo anterior) e depois;
-//! - para que lado está a comida (centroide dos ativados num disco de 6
-//!   células à volta, no início do intervalo).
+//! (por omissão o autosave) e, de DT em DT passos, mede para cada agente o
+//! rumo antes (deslocamento no intervalo anterior) e depois, e para que lado
+//! está a comida (centroide dos ativados num disco de 6 células à volta, no
+//! início do intervalo).
+//!
 //! Índice de viragem = média de sinal(viragem) × sinal(lado da comida):
 //! +1 = vira sempre para a comida, 0 = às cegas, −1 = foge dela.
 //! Índice de avanço = média do cosseno entre o deslocamento e a direção da
-//! comida. Compara quem tem sensor de comida direcional com os cegos.
+//! comida (enviesado para + em todos: quem come deixa um rasto vazio atrás).
+//! MODE = params.signal_mode (0 por aminoácido, 1 isotrópico, 2 direcional).
 use std::collections::HashMap;
 
 use ribossome::gpu::Gpu;
@@ -20,25 +22,42 @@ fn main() {
     let cfg = WorldConfig::DEFAULT;
     let mut w = World::new(&gpu, cfg, 1);
     w.load_scene(&gpu, &Scene::read(std::path::Path::new(&path)).unwrap()).unwrap();
+    if let Some(m) = envf("MODE") {
+        w.params.signal_mode = m;
+    }
+    println!("modo dos sinais: {}", w.params.signal_mode);
     let g = cfg.grid_size as i32;
     let wpc = cfg.world_units_per_cell as f32;
     let dt = envf("DT").unwrap_or(16.0) as u32;
     let steps = envf("STEPS").unwrap_or(1600.0) as u32;
 
-    // Grupos pelos órgãos (no início): 0 cego (sem sensores de disco),
-    // 1 sensor de comida direcional, 2 sensor físico direcional, 3 outro sensor.
-    let names = ["cegos (sem sensor de disco)", "sensor de COMIDA direcional", "sensor FÍSICO direcional", "só sensores totais"];
+    // Grupos pelos órgãos (no início): 0 cego (sem sensores de disco);
+    // 1 e 2: sensor de comida (ativados) direcional, pelo sentido previsto
+    // com resposta uniforme = sinal do ganho × canal (α +, β −): 1 = deve
+    // virar PARA a comida, 2 = deve FUGIR; 3 = outros sensores.
+    let names = ["cegos (sem sensor de disco)", "comida direcional, previsto +", "comida direcional, previsto −", "outros sensores"];
+    let food_dir_row = &w.organ_table[8];
     let organs: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.organs_buf)).to_vec();
     let mut group: HashMap<u32, usize> = HashMap::new();
     for (slot, a) in w.read_agents_blocking(&gpu).iter().enumerate().filter(|(_, a)| a.alive != 0) {
         let mut has = [false; 16];
+        // Sentido previsto do primeiro sensor de comida direcional (alvo 0).
+        let mut predicted = 0.0f32;
         for r in 0..a.body_len as usize {
             let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
             if o != 0 {
-                has[((o & 0xF) - 1) as usize] = true;
+                let t = ((o & 0xF) - 1) as usize;
+                has[t] = true;
+                if t == 8 && predicted == 0.0 {
+                    let v = &food_dir_row.variantes[((o >> 4) & 0xF) as usize];
+                    let get = |k: &str| v.get(k).copied().unwrap_or(0.0);
+                    if get("alvo") < 0.5 {
+                        predicted = get("ganho").signum() * if get("canal") < 0.5 { 1.0 } else { -1.0 };
+                    }
+                }
             }
         }
-        let gi = if has[8] { 1 } else if has[9] { 2 } else if has[2] || has[3] { 3 } else { 0 };
+        let gi = if predicted > 0.0 { 1 } else if predicted < 0.0 { 2 } else if has[8] || has[9] || has[2] || has[3] { 3 } else { 0 };
         group.insert(a.id, gi);
     }
 

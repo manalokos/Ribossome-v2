@@ -15,6 +15,10 @@ const SIGNAL_MAX: f32 = 4.0;
 // (α·sens_α + β·sens_β), saturado suavemente no máximo do aminoácido
 // (AA_MAX_BEND, Ramachandran): máx·tanh(x/máx).
 const SIGNAL_GAIN: f32 = 4.0;
+// Resposta uniforme das juntas (params.signal_mode >= 1): α dobra para a
+// esquerda da cadeia (+), β para a direita (−), igual em todos os resíduos
+// (0,3 ≈ a média do módulo das sensibilidades por aminoácido).
+const SIGNAL_UNIFORM_SENS: f32 = 0.3;
 // Energia gasta por passo por radiano de desvio mantido (todas as juntas).
 const BEND_COST: f32 = 0.0005;
 // Raio de amostragem dos sensores de comida e luz (unidades do mundo).
@@ -114,7 +118,9 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     }
     let pr = aa_props[aa];
     let lim = max(pr.max_bend, 1e-3);
-    return lim * tanh(SIGNAL_GAIN * (s.x * pr.sens_alpha * amp_a + s.y * pr.sens_beta * amp_b) / lim);
+    var sens = vec2<f32>(pr.sens_alpha, pr.sens_beta);
+    if (params.signal_mode >= 0.5) { sens = vec2<f32>(SIGNAL_UNIFORM_SENS, -SIGNAL_UNIFORM_SENS); }
+    return lim * tanh(SIGNAL_GAIN * (s.x * sens.x * amp_a + s.y * sens.y * amp_b) / lim);
 }
 
 // GRELHA DOS CORPOS: resíduos de agentes por célula (BODY_DIV × BODY_DIV
@@ -433,7 +439,14 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         let here = signals[base + k];
         let next = select(vec2<f32>(0.0), signals[base + k + 1u], k + 1u < n);
         let pr = aa_props[body_get(slot, k)];
-        let c = vec4<f32>(pr.cond_alpha_n, pr.cond_alpha_c, pr.cond_beta_n, pr.cond_beta_c);
+        var c = vec4<f32>(pr.cond_alpha_n, pr.cond_alpha_c, pr.cond_beta_n, pr.cond_beta_c);
+        // Modos uniformes: difusão isotrópica (metade de cada vizinho) ou
+        // condução direcional (só do lado N).
+        if (params.signal_mode >= 1.5) {
+            c = vec4<f32>(1.0, 0.0, 1.0, 0.0);
+        } else if (params.signal_mode >= 0.5) {
+            c = vec4<f32>(0.5);
+        }
         let incoming = vec2<f32>(c.x * prev.x + c.y * next.x, c.z * prev.y + c.w * next.y);
         let s = SIGNAL_DECAY * incoming + emit[k];
         signals[base + k] = clamp(s, vec2<f32>(-SIGNAL_MAX), vec2<f32>(SIGNAL_MAX));
