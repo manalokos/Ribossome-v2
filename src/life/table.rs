@@ -50,6 +50,15 @@ pub struct AminoRow {
     pub cond_delta_n: f32,
     #[serde(rename = "cond_delta_C", default = "half")]
     pub cond_delta_c: f32,
+    /// Emissão por contacto: canal (0 α, 1 β, 2 γ, 3 δ; −1 = não emite), a
+    /// classe de parceiro que procura e a classe deste aminoácido (0 =
+    /// nenhuma; 1 ácidos, 2 tiol, 3 aromáticos).
+    #[serde(default = "minus_one")]
+    pub contacto_canal: f32,
+    #[serde(default)]
+    pub contacto_quer: f32,
+    #[serde(default)]
+    pub contacto_classe: f32,
     #[serde(rename = "substrato_A")]
     pub substrato_a: f32,
     #[serde(rename = "substrato_U")]
@@ -110,6 +119,10 @@ fn one() -> f32 {
 
 fn half() -> f32 {
     0.5
+}
+
+fn minus_one() -> f32 {
+    -1.0
 }
 
 pub const ORGANS_PATH: &str = "assets/orgaos.json";
@@ -293,9 +306,9 @@ pub fn to_gpu(rows: &[AminoRow]) -> Vec<AaProps> {
             cond_gamma_c: r.cond_gama_c,
             cond_delta_n: r.cond_delta_n,
             cond_delta_c: r.cond_delta_c,
-            _pad2: 0,
-            _pad3: 0,
-            _pad4: 0,
+            contact_channel: r.contacto_canal,
+            contact_want: r.contacto_quer,
+            contact_class: r.contacto_classe,
         })
         .collect()
 }

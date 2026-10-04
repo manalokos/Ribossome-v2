@@ -10,6 +10,13 @@
 // (uma dobra sozinha é recíproca e não desloca nada).
 
 const SIGNAL_DECAY: f32 = 0.95;
+// EMISSÃO POR CONTACTO (osciladores sem relógio): um resíduo emissor que
+// toca (a menos de CONTACT_EMIT_RADIUS) num resíduo NÃO vizinho na cadeia
+// (|i − k| >= 3) da classe que procura emite CONTACT_EMIT no seu canal. Um
+// corpo enrolado pode fazer o ciclo toca -> emite -> o sinal abre a dobra ->
+// deixa de tocar -> relaxa -> toca outra vez: o ritmo vem da forma. Grátis.
+const CONTACT_EMIT_RADIUS: f32 = 10.0;
+const CONTACT_EMIT: f32 = 1.0;
 // Dinâmica do v3 (modo 0 dos sinais).
 const V3_SIGNAL_DECAY: f32 = 0.997;
 const V3_SIGNAL_UPDATE: f32 = 0.75;
@@ -358,6 +365,20 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         bend += abs(signal_deflection(slot, k));
         emit[k] = vec4<f32>(0.0);
         gate[k] = vec4<f32>(1.0);
+        // Emissão por contacto (qualquer resíduo, com ou sem órgão).
+        let cpr = aa_props[body_get(slot, k)];
+        if (cpr.contact_channel >= 0.0) {
+            let pk = body_pos[base + k];
+            for (var j = 0u; j < n; j++) {
+                if (j + 2u >= k && j <= k + 2u) { continue; }
+                if (aa_props[body_get(slot, j)].contact_class != cpr.contact_want) { continue; }
+                let dj = body_pos[base + j] - pk;
+                if (dot(dj, dj) < CONTACT_EMIT_RADIUS * CONTACT_EMIT_RADIUS) {
+                    emit[k][u32(clamp(cpr.contact_channel, 0.0, 3.0))] += CONTACT_EMIT;
+                    break;
+                }
+            }
+        }
         let o = organ_get(slot, k);
         let t = organ_type(o);
         if (t == 0xFFu) { continue; }

@@ -646,9 +646,14 @@ gpu_struct! {
         pub cond_gamma_c: f32,
         pub cond_delta_n: f32,
         pub cond_delta_c: f32,
-        pub _pad2: u32,
-        pub _pad3: u32,
-        pub _pad4: u32,
+        /// EMISSÃO POR CONTACTO: canal em que este aminoácido emite quando
+        /// toca num resíduo não vizinho da classe que procura (0 α .. 3 δ;
+        /// negativo = não emite).
+        pub contact_channel: f32,
+        /// Classe de parceiro que o faz emitir (ver contact_class).
+        pub contact_want: f32,
+        /// Classe deste aminoácido como parceiro de contacto (0 = nenhuma).
+        pub contact_class: f32,
     }
 }
 
