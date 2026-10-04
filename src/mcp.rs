@@ -105,6 +105,13 @@ fn tools() -> Value {
             }), &[]),
         },
         {
+            "name": "species",
+            "description": "Quantas espécies há: agrupa os genomas dos agentes vivos por semelhança (distância de edição, contando as duas fitas como a mesma espécie) e descreve os grupos maiores: agentes, genomas distintos, bases, e os resíduos e órgãos de cada fita.",
+            "inputSchema": obj(json!({
+                "threshold": { "type": "number", "description": "diferença máxima em relação ao genoma mais comum do grupo, em fração do comprimento (por omissão 0.15)" }
+            }), &[]),
+        },
+        {
             "name": "screenshot",
             "description": "Imagem PNG de uma vista do mundo. Vistas: 0 normal, 1-4 ativados por canal, 5 gastos, 6 terreno, 7 temperatura, 8 UV/luz, 9 fluido, 10 redutor. Por omissão o mundo inteiro; 'camera': true usa o enquadramento que o Filipe está a ver.",
             "inputSchema": obj(json!({
@@ -241,6 +248,42 @@ impl Mcp {
 }
 
 /// Resumo do habitat por blocos (o que examples/probe_habitat.rs imprime).
+/// Espécies (grupos de genomas parecidos; ver `crate::species`).
+pub fn species(gpu: &crate::gpu::Gpu, w: &crate::world::World, threshold: f32) -> Value {
+    use crate::species::{cluster, living_genomes, organ_symbols, reverse_complement};
+    let genomes = living_genomes(gpu, w);
+    let total = genomes.len().max(1) as f32;
+    let code = crate::life::table::code_to_gpu(&w.organ_code);
+    let rs = w.params.require_start != 0;
+    let groups = cluster(&genomes, threshold);
+    let pct = |n: u32| (1000.0 * n as f32 / total).round() as f64 / 10.0;
+    let list: Vec<Value> = groups
+        .iter()
+        .take(12)
+        .map(|s| {
+            let (n1, o1) = organ_symbols(&s.leader, rs, &code);
+            let (n2, o2) = organ_symbols(&reverse_complement(&s.leader), rs, &code);
+            json!({
+                "agentes": s.count,
+                "pct": pct(s.count),
+                "genomas_distintos": s.distinct,
+                "bases": s.leader.len(),
+                "fita_A": { "pct_do_grupo": (100.0 * s.same_strand as f32 / s.count as f32).round(), "residuos": n1, "orgaos": o1 },
+                "fita_B": { "residuos": n2, "orgaos": o2 },
+            })
+        })
+        .collect();
+    json!({
+        "epoch": w.params.epoch,
+        "vivos": genomes.len(),
+        "limiar": threshold,
+        "grupos": groups.len(),
+        "grupos_com_1pct": groups.iter().filter(|s| s.count as f32 >= 0.01 * total).count(),
+        "maiores": list,
+        "nota": "fita A = a do genoma mais comum do grupo; fita B = o complemento reverso (os filhos). Símbolos dos órgãos como no inspetor.",
+    })
+}
+
 pub fn habitat(gpu: &crate::gpu::Gpu, w: &crate::world::World, block: usize) -> Value {
     let cfg = w.cfg;
     let g = cfg.grid_size as usize;

@@ -8,6 +8,7 @@ pub mod mcp;
 pub mod params;
 pub mod render;
 pub mod runlog;
+pub mod species;
 pub mod shaders;
 pub mod stats;
 pub mod ui;
