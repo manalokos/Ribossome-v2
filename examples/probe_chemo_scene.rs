@@ -44,7 +44,7 @@ fn main() {
             alive += 1;
             let chemo = (0..a.body_len as usize).any(|k| {
                 let o = (organs[slot * 32 + k / 2] >> ((k % 2) * 16)) & 0xFFFF;
-                o != 0 && (o & 0xF) - 1 == 14
+                o != 0 && (o & 0x1F) - 1 == 14
             });
             if chemo {
                 nc += 1;

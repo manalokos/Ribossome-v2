@@ -27,7 +27,7 @@ pub struct InspectData {
     pub agent: Agent,
     pub genome: Vec<u8>,
     pub body: Vec<u8>,
-    /// Código de órgão por resíduo (0 = nenhum; (tipo + 1) | (parâmetro << 4) | (intensidade << 8)).
+    /// Código de órgão por resíduo (0 = nenhum; (tipo + 1) | (parâmetro << 5) | (intensidade << 8)).
     pub organs: Vec<u16>,
 }
 
@@ -232,9 +232,9 @@ pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life
             let storage: f32 = d
                 .organs
                 .iter()
-                .filter(|&&o| o != 0 && (o & 0xF) as usize - 1 == 7)
+                .filter(|&&o| o != 0 && (o & 0x1F) as usize - 1 == 7)
                 .map(|&o| {
-                    let p = (((o >> 4) & 0xF) as usize).min(5);
+                    let p = (((o >> 5) & 0x7) as usize).min(5);
                     let cap = organ_table.get(7).and_then(|r| r.variantes.get(p)).and_then(|m| m.get("capacidade")).copied();
                     cap.unwrap_or(0.0) * crate::life::organs::organ_gain((o >> 8) as u8)
                 })
@@ -256,7 +256,7 @@ pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life
                 ui,
                 d.body.iter().zip(&d.organs).map(|(&aa, &o)| {
                     if o != 0 {
-                        (ORGAN_SYMBOLS[((o & 0xF) - 1) as usize], egui::Color32::WHITE)
+                        (ORGAN_SYMBOLS[((o & 0x1F) - 1) as usize], egui::Color32::WHITE)
                     } else {
                         (AA_LETTERS[aa as usize], aa_color(aa))
                     }
@@ -268,11 +268,11 @@ pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life
                 .enumerate()
                 .filter(|(_, o)| **o != 0)
                 .map(|(k, &o)| {
-                    let t = ((o & 0xF) - 1) as u8;
+                    let t = ((o & 0x1F) - 1) as u8;
                     format!(
                         "{}  posição {k}: {}",
                         ORGAN_SYMBOLS[t as usize],
-                        describe(t, ((o >> 4) & 0xF) as u8, (o >> 8) as u8, organ_table)
+                        describe(t, ((o >> 5) & 0x7) as u8, (o >> 8) as u8, organ_table)
                     )
                 })
                 .collect();

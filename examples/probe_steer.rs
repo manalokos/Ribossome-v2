@@ -215,8 +215,8 @@ fn main() {
                     let mut gi = 0;
                     for r in 0..a.body_len as usize {
                         let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
-                        if o != 0 && (o & 0xF) - 1 == 8 {
-                            gi = 1 + ((o >> 4) & 0xF) as usize;
+                        if o != 0 && (o & 0x1F) - 1 == 8 {
+                            gi = 1 + ((o >> 5) & 0x7) as usize;
                         }
                     }
                     group.insert(a.id, gi.min(2));

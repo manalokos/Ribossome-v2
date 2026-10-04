@@ -168,20 +168,20 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         col = class_color(aa);
         let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
         if (oc != 0u) {
-            organ = (oc & 0xFu) - 1u;
+            organ = (oc & 0x1Fu) - 1u;
             r_world *= ORGAN_SCALE;
             if (organ == ORGAN_BIAS) {
-                let p = min((oc >> 4u) & 0xFu, ORGAN_VARIANTS - 1u);
+                let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
                 let beta = organ_variants_view[ORGAN_BIAS * ORGAN_VARIANTS + p].p0 >= 0.5;
                 col = select(vec3<f32>(1.0, 0.55, 0.15), vec3<f32>(0.35, 0.95, 0.35), beta);
             }
             if (organ == ORGAN_ANCHOR) {
-                let p = min((oc >> 4u) & 0xFu, ORGAN_VARIANTS - 1u);
+                let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
                 let plus = organ_variants_view[ORGAN_ANCHOR * ORGAN_VARIANTS + p].p0 >= 0.0;
                 col = select(vec3<f32>(0.25, 0.5, 1.0), vec3<f32>(1.0, 0.3, 0.25), plus);
             }
             if (organ == ORGAN_CLOCK) {
-                let p = min((oc >> 4u) & 0xFu, ORGAN_VARIANTS - 1u);
+                let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
                 // Período da variante (o ponteiro ignora a modulação por α/β).
                 let period = max(organ_variants_view[ORGAN_CLOCK * ORGAN_VARIANTS + p].p1, 2.0);
                 phase = 6.2831853 * f32(a.age) / period;
@@ -335,7 +335,7 @@ fn kin_vertex(vi: u32, slot: u32, a: Agent) -> AgentVsOut {
         var has = false;
         for (var k = 0u; k < min(a.body_len, MAX_BODY_V); k++) {
             let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
-            if (oc != 0u && (oc & 0xFu) == view.mark_organ) {
+            if (oc != 0u && (oc & 0x1Fu) == view.mark_organ) {
                 has = true;
                 break;
             }

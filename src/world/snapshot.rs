@@ -17,7 +17,8 @@ use serde_json::{Value, json};
 use super::*;
 
 const MAGIC: &[u8; 8] = b"RIBOSCN1";
-const VERSION: u32 = 1;
+/// 2: código dos órgãos com o tipo em 5 bits (as de versão 1 são convertidas).
+const VERSION: u32 = 2;
 /// Resíduos por slot nos buffers por resíduo.
 const MAX_BODY: u64 = crate::life::amino::MAX_BODY as u64;
 /// Palavras por agente nos buffers por slot.
@@ -482,7 +483,16 @@ impl World {
                 q.submit([enc.finish()]);
                 continue;
             }
-            let data = scene.block(b.name)?;
+            let mut data = std::borrow::Cow::Borrowed(scene.block(b.name)?);
+            if b.name == "organs" && h["versao"].as_u64().unwrap_or(1) < 2 {
+                // Código antigo: (tipo + 1) | (variante << 4) | (intensidade << 8).
+                let conv: Vec<u16> = bytemuck::pod_collect_to_vec::<u8, u16>(&data)
+                    .into_iter()
+                    .map(|c| if c == 0 { 0 } else { (c & 0xF) | (((c >> 4) & 0x7) << 5) | (c & 0xFF00) })
+                    .collect();
+                data = std::borrow::Cow::Owned(bytemuck::cast_slice(&conv).to_vec());
+            }
+            let data: &[u8] = &data;
             let (segs, words) = segments(&b, &slots, &body_len, false);
             if data.len() as u64 != words * 4 {
                 return Err(format!("bloco {} com tamanho errado", b.name));

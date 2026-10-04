@@ -29,7 +29,7 @@
 @group(3) @binding(14) var<storage, read_write> joint_state: array<u32>;
 // Deformação ATIVA de cada junta (a que vem do ciclo catalítico, propagada).
 @group(3) @binding(15) var<storage, read_write> joint_active: array<f32>;
-// Órgãos: 16 bits por resíduo (0 = nenhum; (tipo + 1) | (parâmetro << 4) |
+// Órgãos: 16 bits por resíduo (0 = nenhum; (tipo + 1) | (parâmetro << 5) |
 // (intensidade << 8)), 32 u32 por slot.
 @group(3) @binding(16) var<storage, read_write> organs: array<u32>;
 // Sinais internos (α, β) por resíduo.
@@ -56,7 +56,7 @@
 @group(3) @binding(25) var<storage, read_write> bond_accept: array<atomic<u32>>;
 @group(3) @binding(26) var<storage, read_write> bond_disp: array<vec4<f32>>;
 // Código dos órgãos (assets/codigo_orgaos.json): promotor·20 + modificador
-// (aminoácidos) -> 0 = sem órgão, senão (tipo + 1) | (variante << 4).
+// (aminoácidos) -> 0 = sem órgão, senão (tipo + 1) | (variante << 5).
 @group(3) @binding(27) var<storage, read> organ_code: array<u32, 400>;
 // OBSERVAÇÃO (observe.wgsl): k-meros do genoma escolhido, semelhança de cada
 // agente com ele, e as estatísticas da população.

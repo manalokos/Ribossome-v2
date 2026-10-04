@@ -66,16 +66,16 @@ fn main() {
     let organs: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.organs_buf)).to_vec();
     let mut group: HashMap<u32, usize> = HashMap::new();
     for (slot, a) in w.read_agents_blocking(&gpu).iter().enumerate().filter(|(_, a)| a.alive != 0) {
-        let mut has = [false; 16];
+        let mut has = [false; 32];
         // Sentido previsto do primeiro sensor de comida direcional (alvo 0).
         let mut predicted = 0.0f32;
         for r in 0..a.body_len as usize {
             let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
             if o != 0 {
-                let t = ((o & 0xF) - 1) as usize;
+                let t = ((o & 0x1F) - 1) as usize;
                 has[t] = true;
                 if t == 8 && predicted == 0.0 {
-                    let v = &food_dir_row.variantes[((o >> 4) & 0xF) as usize];
+                    let v = &food_dir_row.variantes[((o >> 5) & 0x7) as usize];
                     let get = |k: &str| v.get(k).copied().unwrap_or(0.0);
                     if get("alvo") < 0.5 {
                         predicted = get("ganho").signum() * if get("canal") < 0.5 { 1.0 } else { -1.0 };
@@ -89,8 +89,8 @@ fn main() {
             gi = 0;
             for r in 0..a.body_len as usize {
                 let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
-                if o != 0 && (o & 0xF) - 1 == 9 {
-                    gi = if (o >> 4) & 0xF == 1 { 1 } else { 2.max(gi) };
+                if o != 0 && (o & 0x1F) - 1 == 9 {
+                    gi = if (o >> 5) & 0x7 == 1 { 1 } else { 2.max(gi) };
                     if gi == 1 {
                         break;
                     }

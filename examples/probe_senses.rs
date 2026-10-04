@@ -49,11 +49,11 @@ fn main() {
     }
     let mut st: HashMap<u32, S> = HashMap::new();
     for (slot, a) in w.read_agents_blocking(&gpu).iter().enumerate().filter(|(_, a)| a.alive != 0) {
-        let mut has = [false; 16];
+        let mut has = [false; 32];
         for r in 0..a.body_len as usize {
             let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
             if o != 0 {
-                has[((o & 0xF) - 1) as usize] = true;
+                has[((o & 0x1F) - 1) as usize] = true;
             }
         }
         if !has[MOUTH as usize] {

@@ -651,7 +651,14 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let L = a.gene_len;
     let cell = chem_open_cell(world_to_cell(vec2<f32>(a.pos_x, a.pos_y)));
-    let m = clamp(params.mutation_rate, 0.0, 1.0);
+    // REVISÃO: os órgãos de revisão do pai (enzimas que corrigem a cópia)
+    // dividem a taxa de mutação por 1 + a soma das suas proteções.
+    var protect = 0.0;
+    for (var k = 0u; k < a.body_len; k++) {
+        let op = organ_get(slot, k);
+        if (organ_type(op) == ORGAN_PROOFREAD) { protect += max(organ_var(op).p0, 0.0) * organ_gain(op); }
+    }
+    let m = clamp(params.mutation_rate / (1.0 + protect), 0.0, 1.0);
     var g = array<u32, 16>(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
     for (var i = 0u; i < L; i++) {
         gset(&g, i, genome_get(slot, L - 1u - i) ^ 1u);

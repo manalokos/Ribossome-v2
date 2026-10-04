@@ -47,8 +47,8 @@ fn main() {
                 for kk in 0..a.body_len as usize {
                     let o = (organs[s * 32 + kk / 2] >> ((kk % 2) * 16)) & 0xFFFF;
                     if o == 0 { continue; }
-                    let ty = (o & 0xF) as usize - 1;
-                    let p = (o >> 4) & 0xF;
+                    let ty = (o & 0x1F) as usize - 1;
+                    let p = (o >> 5) & 0x7;
                     assert!(ty < ORGAN_TYPES);
                     match ty {
                         10 => {

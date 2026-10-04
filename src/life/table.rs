@@ -367,14 +367,14 @@ pub fn save_code(code: &OrganCode) -> Result<(), String> {
 }
 
 /// Para a GPU: 20 × 20 (promotor·20 + modificador, índices de AA_LETTERS);
-/// 0 = sem órgão, senão (tipo + 1) | (variante << 4).
+/// 0 = sem órgão, senão (tipo + 1) | (variante << 5).
 pub fn code_to_gpu(code: &OrganCode) -> Vec<u32> {
     let idx = |l: &str| AA_LETTERS.iter().position(|c| c.to_string() == l);
     let mut out = vec![0u32; 400];
     for (p, row) in code {
         for (m, [t, v]) in row {
             if let (Some(pi), Some(mi)) = (idx(p), idx(m)) {
-                out[pi * 20 + mi] = (t + 1) | (v << 4);
+                out[pi * 20 + mi] = (t + 1) | (v << 5);
             }
         }
     }

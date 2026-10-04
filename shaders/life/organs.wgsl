@@ -1,6 +1,7 @@
 // ÓRGÃOS E SINAIS INTERNOS (ver src/life/organs.rs).
 //
-// organ byte por resíduo: 0 = nenhum; senão (tipo + 1) | (parâmetro << 4).
+// código por resíduo: 0 = nenhum; senão (tipo + 1) | (parâmetro << 5) |
+// (intensidade << 8).
 // Sinais: dois canais (α, β) por resíduo, CONDUZIDOS entre vizinhos, um
 // salto por passo: cada resíduo recebe o sinal dos vizinhos N e C pesado
 // pela condutividade do seu aminoácido (AA_CONDUCTANCE, v3), com perda
@@ -62,11 +63,11 @@ fn organ_gain(o: u32) -> f32 {
 
 // Tipo do órgão (0..7) ou 0xFF se não houver.
 fn organ_type(o: u32) -> u32 {
-    return select(0xFFu, (o & 0xFu) - 1u, o != 0u);
+    return select(0xFFu, (o & 0x1Fu) - 1u, o != 0u);
 }
 
 fn organ_param(o: u32) -> u32 {
-    return (o >> 4u) & 0xFu;
+    return (o >> 5u) & 0x7u;
 }
 
 // Propriedades da variante do órgão (assets/orgaos.json; ordem em

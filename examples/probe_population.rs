@@ -58,7 +58,7 @@ fn main() {
             .filter(|(s, a)| {
                 (0..a.body_len as usize).any(|k| {
                     let o = (organs[s * 32 + k / 2] >> ((k % 2) * 16)) & 0xFF;
-                    o != 0 && (o & 0xF) - 1 == 5
+                    o != 0 && (o & 0x1F) - 1 == 5
                 })
             })
             .count();
@@ -67,7 +67,7 @@ fn main() {
             .filter(|(s, a)| {
                 (0..a.body_len as usize).any(|k| {
                     let o = (organs[s * 32 + k / 2] >> ((k % 2) * 16)) & 0xFF;
-                    o != 0 && matches!((o & 0xF) - 1, 2..=4)
+                    o != 0 && matches!((o & 0x1F) - 1, 2..=4)
                 })
             })
             .count();

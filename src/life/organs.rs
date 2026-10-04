@@ -33,7 +33,7 @@
 
 use super::amino::{STOP, codon};
 
-pub const ORGAN_TYPES: usize = 15;
+pub const ORGAN_TYPES: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -52,6 +52,7 @@ pub enum Organ {
     Anchor = 12,
     Bias = 13,
     Chemosynthesis = 14,
+    Proofreading = 15,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -72,10 +73,11 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "âncora",
     "bias",
     "quimiossíntese",
+    "revisão (menos mutações)",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -151,6 +153,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("reciclar", "0..1: fração do redutor usada para reativar gastos (o resto dá energia)"),
         pd("eficiencia", "multiplica o que consome"),
     ],
+    &[pd("protecao", "divide a taxa de mutação das cópias deste agente por 1 + a soma das proteções (× intensidade)")],
 ];
 
 fn fmt_canal(v: f32) -> &'static str {
@@ -229,6 +232,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
                 _ => format!("relé limiar [losango]: emite em {cout} a parte de {cin} acima de {:.2} (×{mag:.2})", v("limiar")),
             }
         }
+        15 => format!("revisão [escudo]: taxa de mutação das cópias ÷ (1 + {:.1})", v("protecao") * g),
         7 => format!("armazenamento [disco com anéis]: +{:.1} de capacidade de energia", v("capacidade") * g),
         8 => format!("{} · sente {}", sensor("sensor de comida DIRECIONAL (esquerda − direita)", "2 antenas verdes"), alvo()),
         9 => format!("{} · sente {}", sensor("sensor físico DIRECIONAL (esquerda − direita)", "2 antenas amarelas"), alvo_fisico()),
@@ -289,9 +293,10 @@ pub struct Residue {
 }
 
 /// Código de órgão guardado na GPU (16 bits): 0 = nenhum; senão
-/// (tipo + 1) | (parâmetro << 4) | (intensidade << 8).
+/// (tipo + 1) | (parâmetro << 5) | (intensidade << 8): tipo em 5 bits (até
+/// 31 tipos), variante em 3.
 pub fn organ_code(r: &Residue) -> u16 {
-    r.organ.map_or(0, |(t, p, g)| (t as u16 + 1) | ((p as u16) << 4) | ((g as u16) << 8))
+    r.organ.map_or(0, |(t, p, g)| (t as u16 + 1) | ((p as u16) << 5) | ((g as u16) << 8))
 }
 
 /// Tradução com órgãos (espelho exato do shader): a partir do primeiro AUG
@@ -322,7 +327,7 @@ pub fn translate_organs(genome: &[u8], require_start: bool, code: &[u32]) -> Vec
                     } else {
                         (GAIN_DEFAULT, 6)
                     };
-                body.push(Residue { aa, organ: Some(((c & 0xF) as u8 - 1, (c >> 4) as u8, gain)) });
+                body.push(Residue { aa, organ: Some(((c & 0x1F) as u8 - 1, (c >> 5) as u8, gain)) });
                 i += used;
                 continue;
             }
@@ -352,6 +357,7 @@ pub fn wgsl() -> String {
         "ANCHOR",
         "BIAS",
         "CHEMO",
+        "PROOFREAD",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");

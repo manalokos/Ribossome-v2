@@ -294,11 +294,11 @@ pub fn habitat(gpu: &crate::gpu::Gpu, w: &crate::world::World, block: usize) -> 
         let (cx, cy) = (((a.pos_x / wpc) as usize).min(g - 1), ((a.pos_y / wpc) as usize).min(g - 1));
         let k = &mut blk[(cy / b) * nb + cx / b];
         k.agents += 1;
-        let mut has = [false; 16];
+        let mut has = [false; 32];
         for r in 0..a.body_len as usize {
             let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
             if o != 0 {
-                has[((o & 0xF) - 1) as usize] = true;
+                has[((o & 0x1F) - 1) as usize] = true;
             }
         }
         k.photo += has[10] as u32;
