@@ -203,3 +203,47 @@ fn activate_spent_conserves_matter() {
     assert_eq!(act_gain, n, "os ativados ganhos são os que a função diz");
     assert!((n as f64 - spent_before as f64 * 0.5).abs() < spent_before as f64 * 0.02, "~metade dos gastos: {n} de {spent_before}");
 }
+
+/// Trocar o terreno do mundo vivo e pintar rocha não criam nem destroem
+/// monómeros: os que deixam de caber saem para o lado.
+#[test]
+fn live_terrain_and_painting_conserve_matter() {
+    let gpu = Gpu::new_headless().expect("este teste precisa de uma GPU");
+    let cfg = WorldConfig::TEST;
+    let mut world = World::new(&gpu, cfg, 21);
+    let before = world.seed_matter(&gpu, 21);
+    let n = cfg.grid_size as usize;
+
+    // Terreno novo: um bloco de rocha a meio e uma faixa de entulho.
+    let mut gamma = vec![0u32; n * n];
+    for y in 0..n {
+        for x in 0..n {
+            if (n / 4..n / 2).contains(&x) && (n / 4..n / 2).contains(&y) {
+                gamma[y * n + x] = 6;
+            } else if y < n / 8 {
+                gamma[y * n + x] = 2;
+            }
+        }
+    }
+    world.apply_terrain_live(&gpu, gamma.clone(), vec![0.0; n * n], None);
+    let cells = world.read_cells_blocking(&gpu);
+    let after = Ledger::from_cells(&cells);
+    assert_eq!(channels(&after), channels(&before), "trocar o terreno mudou a matéria por canal");
+    assert_eq!(after.total(), before.total());
+    // Nada ficou dentro da rocha nova.
+    let in_rock: u64 = (0..n * n)
+        .filter(|&i| gamma[i] >= 3)
+        .map(|i| (0..4).map(|c| ((cells[i * 4 + c] & 0xFFFF) + (cells[i * 4 + c] >> 16)) as u64).sum::<u64>())
+        .sum();
+    assert_eq!(in_rock, 0, "ficaram monómeros dentro da rocha carregada");
+
+    // Pintar um disco de rocha noutro sítio e correr uns passos.
+    let mut enc = gpu.device.create_command_encoder(&Default::default());
+    world.encode_paint(&gpu.queue, &mut enc, n as f32 * 0.75, n as f32 * 0.75, 10.0, 6);
+    gpu.queue.submit([enc.finish()]);
+    let g2 = world.read_gamma_blocking(&gpu);
+    assert_eq!(g2[(n * 3 / 4) * n + n * 3 / 4], 6, "o pincel não pôs rocha");
+    run(&gpu, &mut world, 64);
+    let painted = Ledger::from_cells(&world.read_cells_blocking(&gpu));
+    assert_eq!(channels(&painted), channels(&before), "pintar rocha mudou a matéria por canal");
+}

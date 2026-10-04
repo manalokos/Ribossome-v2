@@ -157,6 +157,7 @@ struct Pipelines {
     relax_a: wgpu::ComputePipeline,
     relax_b: wgpu::ComputePipeline,
     grain_fall: wgpu::ComputePipeline,
+    paint_terrain: wgpu::ComputePipeline,
     spawn: wgpu::ComputePipeline,
     agents_step: wgpu::ComputePipeline,
     agents_ledger: wgpu::ComputePipeline,
@@ -382,7 +383,8 @@ impl World {
 
         let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("sim params"),
-            size: PARAMS_STRIDE * MAX_STEPS_PER_FRAME as u64,
+            // + 1: o último lugar é o do passe de pintura (encode_paint).
+            size: PARAMS_STRIDE * (MAX_STEPS_PER_FRAME as u64 + 1),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -754,6 +756,7 @@ impl World {
             relax_a: compute("relax_gamma_a"),
             relax_b: compute("relax_gamma_b"),
             grain_fall: compute("grain_fall"),
+            paint_terrain: compute("paint_terrain"),
             spawn: compute("spawn_seeds"),
             agents_step: compute("agents_step"),
             agents_ledger: compute("agents_ledger"),
@@ -1028,6 +1031,104 @@ impl World {
         self.custom_terrain = Some((g, h));
         self.custom_chem = c;
         Ok(hot)
+    }
+
+    /// PINCEL: põe `grains` grãos (0 = água, 1–2 = entulho, >= 3 = rocha) no
+    /// disco de centro (cx, cy) e raio `radius`, em células. Corre já (mesmo
+    /// em pausa) e conserva os monómeros (saem para as células vizinhas).
+    pub fn encode_paint(&mut self, queue: &wgpu::Queue, enc: &mut wgpu::CommandEncoder, cx: f32, cy: f32, radius: f32, grains: u32) {
+        let p = SimParams {
+            paint_x: cx,
+            paint_y: cy,
+            paint_radius: radius,
+            paint_grains: grains.min(6) as f32,
+            max_agents: self.cfg.max_agents,
+            ..self.params
+        };
+        let offset = PARAMS_STRIDE * MAX_STEPS_PER_FRAME as u64;
+        queue.write_buffer(&self.params_buf, offset, bytemuck::bytes_of(&p));
+        let g = groups(self.cfg.grid_size, 16);
+        let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("paint"), timestamp_writes: None });
+        pass.set_bind_group(0, &self.frame_bg, &[offset as u32]);
+        pass.set_bind_group(1, &self.world_bg, &[]);
+        pass.set_bind_group(2, &self.fluid_ab, &[]);
+        pass.set_bind_group(3, &self.life_bg, &[]);
+        pass.set_pipeline(&self.pipelines.paint_terrain);
+        pass.dispatch_workgroups(g, g, 1);
+        drop(pass);
+        self.light_dirty = true;
+    }
+
+    /// PINCEL das fumarolas: põe calor e/ou química (0..1, fração de uma
+    /// fumarola no centro) no disco, em células. None = não mexe nesse canal.
+    pub fn paint_source(&mut self, cx: f32, cy: f32, radius: f32, heat: Option<f32>, chem: Option<f32>) {
+        let n = self.cfg.grid_size as usize;
+        let cells = n * n;
+        // A química pintada passa a ser própria (deixa de seguir o calor).
+        if chem.is_some() && self.chem_image.is_none() {
+            self.chem_image = Some(self.heat_image.clone().unwrap_or_else(|| vec![0.0; cells]));
+        }
+        if heat.is_some() && self.heat_image.is_none() {
+            // A química que seguia o calor continua onde estava.
+            if self.chem_image.is_none() {
+                self.chem_image = Some(vec![0.0; cells]);
+            }
+            self.heat_image = Some(vec![0.0; cells]);
+        }
+        let r2 = radius * radius;
+        let (x0, x1) = (((cx - radius).floor().max(0.0)) as usize, ((cx + radius).ceil().min(n as f32 - 1.0)) as usize);
+        let (y0, y1) = (((cy - radius).floor().max(0.0)) as usize, ((cy + radius).ceil().min(n as f32 - 1.0)) as usize);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                if dx * dx + dy * dy > r2 {
+                    continue;
+                }
+                if let (Some(v), Some(img)) = (heat, self.heat_image.as_mut()) {
+                    img[y * n + x] = v.clamp(0.0, 1.0);
+                }
+                if let (Some(v), Some(img)) = (chem, self.chem_image.as_mut()) {
+                    img[y * n + x] = v.clamp(0.0, 1.0);
+                }
+            }
+        }
+        self.heat_key.clear();
+    }
+
+    /// Troca o terreno do mundo VIVO (sem semear de novo): os agentes e os
+    /// monómeros ficam. Os monómeros que deixam de caber (células que passam
+    /// a ter mais grãos) são passados, exatos, para as células seguintes com
+    /// espaço. As fumarolas passam a ser as da imagem.
+    pub fn apply_terrain_live(&mut self, gpu: &Gpu, gamma: Vec<u32>, heat: Vec<f32>, chem: Option<Vec<f32>>) {
+        let mut cells = self.read_cells_blocking(gpu);
+        refit_matter_to_terrain(&mut cells, &gamma);
+        gpu.queue.write_buffer(&self.gamma_buf, 0, bytemuck::cast_slice(&gamma));
+        gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
+        self.fumaroles.clear();
+        self.heat_image = Some(heat.clone());
+        self.chem_image = chem.clone();
+        self.custom_terrain = Some((gamma, heat));
+        self.custom_chem = chem;
+        self.heat_key.clear();
+        self.light_dirty = true;
+    }
+
+    /// Carrega um PNG de terreno para o mundo vivo (ver apply_terrain_live).
+    pub fn load_terrain_png_live(&mut self, gpu: &Gpu, path: &std::path::Path) -> Result<usize, String> {
+        let (g, h, c) = terrain::load_png(path, &self.cfg)?;
+        let hot = h.iter().filter(|&&v| v > 0.0).count();
+        self.apply_terrain_live(gpu, g, h, c);
+        Ok(hot)
+    }
+
+    /// Mundo vazio na próxima sementeira: só água, sem fumarolas (para pintar).
+    pub fn use_empty_terrain(&mut self) {
+        let n = self.cfg.cells() as usize;
+        self.custom_terrain = Some((vec![0; n], vec![0.0; n]));
+        self.custom_chem = None;
+        self.heat_image = None;
+        self.chem_image = None;
+        self.fumaroles.clear();
     }
 
     /// Volta ao terreno gerado (com a fumarola por omissão) na próxima sementeira.
@@ -1553,6 +1654,81 @@ const GAMMA_SOLID: u32 = 3;
 /// rocha fica vazia; o entulho (poroso) fica CHEIO até à capacidade
 /// (CHEM_CELL_CAP·(3 − grãos)/3), seja qual for a densidade da semente:
 /// partes iguais por canal, cada monómero ativado com probabilidade 1/2.
+/// Capacidade de monómeros de uma célula com `g` grãos (igual a chem_capacity no shader).
+fn cell_capacity(g: u32) -> u32 {
+    if g >= GAMMA_SOLID { 0 } else { CHEM_CELL_CAP * (GAMMA_SOLID - g) / GAMMA_SOLID }
+}
+
+/// Ajusta a matéria VIVA a um terreno novo sem criar nem destruir nada: o
+/// que excede a capacidade de uma célula segue para as células seguintes
+/// (ordem de varrimento, a dar a volta) com espaço. Cada monómero mantém o
+/// canal e o estado.
+#[allow(clippy::needless_range_loop)]
+fn refit_matter_to_terrain(cells: &mut [u32], gamma: &[u32]) {
+    let n = gamma.len();
+    // Excesso em trânsito: [canal][0 = ativado, 1 = gasto].
+    let mut carry = [[0u64; 2]; 4];
+    let mut pending = 0u64;
+    // Duas voltas: a segunda arruma o que sobrar do fim da primeira.
+    for pass in 0..2 {
+        for i in 0..n {
+            let cap = cell_capacity(gamma[i]);
+            let mut tot: u32 = (0..4).map(|c| (cells[i * 4 + c] & 0xFFFF) + (cells[i * 4 + c] >> 16)).sum();
+            if pass == 0 && tot > cap {
+                // Tira o excesso, canal a canal (gastos primeiro).
+                let mut over = tot - cap;
+                for c in 0..4 {
+                    let v = cells[i * 4 + c];
+                    let (mut act, mut spent) = (v & 0xFFFF, v >> 16);
+                    let ts = spent.min(over);
+                    spent -= ts;
+                    over -= ts;
+                    let ta = act.min(over);
+                    act -= ta;
+                    over -= ta;
+                    carry[c][1] += ts as u64;
+                    carry[c][0] += ta as u64;
+                    pending += (ts + ta) as u64;
+                    cells[i * 4 + c] = act | (spent << 16);
+                }
+                tot = cap;
+            }
+            if pending > 0 && tot < cap {
+                let mut room = cap - tot;
+                for c in 0..4 {
+                    for st in 0..2 {
+                        let k = (carry[c][st].min(room as u64)) as u32;
+                        if k == 0 {
+                            continue;
+                        }
+                        // Cada metade da palavra guarda até 0xFFFF.
+                        let v = cells[i * 4 + c];
+                        let cur = if st == 0 { v & 0xFFFF } else { v >> 16 };
+                        let k = k.min(0xFFFF - cur);
+                        cells[i * 4 + c] = if st == 0 { v + k } else { v + (k << 16) };
+                        carry[c][st] -= k as u64;
+                        pending -= k as u64;
+                        room -= k;
+                    }
+                }
+            }
+        }
+        if pending == 0 {
+            break;
+        }
+    }
+    // Sem espaço em lado nenhum (terreno quase todo rocha): o resto fica na
+    // primeira célula que não seja rocha, acima da capacidade (o transporte
+    // espalha-o depois). Nada se perde.
+    if pending > 0 {
+        let i = (0..n).find(|&i| gamma[i] < GAMMA_SOLID).unwrap_or(0);
+        for c in 0..4 {
+            let v = cells[i * 4 + c];
+            cells[i * 4 + c] = ((v & 0xFFFF) + carry[c][0] as u32) | (((v >> 16) + carry[c][1] as u32) << 16);
+        }
+    }
+}
+
 fn fit_matter_to_terrain(cells: &mut [u32], gamma: &[u32], seed: u64) {
     let mut rng = SplitMix(seed ^ 0x0E17_0B0D_E5EE_D5ED);
     for (i, &g) in gamma.iter().enumerate() {

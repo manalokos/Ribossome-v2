@@ -125,6 +125,14 @@ fn tools() -> Value {
             "inputSchema": obj(json!({ "fraction": { "type": "number", "description": "0..1" } }), &["fraction"]),
         },
         {
+            "name": "paint",
+            "description": "Pincel do terreno: pinta um disco no mundo vivo. x, y em fração do mundo (0..1; y = 1 é o topo); radius em células (o mundo tem 2048). material: 0 água (apaga terreno), 1 entulho fino, 2 entulho denso, 3 rocha, 4 fumarola calor, 5 fumarola química, 6 apagar fumarolas. strength (0..1) só para 4 e 5. A matéria conserva-se.",
+            "inputSchema": obj(json!({
+                "x": { "type": "number" }, "y": { "type": "number" }, "radius": { "type": "number" },
+                "material": { "type": "integer" }, "strength": { "type": "number" }
+            }), &["x", "y", "radius", "material"]),
+        },
+        {
             "name": "pause",
             "description": "Pausa (paused: true) ou continua (false) a simulação; opcionalmente muda os passos por frame.",
             "inputSchema": obj(json!({

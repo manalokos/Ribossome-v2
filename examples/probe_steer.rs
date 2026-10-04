@@ -43,6 +43,7 @@ fn bases(s: &str) -> Vec<u8> {
     s.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect()
 }
 
+#[allow(clippy::type_complexity)]
 fn main() {
     let envf = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
     let code: serde_json::Value = serde_json::from_str(&std::fs::read_to_string("assets/codigo_orgaos.json").unwrap()).unwrap();

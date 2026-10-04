@@ -297,6 +297,45 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
     }
 }
 
+// PINCEL: põe params.paint_grains grãos em cada célula do disco (centro e
+// raio em células). Ao acrescentar grãos, os monómeros que deixam de caber
+// saem para uma vizinha com espaço (a mesma regra de quando um grão cai:
+// o terreno nunca enterra monómeros; os que ficarem em rocha saem depois
+// pela infiltração do transporte). Tirar grãos só abre espaço.
+@compute @workgroup_size(16, 16)
+fn paint_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= GRID_SIZE || gid.y >= GRID_SIZE) { return; }
+    let d = vec2<f32>(f32(gid.x) + 0.5 - params.paint_x, f32(gid.y) + 0.5 - params.paint_y);
+    if (dot(d, d) > params.paint_radius * params.paint_radius) { return; }
+    let idx = gid.y * GRID_SIZE + gid.x;
+    let want = u32(clamp(params.paint_grains, 0.0, 6.0));
+    atomicStore(&gamma_grid[idx], want);
+    let cap = chem_capacity(idx);
+    var guard = 0u;
+    loop {
+        if (guard >= 64u) { break; }
+        guard += 1u;
+        if (chem_cell_total(idx) <= cap) { break; }
+        let to = evict_target(idx, idx);
+        if (to == idx) { break; }
+        var moved = false;
+        for (var c = 0u; c < 4u; c++) {
+            let slot = idx * 4u + c;
+            if (chem_take_state_one(slot, true)) {
+                chem_add_state(to, c, 1u, true);
+                moved = true;
+                break;
+            }
+            if (chem_take_state_one(slot, false)) {
+                chem_add_state(to, c, 1u, false);
+                moved = true;
+                break;
+            }
+        }
+        if (!moved) { break; }
+    }
+}
+
 // GRAVIDADE DOS GRÃOS (vertical, separada da coesão): uma thread por
 // coluna percorre-a de baixo para cima. Um grão solto (abaixo do limiar da
 // rocha) está APOIADO se tiver por baixo, sem buracos, grãos apoiados, rocha

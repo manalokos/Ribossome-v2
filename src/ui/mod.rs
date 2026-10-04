@@ -31,6 +31,12 @@ pub struct UiState {
     /// Terreno em imagem: caminho, ação pedida e resultado da última.
     pub terrain_path: String,
     pub terrain_action: Option<TerrainAction>,
+    /// Pincel do terreno: ligado, material (ver PAINT_MATERIALS), raio em
+    /// células e força das fumarolas (0..1).
+    pub paint_on: bool,
+    pub paint_material: usize,
+    pub paint_radius: f32,
+    pub paint_strength: f32,
     pub terrain_msg: String,
     /// Pedido para abrir o editor dos aminoácidos no browser.
     pub open_editor: bool,
@@ -91,13 +97,27 @@ const TABS: [(Tab, &str); 10] = [
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerrainAction {
-    /// Escolhe um PNG (janela), carrega-o e semeia de novo (mesma semente).
+    /// Escolhe um PNG (janela) e troca o terreno do mundo vivo (os agentes
+    /// e os monómeros ficam).
     Load,
+    /// Mundo vazio (só água, sem fumarolas), semeado de novo: para pintar.
+    Empty,
     /// Escolhe onde gravar (janela) e grava o terreno atual em PNG.
     Save,
     /// Volta ao terreno gerado e semeia de novo.
     Generated,
 }
+
+/// Materiais do pincel (o índice é `UiState::paint_material`).
+pub const PAINT_MATERIALS: [&str; 7] = [
+    "água (apaga terreno)",
+    "entulho fino (1 grão)",
+    "entulho denso (2 grãos)",
+    "rocha",
+    "fumarola: calor",
+    "fumarola: química (redutor)",
+    "apagar fumarolas",
+];
 
 #[derive(Default)]
 pub struct Stats {
@@ -150,6 +170,10 @@ impl UiState {
             history: crate::stats::History::default(),
             terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "assets/terreno.png".into()),
             terrain_action: None,
+            paint_on: false,
+            paint_material: 3,
+            paint_radius: 12.0,
+            paint_strength: 1.0,
             terrain_msg: String::new(),
             open_editor: false,
             tab: Tab::Vista,
@@ -467,7 +491,11 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         ui.text_edit_singleline(&mut st.terrain_path);
     });
     ui.horizontal(|ui| {
-        if ui.button("carregar…").on_hover_text("escolhe um PNG; o mundo é semeado de novo").clicked() {
+        if ui
+            .button("carregar…")
+            .on_hover_text("escolhe um PNG; o terreno muda no mundo que está a correr (os agentes e os monómeros ficam; o que deixar de caber sai para o lado). Para começar do zero com ele, semeia de novo")
+            .clicked()
+        {
             st.terrain_action = Some(TerrainAction::Load);
         }
         if ui.button("gravar…").on_hover_text("grava o terreno atual (e o calor) num PNG").clicked() {
@@ -476,7 +504,25 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         if ui.button("terreno gerado").clicked() {
             st.terrain_action = Some(TerrainAction::Generated);
         }
+        if ui.button("mundo vazio").on_hover_text("só água, sem fumarolas, semeado de novo: para pintar à mão").clicked() {
+            st.terrain_action = Some(TerrainAction::Empty);
+        }
     });
+    ui.separator();
+    ui.strong("Pincel");
+    ui.checkbox(&mut st.paint_on, "pintar com o botão esquerdo (o direito continua a arrastar a vista)");
+    egui::ComboBox::from_label("material")
+        .selected_text(PAINT_MATERIALS[st.paint_material.min(PAINT_MATERIALS.len() - 1)])
+        .show_ui(ui, |ui| {
+            for (i, name) in PAINT_MATERIALS.iter().enumerate() {
+                ui.selectable_value(&mut st.paint_material, i, *name);
+            }
+        });
+    ui.add(egui::Slider::new(&mut st.paint_radius, 1.0..=200.0).logarithmic(true).text("raio (células)"));
+    if st.paint_material == 4 || st.paint_material == 5 {
+        ui.add(egui::Slider::new(&mut st.paint_strength, 0.05..=1.0).text("força da fumarola"));
+    }
+    ui.small("pinta-se também em pausa; os monómeros saem para o lado quando se põe rocha (a matéria conserva-se)");
     if !st.terrain_msg.is_empty() {
         ui.label(&st.terrain_msg);
     }

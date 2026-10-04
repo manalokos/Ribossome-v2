@@ -17,6 +17,7 @@ use ribossome::gpu::Gpu;
 use ribossome::params::WorldConfig;
 use ribossome::world::{MAX_STEPS_PER_FRAME, Scene, World};
 
+#[allow(clippy::type_complexity)]
 fn main() {
     let envf = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
     let path = std::env::var("SCENE").unwrap_or_else(|_| "saves/autosave.ribo".into());

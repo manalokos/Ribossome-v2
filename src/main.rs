@@ -28,6 +28,8 @@ struct Running {
     ui: UiState,
     cursor: [f32; 2],
     dragging: bool,
+    /// Botão esquerdo premido com o pincel ligado.
+    painting: bool,
     /// Onde o botão esquerdo foi premido e se o rato já se mexeu (clique vs arrastar).
     press_pos: [f32; 2],
     press_moved: bool,
@@ -270,6 +272,7 @@ impl Running {
             ui: UiState::new(baseline),
             cursor: [0.0; 2],
             dragging: false,
+            painting: false,
             press_pos: [0.0; 2],
             press_moved: false,
             inspector,
@@ -465,6 +468,29 @@ impl Running {
         }
     }
 
+    /// Pincel: enquanto o botão esquerdo estiver premido, pinta à volta do rato.
+    fn paint_tick(&mut self) {
+        if !(self.painting && self.ui.paint_on) {
+            return;
+        }
+        let w = self.cam.screen_to_world(self.cursor, self.screen());
+        let wpc = self.world.cfg.world_units_per_cell as f32;
+        let (cx, cy, r) = (w[0] / wpc, w[1] / wpc, self.ui.paint_radius.max(0.5));
+        let s = self.ui.paint_strength;
+        match self.ui.paint_material {
+            4 => self.world.paint_source(cx, cy, r, Some(s), None),
+            5 => self.world.paint_source(cx, cy, r, None, Some(s)),
+            6 => self.world.paint_source(cx, cy, r, Some(0.0), Some(0.0)),
+            m => {
+                // 0 água, 1 e 2 entulho, 3 rocha maciça.
+                let grains = [0, 1, 2, 6][m.min(3)];
+                let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+                self.world.encode_paint(&self.gpu.queue, &mut enc, cx, cy, r, grains);
+                self.gpu.queue.submit([enc.finish()]);
+            }
+        }
+    }
+
     /// Atende os pedidos do servidor MCP (entre frames, na thread principal).
     fn mcp_tick(&mut self) {
         let calls: Vec<ribossome::mcp::Call> = match &self.mcp {
@@ -622,6 +648,26 @@ impl Running {
                 log::info!("mcp: ativar já {f}: {n} monómeros");
                 Ok(vec![text(format!("{n} monómeros gastos ativados ({:.0}%)", f.clamp(0.0, 1.0) * 100.0))])
             }
+            "paint" => {
+                let f = |k: &str| args[k].as_f64().ok_or(format!("falta '{k}'"));
+                let n = self.world.cfg.grid_size as f32;
+                let (cx, cy, r) = (f("x")? as f32 * n, f("y")? as f32 * n, (f("radius")? as f32).clamp(0.5, n));
+                let m = args["material"].as_u64().ok_or("falta 'material'")? as usize;
+                let s = args["strength"].as_f64().unwrap_or(1.0) as f32;
+                let name = ribossome::ui::PAINT_MATERIALS.get(m).ok_or("material desconhecido (0..6)")?;
+                match m {
+                    4 => self.world.paint_source(cx, cy, r, Some(s), None),
+                    5 => self.world.paint_source(cx, cy, r, None, Some(s)),
+                    6 => self.world.paint_source(cx, cy, r, Some(0.0), Some(0.0)),
+                    _ => {
+                        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+                        self.world.encode_paint(&self.gpu.queue, &mut enc, cx, cy, r, [0, 1, 2, 6][m]);
+                        self.gpu.queue.submit([enc.finish()]);
+                    }
+                }
+                log::info!("mcp: pintar {name} em ({cx:.0}, {cy:.0}) raio {r:.0}");
+                Ok(vec![text(format!("pintado: {name}, centro ({cx:.0}, {cy:.0}) células, raio {r:.0}"))])
+            }
             "pause" => {
                 if let Some(p) = args["paused"].as_bool() {
                     self.ui.paused = p;
@@ -672,7 +718,7 @@ impl Running {
         let chosen = match action {
             TerrainAction::Load => dialog.set_title("Carregar terreno").pick_file(),
             TerrainAction::Save => dialog.set_title("Gravar terreno").set_file_name(&name).save_file(),
-            TerrainAction::Generated => Some(last.clone()),
+            TerrainAction::Generated | TerrainAction::Empty => Some(last.clone()),
         };
         let Some(path) = chosen else {
             self.ui.terrain_msg = "cancelado".into();
@@ -680,10 +726,12 @@ impl Running {
         };
         self.ui.terrain_path = path.display().to_string();
         let resow = match action {
-            TerrainAction::Load => match self.world.load_terrain_png(&path) {
+            TerrainAction::Load => match self.world.load_terrain_png_live(&self.gpu, &path) {
                 Ok(nf) => {
-                    self.ui.terrain_msg = format!("carregado {} ({nf} células quentes); mundo semeado de novo", path.display());
-                    true
+                    self.ui.terrain_msg =
+                        format!("carregado {} ({nf} células quentes); o mundo continua (semeia de novo para começar do zero)", path.display());
+                    log::info!("{}", self.ui.terrain_msg);
+                    false
                 }
                 Err(e) => {
                     self.ui.terrain_msg = format!("erro: {e}");
@@ -700,6 +748,11 @@ impl Running {
             TerrainAction::Generated => {
                 self.world.use_generated_terrain();
                 self.ui.terrain_msg = "terreno gerado; mundo semeado de novo".into();
+                true
+            }
+            TerrainAction::Empty => {
+                self.world.use_empty_terrain();
+                self.ui.terrain_msg = "mundo vazio (só água); semeado de novo".into();
                 true
             }
         };
@@ -725,6 +778,7 @@ impl Running {
             }
         }
         self.mcp_tick();
+        self.paint_tick();
         self.scene_tick();
         self.inspector.poll(&self.gpu.device);
         if self.inspector.follow
@@ -934,7 +988,10 @@ impl Running {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let pan_button = matches!(button, MouseButton::Left | MouseButton::Right | MouseButton::Middle);
-                if pan_button {
+                if button == MouseButton::Left && self.ui.paint_on {
+                    // Pincel ligado: o botão esquerdo pinta (não arrasta nem seleciona).
+                    self.painting = state == ElementState::Pressed && !egui_mouse;
+                } else if pan_button {
                     let was_dragging = self.dragging;
                     self.dragging = state == ElementState::Pressed && !egui_mouse;
                     if self.dragging {

@@ -304,11 +304,29 @@ gpu_struct! {
         /// fugir depende de como o agente é construído).
         pub signal_mode: f32,
         pub _pad_e1: u32,
+        /// PINCEL do terreno (só o passe de pintura os escreve): centro em
+        /// células, raio em células e grãos a pôr (0 = água .. 6 = rocha).
+        pub paint_x: f32,
+        pub paint_y: f32,
+        pub paint_radius: f32,
+        pub paint_grains: f32,
     }
 }
 
 /// Parâmetros que o passo escreve sozinho (não contam como "mudados").
-const DERIVED_PARAMS: [&str; 7] = ["epoch", "seed", "fluid_dt", "fluid_enabled", "max_agents", "fumarole_count", "spawn_count"];
+const DERIVED_PARAMS: [&str; 11] = [
+    "epoch",
+    "seed",
+    "fluid_dt",
+    "fluid_enabled",
+    "max_agents",
+    "fumarole_count",
+    "spawn_count",
+    "paint_x",
+    "paint_y",
+    "paint_radius",
+    "paint_grains",
+];
 
 impl SimParams {
     /// Inclinação do sol (tangente do ângulo ao zénite, ±sun_angle do nascer
@@ -452,6 +470,10 @@ impl Default for SimParams {
             sediment_settle: 1.0,
             signal_mode: 0.0,
             _pad_e1: 0,
+            paint_x: 0.0,
+            paint_y: 0.0,
+            paint_radius: 0.0,
+            paint_grains: 0.0,
         }
     }
 }
