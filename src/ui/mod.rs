@@ -593,15 +593,16 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.checkbox(&mut hunger, "regulação pela carga energética (cheio não come)");
     p.hunger_regulation = hunger as u32;
     ui.strong("Sinais internos");
-    ui.add(egui::Slider::new(&mut p.signal_mode, 0.0..=3.0).step_by(1.0).text("modo dos sinais"))
-        .on_hover_text("como os sinais α/β andam pela cadeia e dobram as juntas. 0: condução e sensibilidade de cada aminoácido (v3). 1: difusão igual para os dois lados e todas as juntas respondem igual (α dobra para um lado, β para o outro). 2: o sinal só anda do lado N para o C, mesma resposta. 3: anda do N para o C e cada junta responde conforme o seu aminoácido (o corpo decide para que lado vira)");
+    ui.add(egui::Slider::new(&mut p.signal_mode, 0.0..=4.0).step_by(1.0).text("modo dos sinais"))
+        .on_hover_text("como os sinais α/β andam pela cadeia e dobram as juntas. 0: condução e sensibilidade de cada aminoácido (v3). 1: difusão igual para os dois lados e todas as juntas respondem igual (α dobra para um lado, β para o outro). 2: o sinal só anda do lado N para o C, mesma resposta. 3: anda do N para o C e cada junta responde conforme o seu aminoácido (o corpo decide para que lado vira). 4: transporte da tabela (condução de cada aminoácido e órgão, como no 0) mas todas as juntas respondem igual");
     ui.add(egui::Slider::new(&mut p.clock_mute, 0.0..=1.0).text("silenciar relógios"))
         .on_hover_text("experiência: tira amplitude a todos os relógios (1 = mudos). O órgão continua no corpo e continua a pagar o custo; serve para ver se os agentes se mexem sem ele (sensores, emissão por contacto)");
     ui.small(match p.signal_mode.round() as i32 {
         0 => "  0 = por aminoácido (cada junta responde à sua maneira)",
         1 => "  1 = isotrópico (difusão para os dois lados, resposta igual)",
         2 => "  2 = direcional (do lado N para o C, resposta igual)",
-        _ => "  3 = direcional, resposta de cada aminoácido (o corpo decide)",
+        3 => "  3 = direcional, resposta de cada aminoácido (o corpo decide)",
+        _ => "  4 = transporte da tabela (aminoácidos e órgãos), resposta igual",
     });
     ui.separator();
     ui.add(egui::Slider::new(&mut p.maintenance_cost, 0.0..=0.01).text("manutenção por resíduo"));

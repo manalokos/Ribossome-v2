@@ -143,7 +143,7 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     // Modos 1 e 2: resposta igual em todas as juntas (α para um lado, β para
     // o outro; γ e δ são mensageiros internos, não dobram: só agem depois de
     // um relé os passar para α ou β). Modo 3: a de cada aminoácido.
-    if (params.signal_mode >= 0.5 && params.signal_mode < 2.5) {
+    if ((params.signal_mode >= 0.5 && params.signal_mode < 2.5) || params.signal_mode >= 3.5) {
         sens = vec4<f32>(SIGNAL_UNIFORM_SENS, -SIGNAL_UNIFORM_SENS, 0.0, 0.0);
     }
     return lim * tanh(SIGNAL_GAIN * (s.x * sens.x * amp_a + s.y * sens.y * amp_b + s.z * sens.z + s.w * sens.w) / lim);
@@ -545,15 +545,15 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         } else if (params.signal_mode >= 0.5 && params.signal_mode < 1.5) {
             cn = vec4<f32>(0.5);
             cc = vec4<f32>(0.5);
-        } else if (params.signal_mode >= 2.5) {
+        } else if (params.signal_mode >= 2.5 && params.signal_mode < 3.5) {
             cn = vec4<f32>(1.0);
             cc = vec4<f32>(0.0);
         }
         let incoming = cn * prev + cc * next;
         var s = SIGNAL_DECAY * incoming + emit[k];
         var lim = SIGNAL_MAX;
-        if (params.signal_mode < 0.5) {
-            // Modo 0 = a dinâmica do v3: perda de 0,3% por salto, 75% do
+        if (params.signal_mode < 0.5 || params.signal_mode >= 3.5) {
+            // Modos 0 e 4 (transporte da tabela) = a dinâmica do v3: perda de 0,3% por salto, 75% do
             // valor novo + 25% do antigo (cada parte tem memória), ±1.
             s = mix(here, V3_SIGNAL_DECAY * incoming + emit[k], V3_SIGNAL_UPDATE);
             lim = 1.0;

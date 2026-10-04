@@ -301,7 +301,9 @@ gpu_struct! {
         /// 2 = condução DIRECIONAL (do lado N para o C) com a mesma resposta;
         /// 3 = condução direcional com a resposta DE CADA AMINOÁCIDO (o lado
         /// e a força com que cada junta dobra vêm do corpo: aproximar ou
-        /// fugir depende de como o agente é construído).
+        /// fugir depende de como o agente é construído);
+        /// 4 = TRANSPORTE DA TABELA (a condução de cada aminoácido e órgão,
+        /// com a dinâmica do modo 0) e resposta igual em todas as juntas.
         pub signal_mode: f32,
         /// Silenciador dos RELÓGIOS (experiência): a amplitude de todos os
         /// relógios é multiplicada por 1 − isto. 0 = normais, 1 = mudos (o

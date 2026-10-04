@@ -16,6 +16,8 @@ fn main() {
     w.params.clock_mute = envf("CLOCK_MUTE", 0.0);
     // ANGLE: multiplicador dos ângulos de repouso (por omissão o da cena).
     w.params.rest_angle_mult = envf("ANGLE", w.params.rest_angle_mult);
+    // MODE: modo dos sinais (por omissão o da cena).
+    w.params.signal_mode = envf("MODE", w.params.signal_mode);
     let (steps, every) = (envf("STEPS", 6000.0) as u32, envf("EVERY", 1000.0) as u32);
     let report = |w: &World, done: u32| {
         let a = w.read_agents_blocking(&gpu);
