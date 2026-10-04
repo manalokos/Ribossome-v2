@@ -1,6 +1,9 @@
 //! A física deixa um nadador virar para a comida? Agentes DESENHADOS (sem
 //! morte nem reprodução) na sopa por omissão (que tem manchas), nos três
-//! modos de sinais (0 por aminoácido, 1 isotrópico, 2 direcional):
+//! modos de sinais (0 por aminoácido, 1 isotrópico, 2 direcional, 3
+//! direcional com a resposta de cada aminoácido). BODY escolhe o aminoácido
+//! do corpo (por omissão G, glicina; S = serina tem a sensibilidade α de
+//! sinal contrário):
 //! - controlo: relógio + 15 glicinas (o nadador de sempre);
 //! - sensor α: sensor de comida direcional (variante 0: canal α, ganho +1) à
 //!   cabeça + relógio + 15 glicinas;
@@ -43,7 +46,9 @@ fn bases(s: &str) -> Vec<u8> {
 fn main() {
     let envf = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
     let code: serde_json::Value = serde_json::from_str(&std::fs::read_to_string("assets/codigo_orgaos.json").unwrap()).unwrap();
-    let body = "GGU".repeat(15);
+    let body_aa = std::env::var("BODY").ok().and_then(|v| v.chars().next()).unwrap_or('G');
+    println!("corpo: 15 × {body_aa}");
+    let body = codon(body_aa).repeat(15);
     let clock = organ(&code, 5, 0);
     let designs = [
         ("controlo (relógio)", format!("AUG{clock}{body}UAA")),
@@ -57,7 +62,7 @@ fn main() {
     let dt = envf("DT").unwrap_or(16.0) as u32;
     let steps = envf("STEPS").unwrap_or(3200.0) as u32;
     let n_each = envf("N").unwrap_or(400.0) as usize;
-    for mode in [0.0f32, 1.0, 2.0] {
+    for mode in [0.0f32, 1.0, 2.0, 3.0] {
         let mut w = World::new(&gpu, cfg, 3);
         let n = cfg.cells() as usize;
         w.custom_terrain = Some((vec![0; n], vec![0.0; n]));

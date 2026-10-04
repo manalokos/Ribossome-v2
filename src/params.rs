@@ -298,7 +298,10 @@ gpu_struct! {
         /// SINAIS: 0 = condução e resposta das juntas por aminoácido (v3);
         /// 1 = difusão ISOTRÓPICA (metade de cada vizinho) e resposta igual
         /// em todas as juntas (α dobra para um lado, β para o outro);
-        /// 2 = condução DIRECIONAL (do lado N para o C) com a mesma resposta.
+        /// 2 = condução DIRECIONAL (do lado N para o C) com a mesma resposta;
+        /// 3 = condução direcional com a resposta DE CADA AMINOÁCIDO (o lado
+        /// e a força com que cada junta dobra vêm do corpo: aproximar ou
+        /// fugir depende de como o agente é construído).
         pub signal_mode: f32,
         pub _pad_e1: u32,
     }

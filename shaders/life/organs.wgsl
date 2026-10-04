@@ -119,7 +119,11 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     let pr = aa_props[aa];
     let lim = max(pr.max_bend, 1e-3);
     var sens = vec2<f32>(pr.sens_alpha, pr.sens_beta);
-    if (params.signal_mode >= 0.5) { sens = vec2<f32>(SIGNAL_UNIFORM_SENS, -SIGNAL_UNIFORM_SENS); }
+    // Modos 1 e 2: resposta igual em todas as juntas. Modo 3: a de cada
+    // aminoácido (como o 0), mas com a condução direcional.
+    if (params.signal_mode >= 0.5 && params.signal_mode < 2.5) {
+        sens = vec2<f32>(SIGNAL_UNIFORM_SENS, -SIGNAL_UNIFORM_SENS);
+    }
     return lim * tanh(SIGNAL_GAIN * (s.x * sens.x * amp_a + s.y * sens.y * amp_b) / lim);
 }
 
