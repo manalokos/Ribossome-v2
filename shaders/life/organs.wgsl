@@ -21,9 +21,19 @@ const BEND_COST: f32 = 0.0005;
 // Raio do disco dos sensores (mundo): 6 células (era 3: com ~0,4 ativados por
 // célula, cada lado via ~4 monómeros e o ruído de contagem afogava o sinal).
 const SENSOR_RADIUS: f32 = 180.0;
-// Integração no tempo: fração da média que fica em cada passo (constante de
-// tempo ~1/(1 − x) = 10 passos).
-const SENSOR_INTEGRATION: f32 = 0.9;
+// Carga do sensor: no modo NÍVEL a fração que fica em cada passo é a
+// "memória" da variante (descarga = 1 − memória; tempo ~1/(1 − memória)
+// passos). No modo VARIAÇÃO a carga rápida usa esta fração fixa e a
+// referência lenta usa a memória da variante.
+const SENSOR_FAST_KEEP: f32 = 0.7;
+// Sensor acabado de nascer (ainda sem carga): ver bindings.wgsl.
+const SENSOR_UNSET: f32 = -1e30;
+// AMOSTRAGEM ESTOCÁSTICA: em cada passo o sensor lê este número de células
+// ao acaso dentro do raio (como moléculas a chegar a um recetor), não o
+// disco inteiro; a carga integra as chegadas no tempo. Um sensor exato a 6
+// células de distância seria "ação à distância" (precisava de um campo).
+const SENSOR_SAMPLES: u32 = 8u;
+const S_SENSE: u32 = 12u << 16u;    // + resíduo·16 + amostra
 // Ganho dos sensores de variação (diferença por passo).
 const SENSOR_CHANGE_GAIN: f32 = 20.0;
 
@@ -140,6 +150,67 @@ fn body_count(@builtin(global_invocation_id) gid: vec3<u32>) {
 // 5 = redutor das fumarolas, 6 = terreno (grãos por célula, 0 água .. 1
 // rocha). Total: média do disco. Direcional: média do lado esquerdo da
 // cadeia (+perp) − a do direito.
+// O que uma célula vale para um sensor (ver `what` em sense_disc).
+fn sense_value(what: u32, c: vec2<i32>) -> f32 {
+    let idx = u32(c.y) * GRID_SIZE + u32(c.x);
+    if (what == 0u) {
+        var cnt = 0u;
+        for (var ch = 0u; ch < 4u; ch++) { cnt += chem_act_count(idx, ch); }
+        return f32(cnt) / 12.0;
+    } else if (what == 2u) {
+        var cnt = 0u;
+        for (var ch = 0u; ch < 4u; ch++) { cnt += atomicLoad(&chem_grid[idx * 4u + ch]) >> 16u; }
+        return f32(cnt) / 12.0;
+    } else if (what == 4u || what == 5u) {
+        let fi = fluid_index_at_world((vec2<f32>(c) + 0.5) * f32(WORLD_UNITS_PER_CELL));
+        return select(temp_in[fi] / 4.0, redox_in[fi] / 5.0, what == 5u);
+    } else if (what == 6u) {
+        return f32(min(gamma_count(idx), GAMMA_SOLID_THRESHOLD)) / f32(GAMMA_SOLID_THRESHOLD);
+    }
+    return uv_light_at_cell(u32(c.x), u32(c.y)) * 4.0;
+}
+
+// Leitura ESTOCÁSTICA: SENSOR_SAMPLES células ao acaso no disco (uniformes
+// em área). Total: média das amostras. Direcional: metade das amostras de
+// cada lado da cadeia (espelhadas para o lado certo), esquerda − direita.
+// `key`/`salt` escolhem a sequência de sorteio (id do agente, resíduo).
+fn sense_sample(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, key: u32, salt: u32) -> f32 {
+    let w = f32(WORLD_UNITS_PER_CELL);
+    var sum_l = 0.0;
+    var sum_r = 0.0;
+    var n_l = 0.0;
+    var n_r = 0.0;
+    for (var i = 0u; i < SENSOR_SAMPLES; i += 2u) {
+        let q = rng_f4(key, params.epoch, S_SENSE + salt * 16u + i / 2u);
+        for (var h = 0u; h < 2u; h++) {
+            let u = select(q.xy, q.zw, h == 1u);
+            let rad = SENSOR_RADIUS * sqrt(u.x);
+            let ang = 6.2831853 * u.y;
+            var d = rad * vec2<f32>(cos(ang), sin(ang));
+            let left = !directional || h == 0u;
+            if (directional) {
+                // Espelha para o lado pedido (h = 0 esquerda, 1 direita).
+                let side = dot(d, perp);
+                if ((side < 0.0) == left) { d -= 2.0 * side * perp; }
+            }
+            let c = vec2<i32>(floor((pos + d) / w));
+            if (any(c < vec2<i32>(0)) || any(c >= vec2<i32>(i32(GRID_SIZE)))) { continue; }
+            let v = sense_value(what, c);
+            if (left) {
+                sum_l += v;
+                n_l += 1.0;
+            } else {
+                sum_r += v;
+                n_r += 1.0;
+            }
+        }
+    }
+    if (!directional) { return sum_l / max(n_l, 1.0); }
+    return sum_l / max(n_l, 1.0) - sum_r / max(n_r, 1.0);
+}
+
+// Leitura EXATA do disco inteiro (só para os corpos de agentes, onde é
+// preciso descontar o próprio corpo célula a célula).
 fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> f32 {
     let w = f32(WORLD_UNITS_PER_CELL);
     let r = i32(ceil(SENSOR_RADIUS / w));
@@ -257,8 +328,11 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 let dir = t == ORGAN_FOOD_SENSOR_DIR || t == ORGAN_LIGHT_SENSOR_DIR;
                 let here = residue_world(slot, a, k);
                 let perp = chain_normal(slot, a, k);
-                sensed = sense_disc(here, perp, what, dir);
-                if (what == 3u) { sensed -= own_body_in_disc(slot, a, here, perp, dir); }
+                if (what == 3u) {
+                    sensed = sense_disc(here, perp, what, dir) - own_body_in_disc(slot, a, here, perp, dir);
+                } else {
+                    sensed = sense_sample(here, perp, what, dir, a.id, k);
+                }
             }
             case ORGAN_ENERGY_SENSOR: {
                 sensed = clamp(a.energy / max(cap, 1e-3), 0.0, 1.0) * 2.0;
@@ -270,17 +344,24 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             // Variante: p0 canal, p1 ganho (com sinal), p2 modo (0 nível, 1
             // variação), p3 memória da referência na variação.
             let mi = base + k;
-            // O recetor integra no tempo (média exponencial das leituras).
-            let avg = mix(sensed, sensor_avg[mi], SENSOR_INTEGRATION);
-            sensor_avg[mi] = avg;
-            var v = avg;
+            let keep = clamp(ov.p3, 0.0, 0.999);
+            // Nasce já carregado com o que há à volta (sem transitório).
+            let unset = sensor_avg[mi] < -1e20;
+            var v = 0.0;
             if (ov.p2 >= 0.5) {
-                // Variação, amplificada (as mudanças por passo são pequenas);
-                // a referência segue a média com a memória da variante.
-                v = (avg - sensor_mem[mi]) * SENSOR_CHANGE_GAIN;
-                sensor_mem[mi] = mix(avg, sensor_mem[mi], clamp(ov.p3, 0.0, 0.999));
+                // VARIAÇÃO: carga rápida − referência lenta, amplificada (as
+                // mudanças por passo são pequenas).
+                let fast = select(mix(sensed, sensor_avg[mi], SENSOR_FAST_KEEP), sensed, unset);
+                let slow = select(sensor_mem[mi], sensed, unset);
+                sensor_avg[mi] = fast;
+                v = (fast - slow) * SENSOR_CHANGE_GAIN;
+                sensor_mem[mi] = mix(fast, slow, keep);
             } else {
-                sensor_mem[mi] = avg;
+                // NÍVEL: a carga (integrador com fuga pela variante).
+                let q = select(mix(sensed, sensor_avg[mi], keep), sensed, unset);
+                sensor_avg[mi] = q;
+                sensor_mem[mi] = q;
+                v = q;
             }
             v *= ov.p1 * organ_gain(o);
             if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }
