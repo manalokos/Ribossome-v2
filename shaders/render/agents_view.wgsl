@@ -327,6 +327,22 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
 fn kin_vertex(vi: u32, slot: u32, a: Agent) -> AgentVsOut {
     var o: AgentVsOut;
     o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    // MARCAR ÓRGÃO: bola ciano por cima de quem tem o tipo escolhido (a mesma
+    // bola do parentesco; tem prioridade sobre ele).
+    if (view.mark_organ != 0u) {
+        if (a.alive == 0u) { return o; }
+        var has = false;
+        for (var k = 0u; k < min(a.body_len, MAX_BODY_V); k++) {
+            let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
+            if (oc != 0u && (oc & 0xFu) == view.mark_organ) {
+                has = true;
+                break;
+            }
+        }
+        if (!has) { return o; }
+        let cm = vec2<f32>(a.pos_x, a.pos_y);
+        return capsule_vertex(vi, cm, cm, KIN_DOT_PX / view.zoom, vec3<f32>(0.1, 0.95, 1.0));
+    }
     let q = kin_view[slot];
     if (view.signal_view != 4u || a.alive == 0u || q < 0.0) { return o; }
     // Raiz quadrada: mais resolução nos parentescos fracos (os clãs

@@ -707,7 +707,8 @@ gpu_struct! {
         pub uv_depth: f32,
         /// Fração do sol (1 = dia pleno; 0 = noite): a vista escurece de noite.
         pub daylight: f32,
-        pub _vpad2: u32,
+        /// Marcar com uma bola os agentes que têm este órgão: tipo + 1 (0 = nenhum).
+        pub mark_organ: u32,
     }
 }
 

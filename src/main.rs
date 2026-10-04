@@ -627,6 +627,8 @@ impl Running {
                     Camera { center: [0.5 * s, 0.5 * s], zoom: size as f32 / s }
                 };
                 let cap = ribossome::render::capture::Capture::new(&self.gpu, &self.world, size);
+                // Marcar um órgão (tipo 0..14), como na vista "marcar quem tem o órgão".
+                cap.view.mark_organ.set(args["mark_organ"].as_u64().map_or(0, |t| t as u32 + 1));
                 let rgba = cap.render(&self.gpu, &self.world, &cam, view, bright);
                 let bytes = cap.encode_png(&rgba).map_err(|e| format!("png: {e}"))?;
                 Ok(vec![png(&bytes), text(format!("vista {view}, epoch {}", self.world.params.epoch))])
@@ -862,6 +864,7 @@ impl Running {
         }
         self.view.uv_depth.set(self.world.params.uv_depth);
         self.view.daylight.set(self.world.params.daylight(self.world.params.epoch));
+        self.view.mark_organ.set(self.ui.mark_organ);
         self.view.update(
             &self.gpu.queue,
             &self.cam,

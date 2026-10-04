@@ -53,6 +53,8 @@ pub struct WorldView {
     pub uv_depth: std::cell::Cell<f32>,
     /// Fração do sol (escurece a vista de noite).
     pub daylight: std::cell::Cell<f32>,
+    /// Órgão a marcar no mapa: tipo + 1 (0 = nenhum).
+    pub mark_organ: std::cell::Cell<u32>,
 }
 
 impl WorldView {
@@ -275,6 +277,7 @@ impl WorldView {
             focus: std::cell::Cell::new(u32::MAX),
             uv_depth: std::cell::Cell::new(11.0),
             daylight: std::cell::Cell::new(1.0),
+            mark_organ: std::cell::Cell::new(0),
         }
     }
 
@@ -299,7 +302,7 @@ impl WorldView {
             signal_view,
             uv_depth: self.uv_depth.get(),
             daylight: self.daylight.get(),
-            _vpad2: 0,
+            mark_organ: self.mark_organ.get(),
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }

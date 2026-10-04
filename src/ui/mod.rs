@@ -20,6 +20,8 @@ pub struct UiState {
     pub monomer_brightness: f32,
     /// Cor dos agentes: 0 química, 1 sinal α, 2 sinal β, 3 α e β.
     pub signal_view: u32,
+    /// Órgão a marcar no mapa: tipo + 1 (0 = nenhum).
+    pub mark_organ: u32,
     /// Semear: quantas sementes, comprimento mínimo/máximo, começar por AUG.
     pub seed_count: u32,
     pub seed_len: [u32; 2],
@@ -166,6 +168,7 @@ impl UiState {
             vsync: true,
             monomer_brightness: 0.5,
             signal_view: 0,
+            mark_organ: 0,
             stats: Stats::default(),
             history: crate::stats::History::default(),
             terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "assets/terreno.png".into()),
@@ -359,6 +362,17 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
     );
     if st.signal_view == 4 {
         ui.label("clica num organismo: bola verde = genoma próximo, amarela = meio, vermelha = distante (8-meros partilhados; o filho conta como parente)");
+    }
+    let names = crate::life::organs::ORGAN_NAMES;
+    let current = if st.mark_organ == 0 { "nenhum" } else { names[(st.mark_organ as usize - 1).min(names.len() - 1)] };
+    egui::ComboBox::from_label("marcar quem tem o órgão").selected_text(current).show_ui(ui, |ui| {
+        ui.selectable_value(&mut st.mark_organ, 0, "nenhum");
+        for (i, n) in names.iter().enumerate() {
+            ui.selectable_value(&mut st.mark_organ, i as u32 + 1, *n);
+        }
+    });
+    if st.mark_organ != 0 {
+        ui.small("bola ciano = agente com este órgão (do mesmo tamanho no ecrã a qualquer zoom)");
     }
     ui.separator();
     if ui

@@ -89,7 +89,9 @@ fn organ_upkeep(slot: u32, n: u32) -> f32 {
         let o = organ_get(slot, k);
         if (o != 0u) {
             let c = organ_cost(o);
-            u += c.upkeep * select(1.0, organ_gain(o), c.gain_pays > 0.5);
+            // gain_pays = expoente da intensidade na manutenção: 1 = linear
+            // (órgãos que fazem trabalho), 0,5 = raiz (sinais), 0 = não conta.
+            u += c.upkeep * pow(organ_gain(o), clamp(c.gain_pays, 0.0, 1.0));
         }
     }
     return u;

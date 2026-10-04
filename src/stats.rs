@@ -276,7 +276,7 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History) {
         ui.strong(title);
         egui_plot::Plot::new(title)
             .height(160.0)
-            .legend(egui_plot::Legend::default())
+            .legend(egui_plot::Legend::default().position(egui_plot::Corner::LeftTop))
             .allow_scroll(false)
             .show(ui, |p| {
                 for &i in &idx {
