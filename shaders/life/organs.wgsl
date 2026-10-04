@@ -182,17 +182,19 @@ fn sense_k(what: u32) -> f32 {
     }
 }
 
-// O que uma célula vale para um sensor (ver `what` em sense_disc).
-fn sense_value(what: u32, c: vec2<i32>) -> f32 {
+// O que uma célula vale para um sensor (ver `what` em sense_disc). `aff` =
+// peso de cada canal (A, U, G, C; 1 cada = sem preferência): os sensores de
+// monómeros são específicos, como os recetores reais (ver sensor_affinity).
+fn sense_value(what: u32, c: vec2<i32>, aff: vec4<f32>) -> f32 {
     let idx = u32(c.y) * GRID_SIZE + u32(c.x);
     if (what == 0u) {
-        var cnt = 0u;
-        for (var ch = 0u; ch < 4u; ch++) { cnt += chem_act_count(idx, ch); }
-        return f32(cnt) / 12.0;
+        var cnt = 0.0;
+        for (var ch = 0u; ch < 4u; ch++) { cnt += aff[ch] * f32(chem_act_count(idx, ch)); }
+        return cnt / 12.0;
     } else if (what == 2u) {
-        var cnt = 0u;
-        for (var ch = 0u; ch < 4u; ch++) { cnt += atomicLoad(&chem_grid[idx * 4u + ch]) >> 16u; }
-        return f32(cnt) / 12.0;
+        var cnt = 0.0;
+        for (var ch = 0u; ch < 4u; ch++) { cnt += aff[ch] * f32(atomicLoad(&chem_grid[idx * 4u + ch]) >> 16u); }
+        return cnt / 12.0;
     } else if (what == 4u || what == 5u) {
         let fi = fluid_index_at_world((vec2<f32>(c) + 0.5) * f32(WORLD_UNITS_PER_CELL));
         return select(temp_in[fi] / 4.0, redox_in[fi] / 5.0, what == 5u);
@@ -202,11 +204,22 @@ fn sense_value(what: u32, c: vec2<i32>) -> f32 {
     return uv_light_at_cell(u32(c.x), u32(c.y)) * 4.0;
 }
 
+// ESPECIFICIDADE do sensor de monómeros: a "antena" é o resíduo SEGUINTE da
+// cadeia (um bolso de ligação feito com o vizinho); os pesos por canal são as
+// afinidades de substrato desse aminoácido (as que as bocas usam; somam 1,
+// por isso × 4: sem preferência = 1 em cada canal, como antes). Sem vizinho
+// (sensor na ponta C) não há preferência.
+fn sensor_affinity(slot: u32, k: u32, n: u32) -> vec4<f32> {
+    if (k + 1u >= n) { return vec4<f32>(1.0); }
+    let pr = aa_props[body_get(slot, k + 1u)];
+    return 4.0 * vec4<f32>(pr.sub_a, pr.sub_u, pr.sub_g, pr.sub_c);
+}
+
 // Leitura ESTOCÁSTICA: SENSOR_SAMPLES células ao acaso no disco (uniformes
 // em área). Total: média das amostras. Direcional: metade das amostras de
 // cada lado da cadeia (espelhadas para o lado certo), esquerda − direita.
 // `key`/`salt` escolhem a sequência de sorteio (id do agente, resíduo).
-fn sense_sample(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, key: u32, salt: u32) -> f32 {
+fn sense_sample(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, key: u32, salt: u32, aff: vec4<f32>) -> f32 {
     let w = f32(WORLD_UNITS_PER_CELL);
     var sum_l = 0.0;
     var sum_r = 0.0;
@@ -227,7 +240,7 @@ fn sense_sample(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, k
             }
             let c = vec2<i32>(floor((pos + d) / w));
             if (any(c < vec2<i32>(0)) || any(c >= vec2<i32>(i32(GRID_SIZE)))) { continue; }
-            let v = sense_value(what, c);
+            let v = sense_value(what, c, aff);
             if (left) {
                 sum_l += v;
                 n_l += 1.0;
@@ -369,7 +382,7 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                     let raw = sense_disc(here, perp, what, dir) - own_body_in_disc(slot, a, here, perp, dir);
                     sensed = raw / (abs(raw) + sense_k(3u));
                 } else {
-                    sensed = sense_sample(here, perp, what, dir, a.id, k);
+                    sensed = sense_sample(here, perp, what, dir, a.id, k, sensor_affinity(slot, k, n));
                 }
             }
             case ORGAN_ENERGY_SENSOR: {

@@ -116,7 +116,7 @@ const FOOD_SENSOR_PROPS: &[PropDef] = &[
     pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ou, no direcional, o contraste relativo (−1..1)"),
     pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
     pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
-    pd("alvo", "0 = comida (ativados), 1 = gastos (rasto de quem come), 2 = corpos de outros agentes"),
+    pd("alvo", "0 = comida (ativados; os canais pesados pelas afinidades do aminoácido SEGUINTE da cadeia, a antena), 1 = gastos (já sem variantes), 2 = corpos de outros agentes"),
 ];
 
 /// Propriedades de cada tipo de órgão, por ordem (a mesma na GPU).
