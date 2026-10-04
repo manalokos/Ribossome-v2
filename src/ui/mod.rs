@@ -88,10 +88,10 @@ const TABS: [(Tab, &str); 10] = [
     (Tab::Vista, "Vista"),
     (Tab::Materia, "Matéria"),
     (Tab::Luz, "Luz"),
-    (Tab::Agua, "Água"),
+    (Tab::Agua, "Água e fumarolas"),
     (Tab::Terreno, "Terreno"),
     (Tab::Vida, "Vida"),
-    (Tab::Movimento, "Movimento"),
+    (Tab::Movimento, "Corpo"),
     (Tab::Cena, "Cena"),
     (Tab::Graficos, "Gráficos"),
     (Tab::Info, "Info"),
@@ -392,6 +392,7 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
 
 fn tab_matter(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     let p = &mut world.params;
+    ui.strong("Sopa inicial e ativação");
     ui.add(egui::Slider::new(&mut world.seed_density, 0.05..=1.0).text("densidade inicial (na próxima semente)"));
     ui.add(egui::Slider::new(&mut world.seed_active, 0.0..=1.0).text("fração ativada inicial (na próxima semente)"))
         .on_hover_text("fração dos monómeros que nascem ativados quando se semeia um mundo novo (0,5 = metade)");
@@ -401,9 +402,6 @@ fn tab_matter(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
             st.activate_now = true;
         }
     });
-    ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("difusão ×"));
-    ui.add(egui::Slider::new(&mut p.monomer_pressure, 0.0..=20.0).text("pressão dos monómeros"))
-        .on_hover_text("a difusão empurra das zonas cheias para as vazias");
     ui.add(
         egui::Slider::new(&mut p.activation_decay, 0.0..=0.002)
             .logarithmic(true)
@@ -425,14 +423,25 @@ fn tab_matter(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         .on_hover_text("a luz reativa gastos sozinha (segue o dia e a noite e as sombras). 1 = ~1,8% dos gastos por passo em sol pleno; 0,02 = um pingo. 0 = só os fotossistemas");
     ui.add(egui::Slider::new(&mut p.thermal_activation, 0.0..=2.0).logarithmic(true).smallest_positive(0.01).text("pelo calor (acima de T = 2)"))
         .on_hover_text("o calor reativa gastos sozinho, só na água acima de T = 2 (fumarolas). 0 = só os quimiossintéticos aproveitam as fumarolas");
-    ui.strong("Gravidade e agregação dos monómeros");
-    ui.add(egui::Slider::new(&mut p.settle, 0.0..=100.0).logarithmic(true).smallest_positive(0.1).text("gravidade dos MONÓMEROS (assentamento) ×"))
-        .on_hover_text("probabilidade por passo de um monómero descer uma célula = 0,002 × isto (10 = 0,02 células/passo)");
-    ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão"));
+    ui.separator();
+    ui.strong("Transporte dos monómeros");
+    ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("difusão ×"));
+    ui.add(egui::Slider::new(&mut p.monomer_pressure, 0.0..=20.0).text("pressão dos monómeros"))
+        .on_hover_text("a difusão empurra das zonas cheias para as vazias");
+    ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão dos ativados do mesmo tipo"))
+        .on_hover_text("um ativado sai menos de uma célula quando os vizinhos têm ativados do mesmo tipo: junta cada tipo em manchas");
     ui.add(
         egui::Slider::new(&mut p.aggregation, 0.0..=1.0).logarithmic(true).smallest_positive(0.01).text("agregação dos ativados"),
     )
         .on_hover_text("energia de ligação entre ativados vizinhos (÷ temperatura): formam grumos que a corrente leva inteiros; o calor dissolve-os");
+    ui.separator();
+    ui.strong("Gravidade");
+    ui.add(egui::Slider::new(&mut p.settle, 0.0..=100.0).logarithmic(true).smallest_positive(0.1).text("gravidade dos MONÓMEROS ×"))
+        .on_hover_text("probabilidade por passo de um monómero descer uma célula = 0,002 × isto (10 = 0,02 células/passo)");
+    ui.add(egui::Slider::new(&mut p.sediment_settle, 0.0..=5.0).text("gravidade dos GRÃOS de entulho ×"))
+        .on_hover_text("velocidade de queda (×0,5 células do fluido/s): um grão solto anda com a corrente menos a queda — sobe onde a corrente a subir é mais forte (suspensão) e assenta onde ela abranda. 0 = flutuam");
+    ui.add(egui::Slider::new(&mut p.sedimentation, 0.0..=0.5).text("gravidade dos AGENTES × (∝ √n)"))
+        .on_hover_text("os agentes afundam ∝ √(nº de resíduos): os grandes descem mais depressa. 0 = não afundam");
 }
 
 fn tab_light(ui: &mut egui::Ui, world: &mut World) {
@@ -469,12 +478,7 @@ fn tab_light(ui: &mut egui::Ui, world: &mut World) {
 fn tab_water(ui: &mut egui::Ui, world: &mut World) {
     let p = &mut world.params;
     let st = &mut world.settings;
-    ui.strong("Fumarolas: química");
-    ui.add(egui::Slider::new(&mut p.chemo_yield, 0.0..=5.0).text("rendimento da quimiossíntese"))
-        .on_hover_text("energia por unidade de redutor consumido");
-    ui.add(egui::Slider::new(&mut p.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("oxidação do redutor (1/s)"))
-        .on_hover_text("quanto mais lento, mais longe o redutor chega (vista 'redutor das fumarolas')");
-    ui.separator();
+    ui.strong("Fluido");
     ui.checkbox(&mut st.fluid_enabled, "fluido ligado");
     ui.checkbox(&mut st.multigrid, "pressão por multigrid (senão Jacobi)");
     if st.multigrid {
@@ -492,6 +496,10 @@ fn tab_water(ui: &mut egui::Ui, world: &mut World) {
     if world.heat_image.is_some() {
         ui.small("+ calor dos píxeis vermelhos do terreno carregado");
     }
+    ui.add(egui::Slider::new(&mut p.chemo_yield, 0.0..=5.0).text("rendimento da quimiossíntese"))
+        .on_hover_text("energia por unidade de redutor consumido");
+    ui.add(egui::Slider::new(&mut p.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("oxidação do redutor (1/s)"))
+        .on_hover_text("quanto mais lento, mais longe o redutor chega (vista 'redutor das fumarolas')");
     for (i, f) in world.fumaroles.iter_mut().enumerate() {
         ui.push_id(i, |ui| {
             let mut on = f.enabled != 0;
@@ -554,11 +562,8 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         .on_hover_text("quanto a corrente leva o entulho solto (1 = o do v3)");
     ui.add(egui::Slider::new(&mut world.params.sediment_threshold, 0.0..=5.0).text("velocidade crítica de arranque"))
         .on_hover_text("critério de Shields: abaixo desta velocidade (células do fluido/s) a corrente não arranca grãos; acima, arranca ∝ ao excesso");
-    ui.add(egui::Slider::new(&mut world.params.sediment_settle, 0.0..=5.0).text("queda dos GRÃOS de entulho (gravidade)"))
-        .on_hover_text("velocidade de queda (×0,5 células do fluido/s): um grão solto anda com a corrente menos a queda — sobe onde a corrente a subir é mais forte (suspensão) e assenta onde ela abranda. 0 = flutuam");
     ui.add(egui::Slider::new(&mut world.params.bioturbation, 0.0..=0.5).text("bioturbação (empurrar entulho)"));
     ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("custo por grão empurrado"));
-    ui.add(egui::Slider::new(&mut world.params.sedimentation, 0.0..=0.5).text("afundamento dos AGENTES (∝ √n)"));
 }
 
 fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
@@ -575,16 +580,8 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         st.seed_now = true;
     }
     ui.separator();
-    ui.strong("Metabolismo e ciclo de vida");
+    ui.strong("Metabolismo");
     let p = &mut world.params;
-    ui.add(egui::Slider::new(&mut p.death_probability, 0.0..=0.2).text("mortalidade base"));
-    ui.add(egui::Slider::new(&mut p.death_energy_cap, 0.0..=200.0).text("teto da proteção pela energia"))
-        .on_hover_text("a mortalidade base é ÷ energia só até este valor (uma reserva protege, acumular mais não); 0 = sem teto (v3)");
-    ui.add(egui::Slider::new(&mut p.denature_temp, 0.0..=12.0).text("temperatura de desnaturação"))
-        .on_hover_text("acima disto o calor mata (vista 7 = temperatura; o miolo das fumarolas chega a 12)");
-    ui.add(egui::Slider::new(&mut p.heat_kill, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("desnaturação pelo calor"))
-        .on_hover_text("risco de morrer na água quente (acima do limiar das fumarolas), × (1 − termoestabilidade do corpo; coluna da tabela dos aminoácidos)");
-    ui.add(egui::Slider::new(&mut p.spawn_energy, 0.1..=50.0).text("energia inicial"));
     ui.add(egui::Slider::new(&mut p.food_power, 0.0..=20.0).text("energia por monómero"));
     ui.add(
         egui::Slider::new(&mut p.uptake_rate, 0.0..=0.01).logarithmic(true).smallest_positive(1e-5).text("taxa de hidrólise"),
@@ -593,6 +590,40 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     let mut hunger = p.hunger_regulation != 0;
     ui.checkbox(&mut hunger, "regulação pela carga energética (cheio não come)");
     p.hunger_regulation = hunger as u32;
+    ui.add(egui::Slider::new(&mut p.maintenance_cost, 0.0..=0.01).text("manutenção por resíduo"));
+    ui.add(egui::Slider::new(&mut p.metabolic_q10, 1.0..=4.0).text("metabolismo: Q10"))
+        .on_hover_text("quanto a química da vida acelera por cada 'escala' de temperatura (1 = não depende da temperatura). Multiplica manutenção, comer, quimiossíntese e emparelhamento; a luz não");
+    ui.add(egui::Slider::new(&mut p.metabolic_span, 0.5..=12.0).text("metabolismo: escala (unidades de T por Q10)"));
+    ui.add(egui::Slider::new(&mut p.metabolic_ref, 0.0..=8.0).text("metabolismo: temperatura de referência (m = 1)"));
+    ui.separator();
+    ui.strong("Reprodução");
+    ui.add(egui::Slider::new(&mut p.spawn_energy, 0.1..=50.0).text("energia inicial"));
+    ui.add(egui::Slider::new(&mut p.pairing_rate, 0.0..=8.0).text("emparelhamento (bases/passo)"));
+    ui.add(egui::Slider::new(&mut p.pairing_cost, 0.0..=2.0).text("custo por base copiada"));
+    ui.add(egui::Slider::new(&mut p.mutation_rate, 0.0..=0.05).text("taxa de mutação"));
+    let mut aug = p.require_start != 0;
+    ui.checkbox(&mut aug, "tradução começa no AUG (nascimentos novos)");
+    p.require_start = aug as u32;
+    ui.separator();
+    ui.strong("Morte");
+    ui.add(egui::Slider::new(&mut p.death_probability, 0.0..=0.2).text("mortalidade base"));
+    ui.add(egui::Slider::new(&mut p.death_energy_cap, 0.0..=200.0).text("teto da proteção pela energia"))
+        .on_hover_text("a mortalidade base é ÷ energia só até este valor (uma reserva protege, acumular mais não); 0 = sem teto (v3)");
+    ui.add(egui::Slider::new(&mut p.denature_temp, 0.0..=12.0).text("temperatura de desnaturação"))
+        .on_hover_text("acima disto o calor mata (vista 7 = temperatura; o miolo das fumarolas chega a 12)");
+    ui.add(egui::Slider::new(&mut p.heat_kill, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("desnaturação pelo calor"))
+        .on_hover_text("risco de morrer na água quente (acima do limiar das fumarolas), × (1 − termoestabilidade do corpo; coluna da tabela dos aminoácidos)");
+    ui.separator();
+    ui.strong("Ligações entre agentes (órgão âncora: + liga a −)");
+    ui.add(egui::Slider::new(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formação"))
+        .on_hover_text("probabilidade por passo de um agente com uma âncora livre a tentar ligar a uma âncora oposta de um vizinho; a duração vem da variante da âncora (editor)");
+    ui.add(egui::Slider::new(&mut p.bond_energy_share, 0.0..=0.2).text("energia partilhada"))
+        .on_hover_text("fração da diferença de energia que passa por cada ligação, por passo");
+    ui.add(egui::Slider::new(&mut p.bond_signal, 0.0..=1.0).text("sinais pela ligação"));
+}
+
+fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
+    let p = &mut world.params;
     ui.strong("Sinais internos");
     ui.add(egui::Slider::new(&mut p.signal_mode, 0.0..=4.0).step_by(1.0).text("modo dos sinais"))
         .on_hover_text("como os sinais α/β andam pela cadeia e dobram as juntas. 0: condução e sensibilidade de cada aminoácido (v3). 1: difusão igual para os dois lados e todas as juntas respondem igual (α dobra para um lado, β para o outro). 2: o sinal só anda do lado N para o C, mesma resposta. 3: anda do N para o C e cada junta responde conforme o seu aminoácido (o corpo decide para que lado vira). 4: transporte da tabela (condução de cada aminoácido e órgão, como no 0) mas todas as juntas respondem igual");
@@ -606,28 +637,6 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         _ => "  4 = transporte da tabela (aminoácidos e órgãos), resposta igual",
     });
     ui.separator();
-    ui.add(egui::Slider::new(&mut p.maintenance_cost, 0.0..=0.01).text("manutenção por resíduo"));
-    ui.add(egui::Slider::new(&mut p.metabolic_q10, 1.0..=4.0).text("metabolismo: Q10"))
-        .on_hover_text("quanto a química da vida acelera por cada 'escala' de temperatura (1 = não depende da temperatura). Multiplica manutenção, comer, quimiossíntese e emparelhamento; a luz não");
-    ui.add(egui::Slider::new(&mut p.metabolic_span, 0.5..=12.0).text("metabolismo: escala (unidades de T por Q10)"));
-    ui.add(egui::Slider::new(&mut p.metabolic_ref, 0.0..=8.0).text("metabolismo: temperatura de referência (m = 1)"));
-    ui.add(egui::Slider::new(&mut p.pairing_rate, 0.0..=8.0).text("emparelhamento (bases/passo)"));
-    ui.add(egui::Slider::new(&mut p.pairing_cost, 0.0..=2.0).text("custo por base copiada"));
-    ui.add(egui::Slider::new(&mut p.mutation_rate, 0.0..=0.05).text("taxa de mutação"));
-    let mut aug = p.require_start != 0;
-    ui.checkbox(&mut aug, "tradução começa no AUG (nascimentos novos)");
-    p.require_start = aug as u32;
-    ui.separator();
-    ui.strong("Ligações entre agentes (órgão âncora: + liga a −)");
-    ui.add(egui::Slider::new(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formação"))
-        .on_hover_text("probabilidade por passo de um agente com uma âncora livre a tentar ligar a uma âncora oposta de um vizinho; a duração vem da variante da âncora (editor)");
-    ui.add(egui::Slider::new(&mut p.bond_energy_share, 0.0..=0.2).text("energia partilhada"))
-        .on_hover_text("fração da diferença de energia que passa por cada ligação, por passo");
-    ui.add(egui::Slider::new(&mut p.bond_signal, 0.0..=1.0).text("sinais pela ligação"));
-}
-
-fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
-    let p = &mut world.params;
     ui.strong("Natação");
     let mut rft = p.rft_enabled != 0;
     ui.checkbox(&mut rft, "natação (RFT)");
