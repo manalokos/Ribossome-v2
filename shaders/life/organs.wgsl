@@ -18,7 +18,12 @@ const SIGNAL_GAIN: f32 = 4.0;
 // Energia gasta por passo por radiano de desvio mantido (todas as juntas).
 const BEND_COST: f32 = 0.0005;
 // Raio de amostragem dos sensores de comida e luz (unidades do mundo).
-const SENSOR_RADIUS: f32 = 90.0;
+// Raio do disco dos sensores (mundo): 6 células (era 3: com ~0,4 ativados por
+// célula, cada lado via ~4 monómeros e o ruído de contagem afogava o sinal).
+const SENSOR_RADIUS: f32 = 180.0;
+// Integração no tempo: fração da média que fica em cada passo (constante de
+// tempo ~1/(1 − x) = 10 passos).
+const SENSOR_INTEGRATION: f32 = 0.9;
 // Ganho dos sensores de variação (diferença por passo).
 const SENSOR_CHANGE_GAIN: f32 = 20.0;
 
@@ -265,14 +270,17 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             // Variante: p0 canal, p1 ganho (com sinal), p2 modo (0 nível, 1
             // variação), p3 memória da referência na variação.
             let mi = base + k;
-            var v = sensed;
+            // O recetor integra no tempo (média exponencial das leituras).
+            let avg = mix(sensed, sensor_avg[mi], SENSOR_INTEGRATION);
+            sensor_avg[mi] = avg;
+            var v = avg;
             if (ov.p2 >= 0.5) {
                 // Variação, amplificada (as mudanças por passo são pequenas);
-                // a referência segue o sentido com a memória da variante.
-                v = (sensed - sensor_mem[mi]) * SENSOR_CHANGE_GAIN;
-                sensor_mem[mi] = mix(sensed, sensor_mem[mi], clamp(ov.p3, 0.0, 0.999));
+                // a referência segue a média com a memória da variante.
+                v = (avg - sensor_mem[mi]) * SENSOR_CHANGE_GAIN;
+                sensor_mem[mi] = mix(avg, sensor_mem[mi], clamp(ov.p3, 0.0, 0.999));
             } else {
-                sensor_mem[mi] = sensed;
+                sensor_mem[mi] = avg;
             }
             v *= ov.p1 * organ_gain(o);
             if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }

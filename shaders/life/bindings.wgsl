@@ -67,6 +67,9 @@
 // ambiente por lado), refeita no fim de cada passo; os sensores de corpos
 // leem-na no passo seguinte.
 @group(3) @binding(31) var<storage, read_write> body_grid: array<atomic<u32>>;
+// Média no tempo do que cada sensor lê (um por resíduo): o recetor integra
+// as leituras, como a ocupação de um recetor real (menos ruído de contagem).
+@group(3) @binding(32) var<storage, read_write> sensor_avg: array<f32>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

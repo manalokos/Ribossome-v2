@@ -436,6 +436,7 @@ impl World {
         let organs_buf = storage_buffer(device, "organs", max_agents * 32 * 4);
         let signals = storage_buffer(device, "signals", max_agents * 64 * 8);
         let sensor_mem = storage_buffer(device, "sensor memory", max_agents * 64 * 4);
+        let sensor_avg = storage_buffer(device, "sensor average", max_agents * 64 * 4);
         let bitten = storage_buffer(device, "bitten energy", max_agents * 4);
         let bonds_buf = storage_buffer(device, "bonds", max_agents * BOND_STRIDE * 16);
         let bond_accept = storage_buffer(device, "bond accept", max_agents * 4);
@@ -524,7 +525,7 @@ impl World {
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
         let life_entries: Vec<_> =
-            (0..32).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
+            (0..33).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -679,6 +680,7 @@ impl World {
                 &kin_buf,
                 &stats_buf,
                 &body_grid,
+                &sensor_avg,
             ],
         );
 
