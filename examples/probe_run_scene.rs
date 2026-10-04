@@ -14,6 +14,8 @@ fn main() {
     w.load_scene(&gpu, &Scene::read(std::path::Path::new(&path)).unwrap()).unwrap();
     // CLOCK_MUTE: silencia os relógios (0 = normais, 1 = mudos).
     w.params.clock_mute = envf("CLOCK_MUTE", 0.0);
+    // ANGLE: multiplicador dos ângulos de repouso (por omissão o da cena).
+    w.params.rest_angle_mult = envf("ANGLE", w.params.rest_angle_mult);
     let (steps, every) = (envf("STEPS", 6000.0) as u32, envf("EVERY", 1000.0) as u32);
     let report = |w: &World, done: u32| {
         let a = w.read_agents_blocking(&gpu);

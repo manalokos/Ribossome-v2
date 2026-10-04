@@ -130,10 +130,16 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
         if (mv.p1 > 0.5) { amp_b = amp; }
     }
     let pr = aa_props[aa];
-    let lim = max(pr.max_bend, 1e-3);
+    var lim = max(pr.max_bend, 1e-3);
     // 4 canais: α e β dobram (e os músculos amplificam-nos); γ e δ dobram só
     // pela sensibilidade do aminoácido (modos 0 e 3).
     var sens = vec4<f32>(pr.sens_alpha, pr.sens_beta, pr.sens_gamma, pr.sens_delta);
+    // Um órgão pode ter a sua própria dobra máxima e sensibilidade.
+    if (o != 0u) {
+        let op = organ_cost(o);
+        if (op.max_bend < 1e8) { lim = max(op.max_bend, 1e-3); }
+        if (op.sens_alpha < 1e8) { sens = vec4<f32>(op.sens_alpha, op.sens_beta, op.sens_gamma, op.sens_delta); }
+    }
     // Modos 1 e 2: resposta igual em todas as juntas (α para um lado, β para
     // o outro; γ e δ são mensageiros internos, não dobram: só agem depois de
     // um relé os passar para α ou β). Modo 3: a de cada aminoácido.

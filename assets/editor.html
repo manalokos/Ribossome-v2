@@ -131,6 +131,18 @@ function organCard(r, info) {
   let h = `<div class="organ"><h3>${info.simbolo} ${info.nome} <span style="color:var(--dim);font-weight:400">(tipo ${r.tipo})</span></h3>`;
   h += `<div style="margin:4px 0 8px">` + [["comprimento_mult", "× comprimento"], ["massa_mult", "× massa"], ["arrasto_mult", "× arrasto"], ["manutencao", "manutenção"], ["intensidade_paga", "intensidade paga (0/1)"]]
     .map(([k, l]) => `<label style="margin-right:14px;color:var(--dim)">${l} <input type="number" step="0.1" data-t="${r.tipo}" data-k="${k}" value="${+(r[k] ?? 0).toFixed(3)}"></label>`).join("") + `</div>`;
+  // Propriedades da junta/sinais próprias do órgão: vazio = as do aminoácido promotor.
+  const opt = (k, l, i, tip) => {
+    const val = i === undefined ? r[k] : (r[k] ? r[k][i] : undefined);
+    return `<label title="${tip}" style="margin-right:10px;color:var(--dim)">${l} <input type="number" step="0.05" style="width:62px" placeholder="—" data-t="${r.tipo}" data-o="${k}"${i === undefined ? "" : ` data-i="${i}"`} value="${val === undefined || val === null ? "" : +(+val).toFixed(3)}"></label>`;
+  };
+  const CH = ["α", "β", "γ", "δ"];
+  h += `<div style="margin:4px 0 4px">` + opt("angulo", "ângulo (rad)", undefined, "ângulo de repouso próprio; vazio = o do aminoácido promotor") +
+    opt("flexibilidade", "flexibilidade", undefined, "flexibilidade da junta (rigidez = rigidez das juntas / flexibilidade²); vazio = a do promotor") +
+    opt("dobra_max", "dobra máx.", undefined, "dobra máxima pelos sinais (rad); vazio = a do promotor") +
+    CH.map((c, i) => opt("sensibilidade", "sens. " + c, i, "quanto a junta dobra com o sinal " + c + " (modos 0 e 3); vazio = a do promotor")).join("") + `</div>`;
+  h += `<div style="margin:0 0 8px">` + ["α N", "α C", "β N", "β C"].map((c, i) => opt("conducao", "cond. " + c, i, "condução do sinal vindo do vizinho do lado N ou C (modo 0); vazio = a do promotor")).join("") +
+    ["γ N", "γ C", "δ N", "δ C"].map((c, i) => opt("conducao_gd", "cond. " + c, i, "condução nos canais γ e δ (modo 0); vazio = γ usa a de α e δ a de β")).join("") + `</div>`;
   h += `<div class="scroll"><table><thead><tr><th>variante</th>` +
     info.props.map(p => `<th title="${p.desc}">${p.nome}</th>`).join("") +
     COSTS.map(([k, l]) => `<th title="custo da variante: ${l.slice(2)} do tipo" style="color:var(--dim)">${l}</th>`).join("") +
@@ -148,8 +160,29 @@ function renderOrgans() {
   el.innerHTML = organRows.map(r => organCard(r, organInfo[r.tipo])).join("");
   el.querySelectorAll("input").forEach(inp => inp.addEventListener("input", e => {
     const val = parseFloat(e.target.value);
-    if (Number.isNaN(val)) return;
     const r = organRows[+e.target.dataset.t];
+    if (e.target.dataset.o !== undefined) {
+      // Propriedade opcional (escalar ou lista de 4): vazio = sem valor próprio.
+      const k = e.target.dataset.o, i = e.target.dataset.i;
+      const same = `input[data-t="${r.tipo}"][data-o="${k}"]`;
+      if (i === undefined) { if (Number.isNaN(val)) delete r[k]; else r[k] = val; }
+      else if (Number.isNaN(val)) {
+        // Uma lista só existe completa: apagar um campo tira a lista toda.
+        delete r[k];
+        el.querySelectorAll(same).forEach(x => x.value = "");
+      } else {
+        if (!r[k]) {
+          r[k] = [0, 0, 0, 0];
+          el.querySelectorAll(same).forEach(x => { if (x !== e.target) x.value = "0"; });
+        }
+        r[k][+i] = val;
+      }
+      e.target.classList.add("changed");
+      clearTimeout(otimer);
+      otimer = setTimeout(pushOrgans, 150);
+      return;
+    }
+    if (Number.isNaN(val)) return;
     if (e.target.dataset.v !== undefined) r.variantes[+e.target.dataset.v][e.target.dataset.k] = val;
     else r[e.target.dataset.k] = val;
     e.target.classList.add("changed");

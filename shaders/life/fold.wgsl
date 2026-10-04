@@ -20,8 +20,14 @@ const JOINT_MOBILITY: f32 = 0.01;
 const JOINT_MAX_STEP: f32 = 0.2;
 const S_JOINT: u32 = 5u << 16u;     // + índice da junta
 
-fn joint_stiffness(aa: u32) -> f32 {
-    let f = aa_props[aa].flex;
+fn joint_stiffness(slot: u32, k: u32) -> f32 {
+    var f = aa_props[body_get(slot, k)].flex;
+    // Um órgão pode ter a sua própria flexibilidade.
+    let o = organ_get(slot, k);
+    if (o != 0u) {
+        let flex_o = organ_cost(o).flex;
+        if (flex_o < 1e8) { f = flex_o; }
+    }
     return params.chain_stiffness / (f * f);
 }
 
@@ -254,9 +260,9 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
         let drag_here = anchor_drag(pw_k);
         // Alvo: forma de repouso + a deformação ATIVA da junta (estado
         // catalítico, propagado N->C com atraso) + o desvio pelos sinais.
-        let goal = joint_base[base + k] + joint_active[base + k] + signal_deflection(slot, k);
+        let goal = joint_base[base + k] * params.rest_angle_mult + joint_active[base + k] + signal_deflection(slot, k);
         let theta = joint_angle[base + k];
-        let tau = -joint_stiffness(aa) * (theta - goal);
+        let tau = -joint_stiffness(slot, k) * (theta - goal);
         // Ruído térmico (Langevin sobreamortecido): σ = √(2·μ·kT).
         let q = rng_f4(a.id, params.epoch, S_JOINT + k);
         let bm = sqrt(-2.0 * log(max(q.x, 1e-7))) * cos(6.2831853 * q.y);

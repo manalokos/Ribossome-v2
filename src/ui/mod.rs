@@ -652,6 +652,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
     ui.separator();
     ui.strong("Juntas e contacto");
     ui.add(egui::Slider::new(&mut p.chain_stiffness, 1.0..=100.0).text("rigidez das juntas"));
+    ui.add(egui::Slider::new(&mut p.rest_angle_mult, 0.0..=6.0).text("× ângulos de repouso"))
+        .on_hover_text("multiplica o ângulo de repouso de todas as juntas (aminoácidos e órgãos). 1 = os da tabela (corpos quase direitos); 3–4 dá dobras de 50–90° como numa proteína real: corpos enrolados, com mais contactos entre resíduos");
     ui.add(egui::Slider::new(&mut p.thermal_kt, 0.0..=5.0).text("agitação térmica (kT)"));
     ui.add(egui::Slider::new(&mut p.motor_amplitude, 0.0..=1.0).text("curso do motor (rad)"));
     ui.add(egui::Slider::new(&mut p.joint_coupling, 0.0..=0.95).text("acoplamento entre juntas"));

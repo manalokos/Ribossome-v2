@@ -313,6 +313,14 @@ gpu_struct! {
         pub paint_y: f32,
         pub paint_radius: f32,
         pub paint_grains: f32,
+        /// Multiplicador dos ÂNGULOS DE REPOUSO de todas as juntas
+        /// (aminoácidos e órgãos). 1 = os da tabela (corpos quase direitos);
+        /// maior = corpos enrolados/dobrados, mais perto dos ângulos de uma
+        /// proteína real (50–90° por resíduo).
+        pub rest_angle_mult: f32,
+        pub _pad_f1: u32,
+        pub _pad_f2: u32,
+        pub _pad_f3: u32,
     }
 }
 
@@ -477,6 +485,10 @@ impl Default for SimParams {
             paint_y: 0.0,
             paint_radius: 0.0,
             paint_grains: 0.0,
+            rest_angle_mult: 1.0,
+            _pad_f1: 0,
+            _pad_f2: 0,
+            _pad_f3: 0,
         }
     }
 }
@@ -688,8 +700,16 @@ gpu_struct! {
         pub cond_gamma_c: f32,
         pub cond_delta_n: f32,
         pub cond_delta_c: f32,
-        pub _pad0: f32,
-        pub _pad1: f32,
+        /// Flexibilidade e dobra máxima próprias da junta do órgão
+        /// (>= ORGAN_UNSET = as do aminoácido promotor).
+        pub flex: f32,
+        pub max_bend: f32,
+        /// Sensibilidade própria da junta aos 4 canais (sens_alpha >=
+        /// ORGAN_UNSET = a do aminoácido promotor).
+        pub sens_alpha: f32,
+        pub sens_beta: f32,
+        pub sens_gamma: f32,
+        pub sens_delta: f32,
     }
 }
 

@@ -108,6 +108,17 @@ pub struct OrganRow {
     /// usa a de α e δ a de β.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conducao_gd: Option<[f32; 4]>,
+    /// Flexibilidade da junta própria (como a dos aminoácidos: rigidez =
+    /// rigidez das juntas / flexibilidade²); sem ela usa a do promotor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flexibilidade: Option<f32>,
+    /// Dobra máxima pelos sinais própria (rad); sem ela usa a do promotor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dobra_max: Option<f32>,
+    /// Sensibilidade própria da junta aos sinais [α, β, γ, δ] (modos 0 e 3);
+    /// sem ela usa a do promotor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensibilidade: Option<[f32; 4]>,
     /// As 6 variantes (parâmetro do modificador 0..5): propriedade -> valor
     /// (as propriedades de cada tipo estão em `organs::ORGAN_PROPS`).
     pub variantes: Vec<std::collections::BTreeMap<String, f32>>,
@@ -208,8 +219,12 @@ pub fn organs_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganProps> {
                 cond_gamma_c: r.conducao_gd.or(r.conducao).map_or(0.0, |c| c[1]),
                 cond_delta_n: r.conducao_gd.or(r.conducao).map_or(0.0, |c| c[2]),
                 cond_delta_c: r.conducao_gd.or(r.conducao).map_or(0.0, |c| c[3]),
-                _pad0: 0.0,
-                _pad1: 0.0,
+                flex: r.flexibilidade.unwrap_or(ORGAN_UNSET),
+                max_bend: r.dobra_max.unwrap_or(ORGAN_UNSET),
+                sens_alpha: r.sensibilidade.map_or(ORGAN_UNSET, |c| c[0]),
+                sens_beta: r.sensibilidade.map_or(0.0, |c| c[1]),
+                sens_gamma: r.sensibilidade.map_or(0.0, |c| c[2]),
+                sens_delta: r.sensibilidade.map_or(0.0, |c| c[3]),
             });
         }
     }

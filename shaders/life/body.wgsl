@@ -118,7 +118,7 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
             let oa = organ_cost(ob).rest_angle;
             if (oa < 1e8) { b = oa; }
         }
-        joint_angle[slot * MAX_BODY + k] = b;
+        joint_angle[slot * MAX_BODY + k] = b * params.rest_angle_mult;
         joint_base[slot * MAX_BODY + k] = b;
         joint_state[slot * MAX_BODY + k] = 0u;
         joint_active[slot * MAX_BODY + k] = 0.0;
