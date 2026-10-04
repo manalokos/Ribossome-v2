@@ -303,7 +303,10 @@ gpu_struct! {
         /// e a força com que cada junta dobra vêm do corpo: aproximar ou
         /// fugir depende de como o agente é construído).
         pub signal_mode: f32,
-        pub _pad_e1: u32,
+        /// Silenciador dos RELÓGIOS (experiência): a amplitude de todos os
+        /// relógios é multiplicada por 1 − isto. 0 = normais, 1 = mudos (o
+        /// órgão continua lá e continua a pagar o seu custo).
+        pub clock_mute: f32,
         /// PINCEL do terreno (só o passe de pintura os escreve): centro em
         /// células, raio em células e grãos a pôr (0 = água .. 6 = rocha).
         pub paint_x: f32,
@@ -469,7 +472,7 @@ impl Default for SimParams {
             sediment_threshold: 0.5,
             sediment_settle: 1.0,
             signal_mode: 0.0,
-            _pad_e1: 0,
+            clock_mute: 0.0,
             paint_x: 0.0,
             paint_y: 0.0,
             paint_radius: 0.0,

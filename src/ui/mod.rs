@@ -595,6 +595,8 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.strong("Sinais internos");
     ui.add(egui::Slider::new(&mut p.signal_mode, 0.0..=3.0).step_by(1.0).text("modo dos sinais"))
         .on_hover_text("como os sinais α/β andam pela cadeia e dobram as juntas. 0: condução e sensibilidade de cada aminoácido (v3). 1: difusão igual para os dois lados e todas as juntas respondem igual (α dobra para um lado, β para o outro). 2: o sinal só anda do lado N para o C, mesma resposta. 3: anda do N para o C e cada junta responde conforme o seu aminoácido (o corpo decide para que lado vira)");
+    ui.add(egui::Slider::new(&mut p.clock_mute, 0.0..=1.0).text("silenciar relógios"))
+        .on_hover_text("experiência: tira amplitude a todos os relógios (1 = mudos). O órgão continua no corpo e continua a pagar o custo; serve para ver se os agentes se mexem sem ele (sensores, emissão por contacto)");
     ui.small(match p.signal_mode.round() as i32 {
         0 => "  0 = por aminoácido (cada junta responde à sua maneira)",
         1 => "  1 = isotrópico (difusão para os dois lados, resposta igual)",

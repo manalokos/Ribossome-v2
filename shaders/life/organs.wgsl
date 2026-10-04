@@ -460,7 +460,7 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 var phase = sensor_mem[mi] + 6.2831853 * rate / max(ov.p1, 2.0);
                 phase = phase - 6.2831853 * floor(phase / 6.2831853);
                 sensor_mem[mi] = phase;
-                let v = sin(phase) * organ_gain(o);
+                let v = sin(phase) * organ_gain(o) * (1.0 - clamp(params.clock_mute, 0.0, 1.0));
                 if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }
             }
             case ORGAN_RELAY: {
