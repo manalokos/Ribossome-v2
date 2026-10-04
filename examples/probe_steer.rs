@@ -51,11 +51,22 @@ fn main() {
     println!("corpo: 15 × {body_aa}");
     let body = codon(body_aa).repeat(15);
     let clock = organ(&code, 5, 0);
-    let designs = [
-        ("controlo (relógio)", format!("AUG{clock}{body}UAA")),
-        ("sensor α + relógio", format!("AUG{}{clock}{body}UAA", organ(&code, 8, 0))),
-        ("sensor β + relógio", format!("AUG{}{clock}{body}UAA", organ(&code, 8, 1))),
-    ];
+    // NOCLOCK=1: os mesmos desenhos SEM relógio (o sensor anda sozinho?):
+    // corpo sem órgãos, só sensor α, só sensor β.
+    let noclock = std::env::var("NOCLOCK").is_ok();
+    let designs = if noclock {
+        [
+            ("corpo sem órgãos", format!("AUG{body}UAA")),
+            ("só sensor α", format!("AUG{}{body}UAA", organ(&code, 8, 0))),
+            ("só sensor β", format!("AUG{}{body}UAA", organ(&code, 8, 1))),
+        ]
+    } else {
+        [
+            ("controlo (relógio)", format!("AUG{clock}{body}UAA")),
+            ("sensor α + relógio", format!("AUG{}{clock}{body}UAA", organ(&code, 8, 0))),
+            ("sensor β + relógio", format!("AUG{}{clock}{body}UAA", organ(&code, 8, 1))),
+        ]
+    };
     let gpu = Gpu::new_headless().unwrap();
     let cfg = WorldConfig::TEST;
     let g = cfg.grid_size as i32;
@@ -89,7 +100,9 @@ fn main() {
         w.params.maintenance_cost = 0.0;
         w.params.motion_cost = 0.0;
         w.params.pairing_rate = 0.0;
-        w.params.uptake_rate = 0.0; // não comem: a sopa (e as manchas) ficam
+        // Por omissão não comem (a sopa e as manchas ficam, e o motor
+        // catalítico não mexe as juntas). UPTAKE liga o comer.
+        w.params.uptake_rate = envf("UPTAKE").unwrap_or(0.0);
         w.params.spawn_energy = 60.0;
         w.params.diffusion = envf("DIFF").unwrap_or(0.0);
         w.params.aggregation = 0.0;
