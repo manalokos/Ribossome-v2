@@ -526,8 +526,15 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     let mut hunger = p.hunger_regulation != 0;
     ui.checkbox(&mut hunger, "regulação pela carga energética (cheio não come)");
     p.hunger_regulation = hunger as u32;
-    ui.add(egui::Slider::new(&mut p.signal_mode, 0.0..=2.0).step_by(1.0).text("sinais: 0 por aminoácido, 1 isotrópico, 2 direcional"))
+    ui.strong("Sinais internos");
+    ui.add(egui::Slider::new(&mut p.signal_mode, 0.0..=2.0).step_by(1.0).text("modo dos sinais"))
         .on_hover_text("como os sinais α/β andam pela cadeia e dobram as juntas. 0: condução e sensibilidade de cada aminoácido (v3). 1: difusão igual para os dois lados e todas as juntas respondem igual (α dobra para um lado, β para o outro). 2: o sinal só anda do lado N para o C, mesma resposta");
+    ui.small(match p.signal_mode.round() as i32 {
+        0 => "  0 = por aminoácido (cada junta responde à sua maneira)",
+        1 => "  1 = isotrópico (difusão para os dois lados, resposta igual)",
+        _ => "  2 = direcional (do lado N para o C, resposta igual)",
+    });
+    ui.separator();
     ui.add(egui::Slider::new(&mut p.maintenance_cost, 0.0..=0.01).text("manutenção por resíduo"));
     ui.add(egui::Slider::new(&mut p.metabolic_q10, 1.0..=4.0).text("metabolismo: Q10"))
         .on_hover_text("quanto a química da vida acelera por cada 'escala' de temperatura (1 = não depende da temperatura). Multiplica manutenção, comer, quimiossíntese e emparelhamento; a luz não");
