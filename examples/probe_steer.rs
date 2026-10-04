@@ -63,12 +63,23 @@ fn main() {
     let dt = envf("DT").unwrap_or(16.0) as u32;
     let steps = envf("STEPS").unwrap_or(3200.0) as u32;
     let n_each = envf("N").unwrap_or(400.0) as usize;
-    for mode in [0.0f32, 1.0, 2.0, 3.0] {
+    // MODES: lista de modos (por omissão todos); ACTIVE: fração ativada da
+    // sopa (0,5 dá ~4 ativados por célula; 0,06 dá ~0,5, um mundo pastado).
+    let modes: Vec<f32> = std::env::var("MODES")
+        .map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect())
+        .unwrap_or_else(|_| vec![0.0, 1.0, 2.0, 3.0]);
+    for mode in modes {
         let mut w = World::new(&gpu, cfg, 3);
         let n = cfg.cells() as usize;
         w.custom_terrain = Some((vec![0; n], vec![0.0; n]));
         w.fumaroles.clear();
+        w.seed_active = envf("ACTIVE").unwrap_or(0.5);
         w.seed_matter(&gpu, 3);
+        {
+            let c = w.read_cells_blocking(&gpu);
+            let act: u64 = c.iter().map(|v| (v & 0xFFFF) as u64).sum();
+            println!("ativados por célula: {:.2}", act as f64 / (c.len() / 4) as f64);
+        }
         w.settings.fluid_enabled = false;
         w.settings.terrain_enabled = false;
         w.params.uv_strength = 0.0;
@@ -93,10 +104,31 @@ fn main() {
             }
         }
         w.request_seeds(&reqs);
+        // KEEP: depois de semear (numa sopa rica, para as sementes nascerem),
+        // fica só esta fração dos ativados (o resto passa a gasto): um mundo
+        // pastado com os agentes já lá.
+        if let Some(keep) = envf("KEEP") {
+            let mut enc = gpu.device.create_command_encoder(&Default::default());
+            w.encode_steps(&gpu.queue, &mut enc, 1);
+            gpu.queue.submit([enc.finish()]);
+            gpu.wait_idle();
+            let mut c = w.read_cells_blocking(&gpu);
+            let mut r2 = ribossome::life::SplitMix(99);
+            for v in c.iter_mut() {
+                let (act, spent) = (*v & 0xFFFF, *v >> 16);
+                let k = (0..act).filter(|_| r2.f32() < keep).count() as u32;
+                *v = k | ((spent + act - k) << 16);
+            }
+            gpu.queue.write_buffer(&w.chem_buf, 0, bytemuck::cast_slice(&c));
+            let act: u64 = c.iter().map(|v| (v & 0xFFFF) as u64).sum();
+            println!("depois de pastar: {:.2} ativados por célula", act as f64 / (c.len() / 4) as f64);
+        }
         // Grupo de cada agente pelo comprimento do genoma (os desenhos diferem) e pelo órgão.
         let mut group: HashMap<u32, usize> = HashMap::new();
         let mut turn = [(0f64, 0u64); 3];
         let mut speed = [(0f64, 0u64); 3];
+        // Comida à volta (ativados por célula no 5×5) ao longo do percurso.
+        let mut food = [(0f64, 0u64); 3];
         let mut prev: HashMap<u32, ([f32; 2], Option<[f32; 2]>, Option<[f32; 2]>)> = HashMap::new();
         let food_dir = |cells: &[u32], x: f32, y: f32| -> Option<[f32; 2]> {
             let (cx, cy) = ((x / wpc) as i32, (y / wpc) as i32);
@@ -173,6 +205,22 @@ fn main() {
                         }
                     }
                 }
+                {
+                    let (cx, cy) = ((p[0] / wpc) as i32, (p[1] / wpc) as i32);
+                    let mut sum = 0u32;
+                    for dy in -2i32..=2 {
+                        for dx in -2i32..=2 {
+                            let (xx, yy) = ((cx + dx).clamp(0, g - 1), (cy + dy).clamp(0, g - 1));
+                            let i = (yy * g + xx) as usize;
+                            sum += (0..4).map(|ch| cells[i * 4 + ch] & 0xFFFF).sum::<u32>();
+                        }
+                    }
+                    // Só a segunda metade da corrida (depois de terem tempo de se orientar).
+                    if done > steps / 2 {
+                        food[gi].0 += sum as f64 / 25.0;
+                        food[gi].1 += 1;
+                    }
+                }
                 now.insert(a.id, (p, heading, food_dir(&cells, p[0], p[1])));
             }
             prev = now;
@@ -181,10 +229,11 @@ fn main() {
         for (gi, (name, _)) in designs.iter().enumerate() {
             let cnt = group.values().filter(|&&x| x == gi).count();
             println!(
-                "  {name:22} {cnt:4} agentes: viragem para a comida {:+.3} (n={}), {:.2} células por intervalo",
+                "  {name:22} {cnt:4} agentes: viragem para a comida {:+.3} (n={}), {:.2} células por intervalo, comida à volta {:.3}",
                 turn[gi].0 / turn[gi].1.max(1) as f64,
                 turn[gi].1,
-                speed[gi].0 / speed[gi].1.max(1) as f64
+                speed[gi].0 / speed[gi].1.max(1) as f64,
+                food[gi].0 / food[gi].1.max(1) as f64
             );
         }
     }
