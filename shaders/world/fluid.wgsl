@@ -615,6 +615,33 @@ fn subtract_gradient(@builtin(global_invocation_id) gid: vec3<u32>) {
     velocity_out[idx] = clamp_vec2_len(sanitize_vec2(v), MAX_VEL);
 }
 
+// CAUDAL LÍQUIDO ZERO. Num aquário fechado e incompressível, o caudal que
+// atravessa qualquer corte horizontal é zero (o que sobe tem de descer), e
+// o mesmo para qualquer corte vertical. A projeção da pressão (poucos
+// ciclos, grelha colocada) não tira bem este modo de grande escala: o
+// empuxo das fumarolas deixava a água toda a subir em média (~0,09 células
+// do ambiente por passo), e os monómeros, levados por ela, acumulavam-se no
+// topo. Aqui mede-se a média de v_y em cada linha e de v_x em cada coluna
+// (só água); enforce_boundaries subtrai-as.
+@compute @workgroup_size(64)
+fn net_flux(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= 2u * FLUID_SIZE) { return; }
+    let row = i < FLUID_SIZE;
+    let j = select(i - FLUID_SIZE, i, row);
+    var sum = 0.0;
+    var n = 0.0;
+    for (var k = 0u; k < FLUID_SIZE; k++) {
+        let x = select(j, k, row);
+        let y = select(k, j, row);
+        if (is_effectively_solid(x, y)) { continue; }
+        let v = sanitize_vec2(velocity_in[fgrid(x, y)]);
+        sum += select(v.x, v.y, row);
+        n += 1.0;
+    }
+    net_flux_buf[i] = select(0.0, sum / n, n > 0.0);
+}
+
 // Paredes do aquário: impermeáveis e com deslizamento livre. A componente
 // normal é ZERO na parede; a tangencial mantém-se. (O v3 invertia a normal
 // a cada resolução, um "ressalto" que uma parede real não faz, e a borda
@@ -627,6 +654,8 @@ fn enforce_boundaries(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = fgrid(x, y);
     if (is_effectively_solid(x, y)) { velocity_out[idx] = vec2<f32>(0.0); return; }
     var v = sanitize_vec2(velocity_in[idx]);
+    // Caudal líquido zero por linha e por coluna (ver net_flux).
+    v -= vec2<f32>(net_flux_buf[FLUID_SIZE + x], net_flux_buf[y]);
     if (x == 0u || x == FLUID_SIZE - 1u) { v.x = 0.0; }
     if (y == 0u || y == FLUID_SIZE - 1u) { v.y = 0.0; }
     v = reflect_if_into_solid(x, y, v);

@@ -81,6 +81,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         ("jacobi_pressure", Stage::Compute),
         ("subtract_gradient", Stage::Compute),
         ("enforce_boundaries", Stage::Compute),
+        ("net_flux", Stage::Compute),
         ("mg_init", Stage::Compute),
         ("mg_smooth_red", Stage::Compute),
         ("mg_smooth_black", Stage::Compute),

@@ -153,6 +153,7 @@ struct Pipelines {
     jacobi: wgpu::ComputePipeline,
     subtract_gradient: wgpu::ComputePipeline,
     boundaries: wgpu::ComputePipeline,
+    net_flux: wgpu::ComputePipeline,
     slope: wgpu::ComputePipeline,
     relax_a: wgpu::ComputePipeline,
     relax_b: wgpu::ComputePipeline,
@@ -524,7 +525,7 @@ impl World {
             entries: &(0..10).map(|b| storage_entry(b, false)).collect::<Vec<_>>(),
         });
         // Grupo 2 — fluido. Bindings 0 e 2 (velocity_in, pressure_in) só de leitura.
-        let fluid_entries: Vec<_> = (0..15).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
+        let fluid_entries: Vec<_> = (0..16).map(|b| storage_entry(b, matches!(b, 0 | 2 | 9))).collect();
         let fluid_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fluid layout"),
             entries: &fluid_entries,
@@ -563,15 +564,16 @@ impl World {
             &[&chem_buf, &ledger_buf, &gamma_buf, &light_buf, &slope_buf, &chem_next, &shade_buf, &light_tmp, &agg_act, &agg_nb],
         );
         // Ping-pong: "ab" lê a e escreve b (velocidade e pressão em simultâneo).
+        let net_flux = storage_buffer(device, "net flux", 2 * cfg.fluid_size as u64 * 4);
         let fluid_ab = bind_all(
             "fluid ab",
             &fluid_layout,
-            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask, &redox_a, &redox_b, &redox_eaten],
+            &[&vel_a, &vel_b, &p_a, &p_b, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask, &redox_a, &redox_b, &redox_eaten, &net_flux],
         );
         let fluid_ba = bind_all(
             "fluid ba",
             &fluid_layout,
-            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask, &redox_a, &redox_b, &redox_eaten],
+            &[&vel_b, &vel_a, &p_b, &p_a, &div, &temp_a, &temp_b, &force_vec, &forces, &heat_buf, &vel_smooth, &solid_mask, &redox_a, &redox_b, &redox_eaten, &net_flux],
         );
 
         // Grupo 4 — multigrid da pressão: um uniforme por nível (offset
@@ -756,6 +758,7 @@ impl World {
             jacobi: compute("jacobi_pressure"),
             subtract_gradient: compute("subtract_gradient"),
             boundaries: compute("enforce_boundaries"),
+            net_flux: compute("net_flux"),
             slope: compute("compute_gamma_slope"),
             relax_a: compute("relax_gamma_a"),
             relax_b: compute("relax_gamma_b"),
@@ -1395,6 +1398,7 @@ impl World {
                     }
                 }
                 run(&mut pass, "subtract_gradient", &pl.subtract_gradient, ab, f); // a -> b
+                run(&mut pass, "net_flux", &pl.net_flux, ba, [groups(2 * self.cfg.fluid_size, 64), 1]); // lê b
                 run(&mut pass, "boundaries", &pl.boundaries, ba, f); // b -> a (final em a)
                 run(&mut pass, "smooth_velocity", &pl.smooth_velocity, ab, f); // a -> suavizada (agentes)
                 run(&mut pass, "thermal_activation", &pl.thermal_activation, ab, [g, g]);

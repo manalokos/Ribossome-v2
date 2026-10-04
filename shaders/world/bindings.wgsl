@@ -45,6 +45,10 @@
 @group(2) @binding(12) var<storage, read_write> redox_in: array<f32>;
 @group(2) @binding(13) var<storage, read_write> redox_out: array<f32>;
 @group(2) @binding(14) var<storage, read_write> redox_eaten: array<atomic<u32>>;
+// CAUDAL LÍQUIDO: velocidade vertical média de cada linha (0..FLUID_SIZE) e
+// horizontal média de cada coluna (FLUID_SIZE..2·FLUID_SIZE), só água. Num
+// aquário fechado têm de ser zero (ver net_flux em fluid.wgsl).
+@group(2) @binding(15) var<storage, read_write> net_flux_buf: array<f32>;
 
 // Sombra dos agentes: resíduos por célula da luz (LIGHT_SIZE²), refeita antes
 // de cada cálculo da luz.
