@@ -32,7 +32,7 @@ const SENSOR_UNSET: f32 = -1e30;
 // ao acaso dentro do raio (como moléculas a chegar a um recetor), não o
 // disco inteiro; a carga integra as chegadas no tempo. Um sensor exato a 6
 // células de distância seria "ação à distância" (precisava de um campo).
-const SENSOR_SAMPLES: u32 = 8u;
+const SENSOR_SAMPLES: u32 = 16u;
 const S_SENSE: u32 = 12u << 16u;    // + resíduo·16 + amostra
 // Ganho dos sensores de variação (diferença por passo).
 const SENSOR_CHANGE_GAIN: f32 = 20.0;
@@ -150,6 +150,23 @@ fn body_count(@builtin(global_invocation_id) gid: vec3<u32>) {
 // 5 = redutor das fumarolas, 6 = terreno (grãos por célula, 0 água .. 1
 // rocha). Total: média do disco. Direcional: média do lado esquerdo da
 // cadeia (+perp) − a do direito.
+// RESPOSTA DO RECETOR (adaptação ao fundo, como nos recetores reais):
+// - nível: OCUPAÇÃO c / (c + K), que satura (0..1). Numa sopa pobre a
+//   leitura já é uma fração apreciável, em vez de ~0,03;
+// - direcional: CONTRASTE relativo (esq − dir) / (esq + dir + K), em −1..1
+//   (lei de Weber: sente "mais 20%" tanto na sopa rica como na pobre).
+// K = meia-saturação, nas unidades de sense_value de cada alvo.
+fn sense_k(what: u32) -> f32 {
+    switch what {
+        case 0u, 2u: { return 1.0 / 12.0; }   // 1 monómero por célula
+        case 3u: { return 0.2; }              // corpos: 0,2 resíduos por célula
+        case 4u: { return 0.5; }              // temperatura 2
+        case 5u: { return 1.0; }              // redutor 5
+        case 6u: { return 0.3; }              // ~1 grão por célula
+        default: { return 1.0; }              // luz 0,25
+    }
+}
+
 // O que uma célula vale para um sensor (ver `what` em sense_disc).
 fn sense_value(what: u32, c: vec2<i32>) -> f32 {
     let idx = u32(c.y) * GRID_SIZE + u32(c.x);
@@ -205,8 +222,11 @@ fn sense_sample(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, k
             }
         }
     }
-    if (!directional) { return sum_l / max(n_l, 1.0); }
-    return sum_l / max(n_l, 1.0) - sum_r / max(n_r, 1.0);
+    let kk = sense_k(what);
+    let l = sum_l / max(n_l, 1.0);
+    if (!directional) { return l / (l + kk); }
+    let r = sum_r / max(n_r, 1.0);
+    return (l - r) / (l + r + kk);
 }
 
 // Leitura EXATA do disco inteiro (só para os corpos de agentes, onde é
@@ -329,7 +349,10 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 let here = residue_world(slot, a, k);
                 let perp = chain_normal(slot, a, k);
                 if (what == 3u) {
-                    sensed = sense_disc(here, perp, what, dir) - own_body_in_disc(slot, a, here, perp, dir);
+                    // Corpos: só se conhece a diferença (ou o total) já sem o
+                    // próprio corpo; a mesma saturação, com sinal.
+                    let raw = sense_disc(here, perp, what, dir) - own_body_in_disc(slot, a, here, perp, dir);
+                    sensed = raw / (abs(raw) + sense_k(3u));
                 } else {
                     sensed = sense_sample(here, perp, what, dir, a.id, k);
                 }

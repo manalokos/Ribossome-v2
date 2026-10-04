@@ -96,7 +96,7 @@ pub const MAX_PROPS: usize = 8;
 
 const SENSOR_PROPS: &[PropDef] = &[
     pd("canal", "0 = emite em α, 1 = em β"),
-    pd("ganho", "multiplica o que sente (negativo inverte)"),
+    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ou, no direcional, o contraste relativo (−1..1)"),
     pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
     pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
 ];
@@ -104,7 +104,7 @@ const SENSOR_PROPS: &[PropDef] = &[
 /// Sensores "de luz" (físicos): as mesmas propriedades e o que sentem.
 const LIGHT_SENSOR_PROPS: &[PropDef] = &[
     pd("canal", "0 = emite em α, 1 = em β"),
-    pd("ganho", "multiplica o que sente (negativo inverte)"),
+    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ou, no direcional, o contraste relativo (−1..1)"),
     pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
     pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
     pd("alvo", "0 = luz, 1 = temperatura, 2 = redutor das fumarolas, 3 = terreno (grãos)"),
@@ -113,7 +113,7 @@ const LIGHT_SENSOR_PROPS: &[PropDef] = &[
 /// Sensores "de comida": as mesmas propriedades e o que sentem.
 const FOOD_SENSOR_PROPS: &[PropDef] = &[
     pd("canal", "0 = emite em α, 1 = em β"),
-    pd("ganho", "multiplica o que sente (negativo inverte)"),
+    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ou, no direcional, o contraste relativo (−1..1)"),
     pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
     pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
     pd("alvo", "0 = comida (ativados), 1 = gastos (rasto de quem come), 2 = corpos de outros agentes"),
