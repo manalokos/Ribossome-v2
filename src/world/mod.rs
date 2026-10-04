@@ -1665,71 +1665,126 @@ fn cell_capacity(g: u32) -> u32 {
 }
 
 /// Ajusta a matéria VIVA a um terreno novo sem criar nem destruir nada: o
-/// que excede a capacidade de uma célula segue para as células seguintes
-/// (ordem de varrimento, a dar a volta) com espaço. Cada monómero mantém o
-/// canal e o estado.
+/// que excede a capacidade de uma célula é tirado em proporção do que lá
+/// está (todos os tipos e estados por igual) e REPARTIDO por todas as
+/// células com espaço, em proporção do espaço de cada uma e com a mesma
+/// mistura em todas. (Antes seguia para as células seguintes, um canal de
+/// cada vez: ficavam faixas de um só tipo, em arco-íris, à direita de cada
+/// rocha.) Cada monómero mantém o canal e o estado.
 #[allow(clippy::needless_range_loop)]
 fn refit_matter_to_terrain(cells: &mut [u32], gamma: &[u32]) {
     let n = gamma.len();
-    // Excesso em trânsito: [canal][0 = ativado, 1 = gasto].
-    let mut carry = [[0u64; 2]; 4];
-    let mut pending = 0u64;
-    // Duas voltas: a segunda arruma o que sobrar do fim da primeira.
-    for pass in 0..2 {
+    // Tipo k = canal·2 + estado (0 = ativado, 1 = gasto).
+    let get = |cells: &[u32], i: usize, k: usize| -> u32 {
+        let v = cells[i * 4 + k / 2];
+        if k % 2 == 0 { v & 0xFFFF } else { v >> 16 }
+    };
+    let add = |cells: &mut [u32], i: usize, k: usize, d: u32| {
+        cells[i * 4 + k / 2] += if k % 2 == 0 { d } else { d << 16 };
+    };
+    let sub = |cells: &mut [u32], i: usize, k: usize, d: u32| {
+        cells[i * 4 + k / 2] -= if k % 2 == 0 { d } else { d << 16 };
+    };
+    // 1. Tira o excesso de cada célula, em proporção do conteúdo.
+    let mut carry = [0u64; 8];
+    let mut room_total = 0u64;
+    for i in 0..n {
+        let cap = cell_capacity(gamma[i]);
+        let tot: u32 = (0..8).map(|k| get(cells, i, k)).sum();
+        if tot <= cap {
+            room_total += (cap - tot) as u64;
+            continue;
+        }
+        let over = tot - cap;
+        let mut left = over;
+        for k in 0..8 {
+            let t = (get(cells, i, k) as u64 * over as u64 / tot as u64) as u32;
+            sub(cells, i, k, t);
+            carry[k] += t as u64;
+            left -= t;
+        }
+        // O resto do arredondamento, um a um, a começar num tipo que roda.
+        let mut k = i % 8;
+        while left > 0 {
+            if get(cells, i, k) > 0 {
+                sub(cells, i, k, 1);
+                carry[k] += 1;
+                left -= 1;
+            }
+            k = (k + 1) % 8;
+        }
+    }
+    let pending: u64 = carry.iter().sum();
+    if pending == 0 {
+        return;
+    }
+    // 2. Reparte: a célula i recebe de cada tipo carry·espaço_i/espaço_total
+    // (arredondamento acumulado: a soma é exata). O que não couber por causa
+    // dos arredondamentos fica em `rest`.
+    let mut rest = [0u64; 8];
+    if room_total > 0 {
+        let give = carry.map(|c| c.min(c * room_total.min(pending) / pending));
+        let mut cum_room = 0u64;
+        let mut done = [0u64; 8];
         for i in 0..n {
             let cap = cell_capacity(gamma[i]);
-            let mut tot: u32 = (0..4).map(|c| (cells[i * 4 + c] & 0xFFFF) + (cells[i * 4 + c] >> 16)).sum();
-            if pass == 0 && tot > cap {
-                // Tira o excesso, canal a canal (gastos primeiro).
-                let mut over = tot - cap;
-                for c in 0..4 {
-                    let v = cells[i * 4 + c];
-                    let (mut act, mut spent) = (v & 0xFFFF, v >> 16);
-                    let ts = spent.min(over);
-                    spent -= ts;
-                    over -= ts;
-                    let ta = act.min(over);
-                    act -= ta;
-                    over -= ta;
-                    carry[c][1] += ts as u64;
-                    carry[c][0] += ta as u64;
-                    pending += (ts + ta) as u64;
-                    cells[i * 4 + c] = act | (spent << 16);
-                }
-                tot = cap;
+            let tot: u32 = (0..8).map(|k| get(cells, i, k)).sum();
+            if tot >= cap {
+                continue;
             }
-            if pending > 0 && tot < cap {
-                let mut room = cap - tot;
-                for c in 0..4 {
-                    for st in 0..2 {
-                        let k = (carry[c][st].min(room as u64)) as u32;
-                        if k == 0 {
-                            continue;
-                        }
-                        // Cada metade da palavra guarda até 0xFFFF.
-                        let v = cells[i * 4 + c];
-                        let cur = if st == 0 { v & 0xFFFF } else { v >> 16 };
-                        let k = k.min(0xFFFF - cur);
-                        cells[i * 4 + c] = if st == 0 { v + k } else { v + (k << 16) };
-                        carry[c][st] -= k as u64;
-                        pending -= k as u64;
-                        room -= k;
-                    }
-                }
+            let mut room = cap - tot;
+            cum_room += room as u64;
+            for k in 0..8 {
+                // Fase diferente por tipo: senão os arredondamentos de todos
+                // os tipos caíam nas mesmas células.
+                let phase = k as u128 * room_total as u128 / 8;
+                let target = ((give[k] as u128 * cum_room as u128 + phase) / room_total as u128) as u64;
+                let want = (target - done[k]) as u32;
+                done[k] = target;
+                let d = want.min(room).min(0xFFFF - get(cells, i, k));
+                add(cells, i, k, d);
+                room -= d;
+                rest[k] += (want - d) as u64;
             }
         }
-        if pending == 0 {
-            break;
+        for k in 0..8 {
+            rest[k] += carry[k] - give[k];
         }
+    } else {
+        rest = carry;
+    }
+    // 3. Os restos (poucos): pelas células com espaço, um de cada tipo de
+    // cada vez.
+    let mut left: u64 = rest.iter().sum();
+    let mut i = 0;
+    let mut k = 0;
+    let mut idle = 0;
+    while left > 0 && idle < n {
+        let cap = cell_capacity(gamma[i]);
+        let tot: u32 = (0..8).map(|k| get(cells, i, k)).sum();
+        if tot < cap {
+            while rest[k] == 0 {
+                k = (k + 1) % 8;
+            }
+            if get(cells, i, k) < 0xFFFF {
+                add(cells, i, k, 1);
+                rest[k] -= 1;
+                left -= 1;
+                idle = 0;
+            }
+            k = (k + 1) % 8;
+        } else {
+            idle += 1;
+        }
+        i = (i + 1) % n;
     }
     // Sem espaço em lado nenhum (terreno quase todo rocha): o resto fica na
     // primeira célula que não seja rocha, acima da capacidade (o transporte
     // espalha-o depois). Nada se perde.
-    if pending > 0 {
+    if left > 0 {
         let i = (0..n).find(|&i| gamma[i] < GAMMA_SOLID).unwrap_or(0);
-        for c in 0..4 {
-            let v = cells[i * 4 + c];
-            cells[i * 4 + c] = ((v & 0xFFFF) + carry[c][0] as u32) | (((v >> 16) + carry[c][1] as u32) << 16);
+        for k in 0..8 {
+            add(cells, i, k, rest[k] as u32);
         }
     }
 }
@@ -1824,4 +1879,41 @@ fn bilinear(f: &[f32], m: usize, x: f32, y: f32) -> f32 {
     let a = f[y0 * m + x0] + (f[y0 * m + x1] - f[y0 * m + x0]) * tx;
     let b = f[y1 * m + x0] + (f[y1 * m + x1] - f[y1 * m + x0]) * tx;
     a + (b - a) * ty
+}
+
+#[cfg(test)]
+mod refit_tests {
+    use super::*;
+
+    /// Uma rocha a meio de uma linha: a matéria que lá estava reparte-se por
+    /// todas as células com espaço, com a mesma mistura de tipos (sem faixas
+    /// de um só tipo ao lado da rocha), e nada se perde.
+    #[test]
+    fn refit_spreads_excess_evenly_and_keeps_the_mix() {
+        let n = 400;
+        let mut cells = vec![0u32; n * 4];
+        for i in 0..n {
+            for c in 0..4 {
+                cells[i * 4 + c] = 2 | (3 << 16);
+            }
+        }
+        let mut gamma = vec![0u32; n];
+        for g in &mut gamma[100..140] {
+            *g = GAMMA_SOLID;
+        }
+        let before = Ledger::from_cells(&cells);
+        refit_matter_to_terrain(&mut cells, &gamma);
+        assert_eq!(Ledger::from_cells(&cells), before);
+        for i in 0..n {
+            let per: Vec<u32> = (0..4).map(|c| (cells[i * 4 + c] & 0xFFFF) + (cells[i * 4 + c] >> 16)).collect();
+            let tot: u32 = per.iter().sum();
+            if gamma[i] >= GAMMA_SOLID {
+                assert_eq!(tot, 0);
+            } else {
+                // 20 por célula + 800 repartidos por 360 células (~2,2 cada).
+                assert!((21..=24).contains(&tot), "célula {i}: {tot}");
+                assert!(per.iter().all(|&v| (5..=7).contains(&v)), "célula {i}: {per:?}");
+            }
+        }
+    }
 }
