@@ -543,6 +543,13 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             let edge = smoothstep(core * 0.95, core * 1.15, d);
             return vec4<f32>(mix(in.color, in.color * 0.4, edge), 1.0);
         }
+        case ORGAN_DORMANCY: {
+            // Lua em crescente (azul-clara): disco menos um disco deslocado.
+            if (d > core) { discard; }
+            let bite = length(vec2<f32>(u, v) - vec2<f32>(core * 0.45, core * 0.2));
+            if (bite < core * 0.8) { discard; }
+            return vec4<f32>(0.72, 0.82, 1.0, 1.0);
+        }
         case ORGAN_PROTEASE: {
             // Disco com dentes (6 triângulos à volta).
             let ang = atan2(v, u);

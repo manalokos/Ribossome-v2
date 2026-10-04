@@ -295,7 +295,24 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // METABOLISMO (Q10): toda a química do agente (comer, quimiossíntese,
     // copiar, manter-se) anda mais depressa no quente e mais devagar no frio.
     // A luz não depende da temperatura. m = 1 em T = metabolic_ref.
-    let metab = pow(max(params.metabolic_q10, 1e-3), (t_here - params.metabolic_ref) / max(params.metabolic_span, 1e-3));
+    var metab = pow(max(params.metabolic_q10, 1e-3), (t_here - params.metabolic_ref) / max(params.metabolic_span, 1e-3));
+    // DORMÊNCIA (como as proteínas de hibernação dos ribossomas): cada órgão
+    // multiplica o metabolismo do agente pelo seu fator (^intensidade). As
+    // variantes fixas atuam sempre; as outras, em proporção do sinal γ ou δ
+    // (positivo, até 1) que chega ao órgão. É uma troca, não uma poupança:
+    // o agente gasta menos mas também come e copia mais devagar.
+    var dorm = 1.0;
+    for (var k = 0u; k < a.body_len; k++) {
+        let od = organ_get(slot, k);
+        if (organ_type(od) != ORGAN_DORMANCY) { continue; }
+        let dv = organ_var(od);
+        var drive = 1.0;
+        if (dv.p1 >= 0.0) {
+            drive = clamp(signals[slot * MAX_BODY + k][u32(clamp(dv.p1, 0.0, 3.0))], 0.0, 1.0);
+        }
+        dorm *= pow(clamp(dv.p0, 0.01, 1.0), organ_gain(od) * drive);
+    }
+    metab *= max(dorm, DORMANCY_FLOOR);
     // O ganho de natação escala SÓ a translação. A rotação fica a física:
     // escalá-la exagerava o balanço de cada abrir-e-fechar (o corpo rodava
     // muito para um lado e para o outro) e a orientação errada estragava a
@@ -634,6 +651,10 @@ fn fluid_index_at_world(p: vec2<f32>) -> u32 {
     let f = clamp(vec2<i32>(floor(p / SIM_SIZE * f32(FLUID_SIZE))), vec2<i32>(0), vec2<i32>(i32(FLUID_SIZE) - 1));
     return u32(f.y) * FLUID_SIZE + u32(f.x);
 }
+
+// O metabolismo nunca desce abaixo disto por dormência (um agente nunca
+// fica totalmente parado: continua a pagar e a poder acordar).
+const DORMANCY_FLOOR: f32 = 0.1;
 
 // NASCIMENTO: quando o emparelhamento está completo, os complementos
 // capturados formam o filho = complemento reverso do genoma (v3). Mutações

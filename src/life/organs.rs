@@ -33,7 +33,7 @@
 
 use super::amino::{STOP, codon};
 
-pub const ORGAN_TYPES: usize = 16;
+pub const ORGAN_TYPES: usize = 17;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -53,6 +53,7 @@ pub enum Organ {
     Bias = 13,
     Chemosynthesis = 14,
     Proofreading = 15,
+    Dormancy = 16,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -74,10 +75,11 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "bias",
     "quimiossíntese",
     "revisão (menos mutações)",
+    "dormência (metabolismo lento)",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -154,6 +156,10 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("eficiencia", "multiplica o que consome"),
     ],
     &[pd("protecao", "divide a taxa de mutação das cópias deste agente por 1 + a soma das proteções (× intensidade)")],
+    &[
+        pd("fator", "o metabolismo do agente (manutenção, comer, quimiossíntese e copiar, tudo junto) é multiplicado por isto quando o órgão está a atuar em pleno"),
+        pd("canal", "−1 = atua sempre; 2 = só com sinal γ positivo; 3 = só com sinal δ positivo (proporcional ao sinal, até 1)"),
+    ],
 ];
 
 fn fmt_canal(v: f32) -> &'static str {
@@ -233,6 +239,15 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             }
         }
         15 => format!("revisão [escudo]: taxa de mutação das cópias ÷ (1 + {:.1})", v("protecao") * g),
+        16 => format!(
+            "dormência [lua]: metabolismo × {:.2} (come, copia e gasta mais devagar), {}",
+            v("fator").clamp(0.01, 1.0).powf(g),
+            match v("canal") {
+                c if c < 0.0 => "sempre".to_string(),
+                c if c < 2.5 => "só com sinal γ positivo".to_string(),
+                _ => "só com sinal δ positivo".to_string(),
+            }
+        ),
         7 => format!("armazenamento [disco com anéis]: +{:.1} de capacidade de energia", v("capacidade") * g),
         8 => format!("{} · sente {}", sensor("sensor de comida DIRECIONAL (esquerda − direita)", "2 antenas verdes"), alvo()),
         9 => format!("{} · sente {}", sensor("sensor físico DIRECIONAL (esquerda − direita)", "2 antenas amarelas"), alvo_fisico()),
@@ -358,6 +373,7 @@ pub fn wgsl() -> String {
         "BIAS",
         "CHEMO",
         "PROOFREAD",
+        "DORMANCY",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");
