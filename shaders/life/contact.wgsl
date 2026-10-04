@@ -149,4 +149,8 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     a.rot += bd.z;
     a.energy = min(max(a.energy + contact_disp[slot].z + bd.w, 0.0), energy_capacity(slot, a)) - lost;
     agents[slot] = a;
+    // Para a vista (flash das proteases): .x = energia que lhe morderam
+    // neste passo, .z = a que ganhou a morder. contact_build repõe tudo no
+    // passo seguinte.
+    contact_disp[slot] = vec4<f32>(lost, 0.0, contact_disp[slot].z, contact_disp[slot].w);
 }

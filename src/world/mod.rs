@@ -277,6 +277,9 @@ pub struct World {
     /// com ele (−1 = sem dados); estatísticas da população (leitura assíncrona).
     kin_target: wgpu::Buffer,
     pub kin_buf: wgpu::Buffer,
+    /// Contacto por agente (vec4): depois do passo, .x = energia perdida em
+    /// mordidas e .z = ganha a morder (a vista usa-os para o flash).
+    pub contact_disp_buf: wgpu::Buffer,
     stats_buf: wgpu::Buffer,
     stats_staging: wgpu::Buffer,
     stats_readback: Readback,
@@ -838,6 +841,7 @@ impl World {
             code_buf,
             kin_target,
             kin_buf,
+            contact_disp_buf: contact_disp,
             stats_buf,
             stats_staging,
             stats_readback: Readback::Idle,

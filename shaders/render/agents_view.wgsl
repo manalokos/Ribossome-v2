@@ -28,6 +28,15 @@
 @group(0) @binding(11) var<storage, read> bonds_view: array<vec4<u32>>;
 // Semelhança genética de cada slot com o selecionado (−1 = sem dados).
 @group(0) @binding(12) var<storage, read> kin_view: array<f32>;
+// Mordidas do último passo por agente: .x = energia que lhe tiraram, .z = a
+// que ganhou a morder (shaders/life/contact.wgsl).
+@group(0) @binding(13) var<storage, read> bite_view: array<vec4<f32>>;
+
+// FLASH DAS PROTEASES: quem está a morder fica com as proteases maiores e
+// amarelo-claras; a vítima fica com o corpo vermelho vivo.
+const BITE_ORGAN_GROW: f32 = 2.2;
+const BITE_ATTACK_COLOR: vec3<f32> = vec3<f32>(1.0, 0.95, 0.45);
+const BITE_VICTIM_COLOR: vec3<f32> = vec3<f32>(1.0, 0.12, 0.08);
 
 // Fios de RNA nas pontas (as zonas não traduzidas): bases desenhadas por
 // agente (metade para cada ponta), distância entre bases e ondulação.
@@ -149,6 +158,9 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     var organ = NO_ORGAN;
     var tangent = vec2<f32>(1.0, 0.0);
     var phase = 0.0;
+    let bite = bite_view[slot];
+    var flash = vec3<f32>(-1.0);
+    if (bite.x > 0.0) { flash = BITE_VICTIM_COLOR; }
     if (!naked) {
         let base = slot * MAX_BODY_V;
         let aa = (bodies_view[slot * 16u + k / 4u] >> ((k % 4u) * 8u)) & 0xFFu;
@@ -170,6 +182,13 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         if (oc != 0u) {
             organ = (oc & 0x1Fu) - 1u;
             r_world *= ORGAN_SCALE;
+            if (organ == ORGAN_PROTEASE) {
+                col = vec3<f32>(0.9, 0.2, 0.2);
+                if (bite.z > 0.0 && glyph) {
+                    flash = BITE_ATTACK_COLOR;
+                    r_world *= BITE_ORGAN_GROW;
+                }
+            }
             if (organ == ORGAN_BIAS) {
                 let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
                 let beta = organ_variants_view[ORGAN_BIAS * ORGAN_VARIANTS + p].p0 >= 0.5;
@@ -199,6 +218,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     // Pouca energia = mais escuro (só na vista química).
     let dim = mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
     o.color = select(col, col * dim, view.signal_view == 0u || view.signal_view == 4u);
+    if (flash.x >= 0.0 && view.signal_view == 0u) { o.color = flash; }
     if (!glyph && !naked) {
         // TUBO: cápsula do resíduo k até ao k+1 (o último só tem a ponta).
         // A espessura é a do resíduo k sem o aumento dos órgãos.
@@ -528,7 +548,7 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             let ang = atan2(v, u);
             let tooth = core + (0.95 - core) * max(0.0, 1.0 - abs(fract(ang / 1.0471976) - 0.5) * 4.0);
             if (d > tooth) { discard; }
-            return vec4<f32>(select(vec3<f32>(0.9, 0.2, 0.2), vec3<f32>(1.0, 0.9, 0.9), d > core), 1.0);
+            return vec4<f32>(select(in.color, mix(in.color, vec3<f32>(1.0), 0.8), d > core), 1.0);
         }
         default: {
             // Armazenamento: disco com anéis concêntricos.
