@@ -74,6 +74,13 @@ pub struct OrganRow {
     /// proteína a manter). 0 = sinais (sensores, relógio, relé).
     #[serde(default)]
     pub intensidade_paga: f32,
+    /// Ângulo de repouso próprio (rad); sem ele usa o do aminoácido promotor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angulo: Option<f32>,
+    /// Condução dos sinais própria [α lado N, α lado C, β lado N, β lado C];
+    /// sem ela usa a do aminoácido promotor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conducao: Option<[f32; 4]>,
     /// As 6 variantes (parâmetro do modificador 0..5): propriedade -> valor
     /// (as propriedades de cada tipo estão em `organs::ORGAN_PROPS`).
     pub variantes: Vec<std::collections::BTreeMap<String, f32>>,
@@ -143,6 +150,9 @@ pub const VARIANT_COSTS: [(&str, &str); 4] = [
 
 /// Propriedades físicas por variante (tipo·VARIANTS + parâmetro): as do tipo
 /// × os custos da variante.
+/// "Sem valor próprio" nas propriedades de órgão enviadas à GPU.
+pub const ORGAN_UNSET: f32 = 1e9;
+
 pub fn organs_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganProps> {
     let mut out = Vec::new();
     for r in rows {
@@ -154,9 +164,13 @@ pub fn organs_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganProps> {
                 upkeep: r.manutencao * c("custo_manutencao"),
                 drag_mult: r.arrasto_mult * c("custo_arrasto"),
                 gain_pays: r.intensidade_paga,
+                rest_angle: r.angulo.unwrap_or(ORGAN_UNSET),
+                cond_alpha_n: r.conducao.map_or(ORGAN_UNSET, |c| c[0]),
+                cond_alpha_c: r.conducao.map_or(0.0, |c| c[1]),
+                cond_beta_n: r.conducao.map_or(0.0, |c| c[2]),
+                cond_beta_c: r.conducao.map_or(0.0, |c| c[3]),
                 _pad0: 0.0,
                 _pad1: 0.0,
-                _pad2: 0.0,
             });
         }
     }

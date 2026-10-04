@@ -632,9 +632,18 @@ gpu_struct! {
         /// 1 = a manutenção multiplica pela intensidade (órgãos que fazem
         /// trabalho); 0 = não (sinais: a intensidade é só um peso).
         pub gain_pays: f32,
+        /// Ângulo de repouso próprio do órgão (rad). >= ORGAN_UNSET = usa o
+        /// do aminoácido promotor.
+        pub rest_angle: f32,
+        /// Condução dos sinais própria do órgão (v3: cada parte tinha os
+        /// seus multiplicadores): peso do vizinho do lado N e do lado C, por
+        /// canal. cond_alpha_n >= ORGAN_UNSET = usa a do aminoácido promotor.
+        pub cond_alpha_n: f32,
+        pub cond_alpha_c: f32,
+        pub cond_beta_n: f32,
+        pub cond_beta_c: f32,
         pub _pad0: f32,
         pub _pad1: f32,
-        pub _pad2: f32,
     }
 }
 

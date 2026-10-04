@@ -10,6 +10,9 @@
 // (uma dobra sozinha é recíproca e não desloca nada).
 
 const SIGNAL_DECAY: f32 = 0.95;
+// Dinâmica do v3 (modo 0 dos sinais).
+const V3_SIGNAL_DECAY: f32 = 0.997;
+const V3_SIGNAL_UPDATE: f32 = 0.75;
 const SIGNAL_MAX: f32 = 4.0;
 // Resposta das juntas aos sinais (v3, jan. 2026): desvio = SIGNAL_GAIN ×
 // (α·sens_α + β·sens_β), saturado suavemente no máximo do aminoácido
@@ -444,6 +447,12 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         let next = select(vec2<f32>(0.0), signals[base + k + 1u], k + 1u < n);
         let pr = aa_props[body_get(slot, k)];
         var c = vec4<f32>(pr.cond_alpha_n, pr.cond_alpha_c, pr.cond_beta_n, pr.cond_beta_c);
+        // Um órgão tem a sua própria condução (v3: cada parte a sua).
+        let ok = organ_get(slot, k);
+        if (ok != 0u) {
+            let op = organ_cost(ok);
+            if (op.cond_alpha_n < 1e8) { c = vec4<f32>(op.cond_alpha_n, op.cond_alpha_c, op.cond_beta_n, op.cond_beta_c); }
+        }
         // Modos uniformes: difusão isotrópica (metade de cada vizinho) ou
         // condução direcional (só do lado N).
         if (params.signal_mode >= 1.5) {
@@ -452,8 +461,15 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             c = vec4<f32>(0.5);
         }
         let incoming = vec2<f32>(c.x * prev.x + c.y * next.x, c.z * prev.y + c.w * next.y);
-        let s = SIGNAL_DECAY * incoming + emit[k];
-        signals[base + k] = clamp(s, vec2<f32>(-SIGNAL_MAX), vec2<f32>(SIGNAL_MAX));
+        var s = SIGNAL_DECAY * incoming + emit[k];
+        var lim = SIGNAL_MAX;
+        if (params.signal_mode < 0.5) {
+            // Modo 0 = a dinâmica do v3: perda de 0,3% por salto, 75% do
+            // valor novo + 25% do antigo (cada parte tem memória), ±1.
+            s = mix(here, V3_SIGNAL_DECAY * incoming + emit[k], V3_SIGNAL_UPDATE);
+            lim = 1.0;
+        }
+        signals[base + k] = clamp(s, vec2<f32>(-lim), vec2<f32>(lim));
         prev = here;
     }
     return bend * BEND_COST;

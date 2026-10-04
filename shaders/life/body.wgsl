@@ -111,7 +111,13 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
     // Geometria inicial: dobras homoquirais pela tendência local; a
     // dobragem (fold.wgsl) parte daqui nos primeiros passos de vida.
     for (var k = 0u; k < n; k++) {
-        let b = residue_bend(body_get(slot, k));
+        // O órgão pode ter o seu ângulo de repouso (tabela dos órgãos, v3).
+        var b = residue_bend(body_get(slot, k));
+        let ob = organ_get(slot, k);
+        if (ob != 0u) {
+            let oa = organ_cost(ob).rest_angle;
+            if (oa < 1e8) { b = oa; }
+        }
         joint_angle[slot * MAX_BODY + k] = b;
         joint_base[slot * MAX_BODY + k] = b;
         joint_state[slot * MAX_BODY + k] = 0u;
