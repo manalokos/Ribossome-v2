@@ -350,8 +350,14 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
         }
     });
     ui.add(egui::Slider::new(&mut st.monomer_brightness, 0.0..=1.0).text("brilho dos monómeros"));
-    const SIGNAL_VIEWS: [&str; 5] =
-        ["química", "sinal α", "sinal β", "α (vermelho) + β (verde)", "parentesco com o selecionado"];
+    const SIGNAL_VIEWS: [&str; 6] = [
+        "química",
+        "sinal α",
+        "sinal β",
+        "α (vermelho) + β (verde)",
+        "parentesco com o selecionado",
+        "γ (vermelho) + δ (verde)",
+    ];
     egui::ComboBox::from_label("cor dos agentes").selected_text(SIGNAL_VIEWS[st.signal_view as usize]).show_ui(
         ui,
         |ui| {

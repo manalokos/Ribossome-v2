@@ -638,7 +638,17 @@ gpu_struct! {
         /// Termoestabilidade (0..1): contribuição do resíduo para resistir à
         /// desnaturação pelo calor (termófilos: mais E, K, R, P; menos Q, N).
         pub thermo: f32,
+        /// Canais γ e δ dos sinais: sensibilidade da junta e condução (lado
+        /// N, lado C), como para α e β.
+        pub sens_gamma: f32,
+        pub sens_delta: f32,
+        pub cond_gamma_n: f32,
+        pub cond_gamma_c: f32,
+        pub cond_delta_n: f32,
+        pub cond_delta_c: f32,
         pub _pad2: u32,
+        pub _pad3: u32,
+        pub _pad4: u32,
     }
 }
 
@@ -664,6 +674,12 @@ gpu_struct! {
         pub cond_alpha_c: f32,
         pub cond_beta_n: f32,
         pub cond_beta_c: f32,
+        /// Condução própria nos canais γ e δ (sem valor próprio: γ usa a de
+        /// α e δ a de β do mesmo órgão).
+        pub cond_gamma_n: f32,
+        pub cond_gamma_c: f32,
+        pub cond_delta_n: f32,
+        pub cond_delta_c: f32,
         pub _pad0: f32,
         pub _pad1: f32,
     }

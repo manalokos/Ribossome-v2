@@ -36,6 +36,20 @@ pub struct AminoRow {
     pub cond_beta_n: f32,
     #[serde(rename = "cond_beta_C")]
     pub cond_beta_c: f32,
+    /// Canais γ e δ (sem eles no ficheiro: junta insensível e condução
+    /// igual para os dois lados).
+    #[serde(default)]
+    pub sens_gama: f32,
+    #[serde(default)]
+    pub sens_delta: f32,
+    #[serde(rename = "cond_gama_N", default = "half")]
+    pub cond_gama_n: f32,
+    #[serde(rename = "cond_gama_C", default = "half")]
+    pub cond_gama_c: f32,
+    #[serde(rename = "cond_delta_N", default = "half")]
+    pub cond_delta_n: f32,
+    #[serde(rename = "cond_delta_C", default = "half")]
+    pub cond_delta_c: f32,
     #[serde(rename = "substrato_A")]
     pub substrato_a: f32,
     #[serde(rename = "substrato_U")]
@@ -81,6 +95,10 @@ pub struct OrganRow {
     /// sem ela usa a do aminoácido promotor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conducao: Option<[f32; 4]>,
+    /// Condução própria nos canais γ e δ [γ N, γ C, δ N, δ C]; sem ela, γ
+    /// usa a de α e δ a de β.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conducao_gd: Option<[f32; 4]>,
     /// As 6 variantes (parâmetro do modificador 0..5): propriedade -> valor
     /// (as propriedades de cada tipo estão em `organs::ORGAN_PROPS`).
     pub variantes: Vec<std::collections::BTreeMap<String, f32>>,
@@ -88,6 +106,10 @@ pub struct OrganRow {
 
 fn one() -> f32 {
     1.0
+}
+
+fn half() -> f32 {
+    0.5
 }
 
 pub const ORGANS_PATH: &str = "assets/orgaos.json";
@@ -169,6 +191,10 @@ pub fn organs_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganProps> {
                 cond_alpha_c: r.conducao.map_or(0.0, |c| c[1]),
                 cond_beta_n: r.conducao.map_or(0.0, |c| c[2]),
                 cond_beta_c: r.conducao.map_or(0.0, |c| c[3]),
+                cond_gamma_n: r.conducao_gd.or(r.conducao).map_or(0.0, |c| c[0]),
+                cond_gamma_c: r.conducao_gd.or(r.conducao).map_or(0.0, |c| c[1]),
+                cond_delta_n: r.conducao_gd.or(r.conducao).map_or(0.0, |c| c[2]),
+                cond_delta_c: r.conducao_gd.or(r.conducao).map_or(0.0, |c| c[3]),
                 _pad0: 0.0,
                 _pad1: 0.0,
             });
@@ -261,7 +287,15 @@ pub fn to_gpu(rows: &[AminoRow]) -> Vec<AaProps> {
             uv_absorb: r.absorcao_uv,
             seg_len: r.comprimento,
             thermo: r.termoestabilidade,
+            sens_gamma: r.sens_gama,
+            sens_delta: r.sens_delta,
+            cond_gamma_n: r.cond_gama_n,
+            cond_gamma_c: r.cond_gama_c,
+            cond_delta_n: r.cond_delta_n,
+            cond_delta_c: r.cond_delta_c,
             _pad2: 0,
+            _pad3: 0,
+            _pad4: 0,
         })
         .collect()
 }

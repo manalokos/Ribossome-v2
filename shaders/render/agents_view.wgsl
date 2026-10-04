@@ -19,7 +19,7 @@
 @group(0) @binding(3) var<storage, read> body_pos_view: array<vec2<f32>>;
 @group(0) @binding(4) var<storage, read> draw_list_view: array<u32>;
 @group(0) @binding(5) var<storage, read> organs_view: array<u32>;
-@group(0) @binding(6) var<storage, read> signals_view: array<vec2<f32>>;
+@group(0) @binding(6) var<storage, read> signals_view: array<vec4<f32>>;
 @group(0) @binding(7) var<storage, read> aa_props_view: array<AaProps, 20>;
 @group(0) @binding(8) var<storage, read> genomes_view: array<u32>;
 @group(0) @binding(9) var<storage, read> rna_tail_view: array<vec4<f32>>;
@@ -192,6 +192,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             case 1u: { col = signed_color(s.x, vec3<f32>(1.0, 0.45, 0.1), vec3<f32>(0.1, 0.6, 1.0)); }
             case 2u: { col = signed_color(s.y, vec3<f32>(0.3, 1.0, 0.3), vec3<f32>(0.95, 0.3, 0.9)); }
             case 3u: { col = vec3<f32>(0.5 + 0.5 * tanh(s.x), 0.5 + 0.5 * tanh(s.y), 0.35); }
+            case 5u: { col = vec3<f32>(0.5 + 0.5 * tanh(s.z), 0.5 + 0.5 * tanh(s.w), 0.35); }
             default: {}
         }
     }

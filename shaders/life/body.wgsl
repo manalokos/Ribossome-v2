@@ -122,7 +122,7 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
         joint_base[slot * MAX_BODY + k] = b;
         joint_state[slot * MAX_BODY + k] = 0u;
         joint_active[slot * MAX_BODY + k] = 0.0;
-        signals[slot * MAX_BODY + k] = vec2<f32>(0.0);
+        signals[slot * MAX_BODY + k] = vec4<f32>(0.0);
         sensor_mem[slot * MAX_BODY + k] = 0.0;
         sensor_avg[slot * MAX_BODY + k] = SENSOR_UNSET;
     }

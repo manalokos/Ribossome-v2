@@ -123,13 +123,16 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     }
     let pr = aa_props[aa];
     let lim = max(pr.max_bend, 1e-3);
-    var sens = vec2<f32>(pr.sens_alpha, pr.sens_beta);
-    // Modos 1 e 2: resposta igual em todas as juntas. Modo 3: a de cada
-    // aminoácido (como o 0), mas com a condução direcional.
+    // 4 canais: α e β dobram (e os músculos amplificam-nos); γ e δ dobram só
+    // pela sensibilidade do aminoácido (modos 0 e 3).
+    var sens = vec4<f32>(pr.sens_alpha, pr.sens_beta, pr.sens_gamma, pr.sens_delta);
+    // Modos 1 e 2: resposta igual em todas as juntas (α para um lado, β para
+    // o outro; γ e δ são mensageiros internos, não dobram: só agem depois de
+    // um relé os passar para α ou β). Modo 3: a de cada aminoácido.
     if (params.signal_mode >= 0.5 && params.signal_mode < 2.5) {
-        sens = vec2<f32>(SIGNAL_UNIFORM_SENS, -SIGNAL_UNIFORM_SENS);
+        sens = vec4<f32>(SIGNAL_UNIFORM_SENS, -SIGNAL_UNIFORM_SENS, 0.0, 0.0);
     }
-    return lim * tanh(SIGNAL_GAIN * (s.x * sens.x * amp_a + s.y * sens.y * amp_b) / lim);
+    return lim * tanh(SIGNAL_GAIN * (s.x * sens.x * amp_a + s.y * sens.y * amp_b + s.z * sens.z + s.w * sens.w) / lim);
 }
 
 // GRELHA DOS CORPOS: resíduos de agentes por célula (BODY_DIV × BODY_DIV
@@ -347,11 +350,14 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
     if (n == 0u) { return 0.0; }
     let base = slot * MAX_BODY;
     // Emissões (a partir dos sinais do passo anterior, para o relé).
-    var emit: array<vec2<f32>, 64>;
+    var emit: array<vec4<f32>, 64>;
+    // Portas: 1 = o canal passa neste resíduo, 0 = travado (relés).
+    var gate: array<vec4<f32>, 64>;
     var bend = 0.0;
     for (var k = 0u; k < n; k++) {
         bend += abs(signal_deflection(slot, k));
-        emit[k] = vec2<f32>(0.0);
+        emit[k] = vec4<f32>(0.0);
+        gate[k] = vec4<f32>(1.0);
         let o = organ_get(slot, k);
         let t = organ_type(o);
         if (t == 0xFFu) { continue; }
@@ -436,10 +442,37 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }
             }
             case ORGAN_RELAY: {
-                // p0 entrada, p1 saída, p2 ganho, p3 limiar (porta).
-                let x = select(s.x, s.y, ov.p0 >= 0.5);
-                let y = sign(x) * max(abs(x) - max(ov.p3, 0.0), 0.0) * ov.p2 * organ_gain(o);
-                if (ov.p1 < 0.5) { emit[k].x = y; } else { emit[k].y = y; }
+                // RELÉ = lógica entre os 4 canais. O 3.º codão (o da
+                // intensidade) escolhe os canais: entrada = bits 0–1, saída =
+                // bits 2–3, força = bits 4–5 (×0,5, 1, 2, 4). A variante dá a
+                // função (p0), o ganho (p1) e o limiar (p2): assim cada parte
+                // do corpo pode dar a um canal o significado que quiser.
+                let gi = o >> 8u;
+                let cin = gi & 3u;
+                let cout = (gi >> 2u) & 3u;
+                let mag = ov.p1 * exp2(f32((gi >> 4u) & 3u) - 1.0);
+                let x = s[cin];
+                let th = max(ov.p2, 0.0);
+                let f = u32(clamp(ov.p0, 0.0, 5.0) + 0.5);
+                if (f == 0u) {
+                    // SWITCH: o sinal muda de canal e a entrada fica travada aqui.
+                    if (cin != cout) {
+                        emit[k][cout] = mag * x;
+                        gate[k][cin] = 0.0;
+                    }
+                } else if (f == 1u) {
+                    if (cin != cout) { emit[k][cout] = mag * x; }
+                } else if (f == 2u) {
+                    emit[k][cout] = -mag * x;
+                } else if (f == 3u) {
+                    // GATE que fecha: entrada alta trava o canal de saída aqui.
+                    if (abs(x) > th) { gate[k][cout] = 0.0; }
+                } else if (f == 4u) {
+                    // GATE que abre: a saída só passa com a entrada alta.
+                    if (abs(x) <= th) { gate[k][cout] = 0.0; }
+                } else {
+                    emit[k][cout] = mag * sign(x) * max(abs(x) - th, 0.0);
+                }
             }
             default: {}
         }
@@ -456,26 +489,39 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
     // Condução com um passo de atraso: o resíduo k recebe o que os vizinhos
     // k−1 (lado N) e k+1 (lado C) tinham no passo anterior, pesado pela
     // condutividade do seu aminoácido, perdendo SIGNAL_DECAY, mais a emissão.
-    var prev = vec2<f32>(0.0);
+    var prev = vec4<f32>(0.0);
     for (var k = 0u; k < n; k++) {
         let here = signals[base + k];
-        let next = select(vec2<f32>(0.0), signals[base + k + 1u], k + 1u < n);
+        // As portas dos relés travam o que um resíduo PASSA aos vizinhos (ele
+        // próprio continua a receber e a ler o canal).
+        var next = vec4<f32>(0.0);
+        if (k + 1u < n) { next = signals[base + k + 1u] * gate[k + 1u]; }
         let pr = aa_props[body_get(slot, k)];
-        var c = vec4<f32>(pr.cond_alpha_n, pr.cond_alpha_c, pr.cond_beta_n, pr.cond_beta_c);
+        // Condução por canal (α, β, γ, δ): peso do vizinho do lado N e do C.
+        var cn = vec4<f32>(pr.cond_alpha_n, pr.cond_beta_n, pr.cond_gamma_n, pr.cond_delta_n);
+        var cc = vec4<f32>(pr.cond_alpha_c, pr.cond_beta_c, pr.cond_gamma_c, pr.cond_delta_c);
         // Um órgão tem a sua própria condução (v3: cada parte a sua).
         let ok = organ_get(slot, k);
         if (ok != 0u) {
             let op = organ_cost(ok);
-            if (op.cond_alpha_n < 1e8) { c = vec4<f32>(op.cond_alpha_n, op.cond_alpha_c, op.cond_beta_n, op.cond_beta_c); }
+            if (op.cond_alpha_n < 1e8) {
+                cn = vec4<f32>(op.cond_alpha_n, op.cond_beta_n, op.cond_gamma_n, op.cond_delta_n);
+                cc = vec4<f32>(op.cond_alpha_c, op.cond_beta_c, op.cond_gamma_c, op.cond_delta_c);
+            }
         }
         // Modos uniformes: difusão isotrópica (metade de cada vizinho) ou
         // condução direcional (só do lado N).
-        if (params.signal_mode >= 1.5) {
-            c = vec4<f32>(1.0, 0.0, 1.0, 0.0);
-        } else if (params.signal_mode >= 0.5) {
-            c = vec4<f32>(0.5);
+        if (params.signal_mode >= 1.5 && params.signal_mode < 2.5) {
+            cn = vec4<f32>(1.0);
+            cc = vec4<f32>(0.0);
+        } else if (params.signal_mode >= 0.5 && params.signal_mode < 1.5) {
+            cn = vec4<f32>(0.5);
+            cc = vec4<f32>(0.5);
+        } else if (params.signal_mode >= 2.5) {
+            cn = vec4<f32>(1.0);
+            cc = vec4<f32>(0.0);
         }
-        let incoming = vec2<f32>(c.x * prev.x + c.y * next.x, c.z * prev.y + c.w * next.y);
+        let incoming = cn * prev + cc * next;
         var s = SIGNAL_DECAY * incoming + emit[k];
         var lim = SIGNAL_MAX;
         if (params.signal_mode < 0.5) {
@@ -484,8 +530,8 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             s = mix(here, V3_SIGNAL_DECAY * incoming + emit[k], V3_SIGNAL_UPDATE);
             lim = 1.0;
         }
-        signals[base + k] = clamp(s, vec2<f32>(-lim), vec2<f32>(lim));
-        prev = here;
+        signals[base + k] = clamp(s, vec4<f32>(-lim), vec4<f32>(lim));
+        prev = here * gate[k];
     }
     return bend * BEND_COST;
 }

@@ -39,6 +39,12 @@ fn organ(code: &serde_json::Value, t: u64, v: u64) -> String {
     panic!("órgão {t}/{v} não está na tabela");
 }
 
+/// O mesmo com o 3.º codão escolhido (no relé é ele que dá os canais).
+fn organ3(code: &serde_json::Value, t: u64, v: u64, third: &str) -> String {
+    let o = organ(code, t, v);
+    format!("{}{third}", &o[..6])
+}
+
 fn bases(s: &str) -> Vec<u8> {
     s.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect()
 }
@@ -54,7 +60,20 @@ fn main() {
     // NOCLOCK=1: os mesmos desenhos SEM relógio (o sensor anda sozinho?):
     // corpo sem órgãos, só sensor α, só sensor β.
     let noclock = std::env::var("NOCLOCK").is_ok();
-    let designs = if noclock {
+    // RELAY=1: testa os relés. O sensor α à cabeça; um SWITCH α→γ (3.º codão
+    // GGA: entrada α, saída γ, ×2) tira o sinal do canal que dobra o corpo;
+    // um segundo SWITCH γ→α (GAG) devolve-o.
+    let relay = std::env::var("RELAY").is_ok();
+    let sw_ag = organ3(&code, 6, 0, "GGA");
+    let sw_ga = organ3(&code, 6, 0, "GAG");
+    let sensor = organ(&code, 8, 0);
+    let designs = if relay {
+        [
+            ("sensor α + relógio", format!("AUG{sensor}{clock}{body}UAA")),
+            ("sensor, α→γ", format!("AUG{sensor}{sw_ag}{clock}{body}UAA")),
+            ("sensor, α→γ, γ→α", format!("AUG{sensor}{sw_ag}GGU{sw_ga}{clock}{body}UAA")),
+        ]
+    } else if noclock {
         [
             ("corpo sem órgãos", format!("AUG{body}UAA")),
             ("só sensor α", format!("AUG{}{body}UAA", organ(&code, 8, 0))),
@@ -183,7 +202,15 @@ fn main() {
             if first {
                 first = false;
                 let organs: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.organs_buf)).to_vec();
+                let lens: Vec<u32> = designs.iter().map(|(_, g)| g.len() as u32).collect();
                 for (slot, a) in agents.iter().enumerate().filter(|(_, a)| a.alive != 0) {
+                    if relay {
+                        // Os três desenhos têm comprimentos de genoma diferentes.
+                        if let Some(gi) = lens.iter().position(|&l| l == a.gene_len) {
+                            group.insert(a.id, gi);
+                        }
+                        continue;
+                    }
                     // 0 controlo; 1 sensor variante 0 (α); 2 sensor variante 1 (β).
                     let mut gi = 0;
                     for r in 0..a.body_len as usize {

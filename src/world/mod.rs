@@ -436,7 +436,8 @@ impl World {
         let joint_state_buf = storage_buffer(device, "joint state", max_agents * 64 * 4);
         let joint_active = storage_buffer(device, "joint active", max_agents * 64 * 4);
         let organs_buf = storage_buffer(device, "organs", max_agents * 32 * 4);
-        let signals = storage_buffer(device, "signals", max_agents * 64 * 8);
+        // 4 canais (α, β, γ, δ) por resíduo.
+        let signals = storage_buffer(device, "signals", max_agents * 64 * 16);
         let sensor_mem = storage_buffer(device, "sensor memory", max_agents * 64 * 4);
         let sensor_avg = storage_buffer(device, "sensor average", max_agents * 64 * 4);
         let bitten = storage_buffer(device, "bitten energy", max_agents * 4);

@@ -133,10 +133,9 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("mod_beta", "o mesmo com β"),
     ],
     &[
-        pd("entrada", "0 = lê α, 1 = lê β"),
-        pd("saida", "0 = emite em α, 1 = em β"),
-        pd("ganho", "multiplica (negativo inverte)"),
-        pd("limiar", "só passa o que estiver acima deste nível (porta)"),
+        pd("funcao", "0 = SWITCH (passa o sinal do canal de entrada para o de saída e trava a entrada aqui), 1 = cópia (emite na saída, a entrada segue), 2 = inversor (emite o simétrico), 3 = GATE que fecha (entrada acima do limiar: o canal de saída não passa aqui), 4 = GATE que abre (o canal de saída só passa aqui com a entrada acima do limiar), 5 = limiar (emite só a parte da entrada acima do limiar)"),
+        pd("ganho", "multiplica o que emite (× a força do 3.º codão)"),
+        pd("limiar", "limiar das portas e do modo 5 (módulo do sinal de entrada)"),
     ],
     &[pd("capacidade", "energia extra que guarda")],
     FOOD_SENSOR_PROPS,
@@ -216,13 +215,20 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
                 String::new()
             }
         ),
-        6 => format!(
-            "relé [losango]: lê {} e emite em {}, ganho ×{:.2}{}",
-            fmt_canal(v("entrada")),
-            fmt_canal(v("saida")),
-            v("ganho") * g,
-            if v("limiar") > 0.0 { format!(", só acima de {:.2}", v("limiar")) } else { String::new() }
-        ),
+        6 => {
+            // Os canais vêm do 3.º codão (gain_idx): entrada = bits 0–1,
+            // saída = bits 2–3, força = bits 4–5.
+            let (cin, cout) = (RELAY_CHANNELS[(gain_idx & 3) as usize], RELAY_CHANNELS[((gain_idx >> 2) & 3) as usize]);
+            let mag = RELAY_MAG[((gain_idx >> 4) & 3) as usize] * v("ganho");
+            match v("funcao").round() as i32 {
+                0 => format!("relé SWITCH [losango]: passa {cin} para {cout} (×{mag:.2}) e trava {cin} aqui"),
+                1 => format!("relé cópia [losango]: lê {cin} e emite em {cout} (×{mag:.2})"),
+                2 => format!("relé inversor [losango]: lê {cin} e emite −{cin} em {cout} (×{mag:.2})"),
+                3 => format!("relé GATE [losango]: com |{cin}| > {:.2}, {cout} não passa aqui", v("limiar")),
+                4 => format!("relé GATE [losango]: {cout} só passa aqui com |{cin}| > {:.2}", v("limiar")),
+                _ => format!("relé limiar [losango]: emite em {cout} a parte de {cin} acima de {:.2} (×{mag:.2})", v("limiar")),
+            }
+        }
         7 => format!("armazenamento [disco com anéis]: +{:.1} de capacidade de energia", v("capacidade") * g),
         8 => format!("{} · sente {}", sensor("sensor de comida DIRECIONAL (esquerda − direita)", "2 antenas verdes"), alvo()),
         9 => format!("{} · sente {}", sensor("sensor físico DIRECIONAL (esquerda − direita)", "2 antenas amarelas"), alvo_fisico()),
@@ -267,6 +273,10 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
 pub const GAIN_DEFAULT: u8 = 32;
 
 /// Ganho de um índice de intensidade (0..63).
+/// Relé: nomes dos 4 canais e forças escolhidas pelo 3.º codão.
+pub const RELAY_CHANNELS: [&str; 4] = ["α", "β", "γ", "δ"];
+pub const RELAY_MAG: [f32; 4] = [0.5, 1.0, 2.0, 4.0];
+
 pub fn organ_gain(idx: u8) -> f32 {
     2f32.powf((idx as f32 - 32.0) / 8.0)
 }

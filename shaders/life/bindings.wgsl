@@ -33,7 +33,7 @@
 // (intensidade << 8)), 32 u32 por slot.
 @group(3) @binding(16) var<storage, read_write> organs: array<u32>;
 // Sinais internos (α, β) por resíduo.
-@group(3) @binding(17) var<storage, read_write> signals: array<vec2<f32>>;
+@group(3) @binding(17) var<storage, read_write> signals: array<vec4<f32>>;
 // Memória dos sensores (o valor sentido no passo anterior), por resíduo.
 @group(3) @binding(18) var<storage, read_write> sensor_mem: array<f32>;
 // Energia tirada a cada agente por proteases de outros neste passo

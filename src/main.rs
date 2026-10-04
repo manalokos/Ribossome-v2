@@ -332,7 +332,7 @@ impl Running {
             self.ui.monomer_brightness = x as f32;
         }
         if let Some(n) = u("signal_view") {
-            self.ui.signal_view = (n as u32).min(4);
+            self.ui.signal_view = (n as u32).min(5);
         }
         if let Some(n) = u("seed_count") {
             self.ui.seed_count = n as u32;

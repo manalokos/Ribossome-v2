@@ -222,7 +222,7 @@ impl World {
             per_slot("rna_tails", &self.tail_buf, TAIL_WORDS),
             per_slot("bitten", &s.bitten, 1),
             per_res("body_pos", &self.body_pos_buf, 2),
-            per_res("signals", &self.signals_buf, 2),
+            per_res("signals4", &self.signals_buf, 4),
             per_res("joint_angle", &s.joint_angle, 1),
             per_res("joint_base", &s.joint_base, 1),
             per_res("joint_state", &self.joint_state_buf, 1),
@@ -472,6 +472,14 @@ impl World {
         for b in self.slot_bufs() {
             if b.name == "bonds2" && !scene.blocks.contains_key("bonds2") {
                 notes.push("cena sem ligações por âncoras (gravada antes de existirem): agentes soltos".into());
+                continue;
+            }
+            if b.name == "signals4" && !scene.blocks.contains_key("signals4") {
+                // Cena de antes dos 4 canais: os sinais internos recomeçam a zero.
+                notes.push("cena com sinais de 2 canais (antes de γ e δ): os sinais internos recomeçam a zero".into());
+                let mut enc = gpu.device.create_command_encoder(&Default::default());
+                enc.clear_buffer(&self.signals_buf, 0, None);
+                q.submit([enc.finish()]);
                 continue;
             }
             let data = scene.block(b.name)?;
