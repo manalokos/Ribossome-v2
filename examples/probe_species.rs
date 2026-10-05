@@ -29,6 +29,17 @@ fn main() {
     for (i, s) in cluster(&genomes, thr).iter().enumerate().filter(|(_, s)| s.count as f32 >= 0.01 * total) {
         let (n1, o1) = organ_symbols(&s.leader, rs, &code);
         let (n2, o2) = organ_symbols(&reverse_complement(&s.leader), rs, &code);
+        // Sequência de aminoácidos das duas fitas (minúscula = resíduo com órgão).
+        let seq = |g: &[u8]| -> String {
+            ribossome::life::organs::translate_organs(g, rs, &code)
+                .iter()
+                .map(|r| {
+                    let c = ribossome::life::amino::AMINO[r.aa as usize].letter;
+                    if r.organ.is_some() { c.to_ascii_lowercase() } else { c }
+                })
+                .collect()
+        };
+        println!("      A: {}   B: {}", seq(&s.leader), seq(&reverse_complement(&s.leader)));
         println!(
             "  #{i}: {:5} agentes ({:4.1}%), {} genomas distintos, {} bases; fita A ({:.0}%): {n1} resíduos [{o1}] | fita B: {n2} resíduos [{o2}]",
             s.count,
