@@ -320,7 +320,9 @@ gpu_struct! {
         /// maior = corpos enrolados/dobrados, mais perto dos ângulos de uma
         /// proteína real (50–90° por resíduo).
         pub rest_angle_mult: f32,
-        pub _pad_f1: u32,
+        /// PREDAÇÃO: multiplicador da energia que uma protease tira por passo
+        /// de contacto (base: 0,01 × força da variante × intensidade).
+        pub protease_power: f32,
         pub _pad_f2: u32,
         pub _pad_f3: u32,
     }
@@ -488,7 +490,7 @@ impl Default for SimParams {
             paint_radius: 0.0,
             paint_grains: 0.0,
             rest_angle_mult: 1.0,
-            _pad_f1: 0,
+            protease_power: 1.0,
             _pad_f2: 0,
             _pad_f3: 0,
         }

@@ -110,7 +110,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (overlap + prot.y > 0.0) {
                         if (power > 0.0 && b.energy > 0.0) {
                             let resist = 1.0 - PRED_PROLINE_DEFENSE * contact_disp[e].w;
-                            let bite = min(PRED_BITE * power * resist, b.energy);
+                            let bite = min(PRED_BITE * max(params.protease_power, 0.0) * power * resist, b.energy);
                             if (bite > 0.0) {
                                 atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
                                 gained += bite * PRED_EFFICIENCY;

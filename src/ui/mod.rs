@@ -614,6 +614,10 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.heat_kill, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("desnaturação pelo calor"))
         .on_hover_text("risco de morrer na água quente (acima do limiar das fumarolas), × (1 − termoestabilidade do corpo; coluna da tabela dos aminoácidos)");
     ui.separator();
+    ui.strong("Predação");
+    ui.add(egui::Slider::new(&mut p.protease_power, 0.0..=30.0).logarithmic(true).smallest_positive(0.1).text("força das proteases ×"))
+        .on_hover_text("multiplica a energia que uma protease tira por passo de contacto (o atacante fica com metade). 1 = o de sempre; 0 = sem predação. A prolina do corpo da vítima continua a defender");
+    ui.separator();
     ui.strong("Ligações entre agentes (órgão âncora: + liga a −)");
     ui.add(egui::Slider::new(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formação"))
         .on_hover_text("probabilidade por passo de um agente com uma âncora livre a tentar ligar a uma âncora oposta de um vizinho; a duração vem da variante da âncora (editor)");
