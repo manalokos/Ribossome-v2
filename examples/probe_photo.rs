@@ -16,6 +16,16 @@ fn main() {
     let cfg = WorldConfig::DEFAULT;
     let mut w = World::new(&gpu, cfg, 1);
     w.load_scene(&gpu, &Scene::read(std::path::Path::new(&path)).unwrap()).unwrap();
+    // PARAMS=nome=valor,...: muda parâmetros por nome. LIT = altura (0..1)
+    // acima da qual se conta "na luz" (por omissão 0,875).
+    if let Ok(list) = std::env::var("PARAMS") {
+        for kv in list.split(',').filter(|s| !s.is_empty()) {
+            let (k, v) = kv.split_once('=').expect("PARAMS: nome=valor");
+            assert!(w.params.set_named(k, v.parse().expect("valor")), "parâmetro desconhecido: {k}");
+        }
+        w.invalidate_light();
+    }
+    let lit_from = envf("LIT").unwrap_or(0.875);
     let size = cfg.sim_size();
     let organs: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.organs_buf)).to_vec();
     struct S {
@@ -29,7 +39,7 @@ fn main() {
             let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
             o != 0 && (o & 0x1F) - 1 == 10
         });
-        let lit = a.pos_y / size > 0.875;
+        let lit = a.pos_y / size > lit_from;
         st.insert(a.id, S { group: photo as usize | ((lit as usize) << 1), y0: a.pos_y / size, e0: a.energy });
     }
     let steps = envf("STEPS").unwrap_or(3000.0) as u32;

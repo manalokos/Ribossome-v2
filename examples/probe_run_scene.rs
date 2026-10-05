@@ -18,6 +18,14 @@ fn main() {
     w.params.rest_angle_mult = envf("ANGLE", w.params.rest_angle_mult);
     // MODE: modo dos sinais (por omissão o da cena).
     w.params.signal_mode = envf("MODE", w.params.signal_mode);
+    // PARAMS=nome=valor,nome=valor: muda parâmetros por nome (como o MCP).
+    if let Ok(list) = std::env::var("PARAMS") {
+        for kv in list.split(',').filter(|s| !s.is_empty()) {
+            let (k, v) = kv.split_once('=').expect("PARAMS: nome=valor");
+            assert!(w.params.set_named(k, v.parse().expect("valor")), "parâmetro desconhecido: {k}");
+        }
+        w.invalidate_light();
+    }
     let (steps, every) = (envf("STEPS", 6000.0) as u32, envf("EVERY", 1000.0) as u32);
     let report = |w: &World, done: u32| {
         let a = w.read_agents_blocking(&gpu);

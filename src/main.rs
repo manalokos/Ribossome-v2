@@ -560,6 +560,10 @@ impl Running {
                     log::info!("mcp: {k} {} -> {}", num(old), num(new));
                     lines.push(format!("{k}: {} -> {}", num(old), num(new)));
                 }
+                // A atenuação muda a luz em todo o mundo: recalcula-a já.
+                if map.contains_key("uv_depth") {
+                    self.world.invalidate_light();
+                }
                 Ok(vec![text(lines.join("\n"))])
             }
             "set_world" => {
