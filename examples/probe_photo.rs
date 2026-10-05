@@ -1,84 +1,73 @@
-//! Balanço de energia dos fotossintéticos: agentes desenhados (3 fotossistemas
-//! produtores, sem boca) a várias alturas, mundo completo SEM terreno, sem
-//! reprodução nem morte ao acaso. Energia por passo = (E fim − E início)/passos.
-//! GAIN = codão da intensidade (CCC = ×14,7, GGG = ×2,4, sem = ×1).
+//! Compensa ter fotossistema? Carrega uma cena, divide os agentes por terem
+//! ou não fotossistema e por estarem ou não na zona com luz (o oitavo de
+//! cima do mundo) e segue-os STEPS passos: sobrevivência, filhos por agente,
+//! energia média (em fração da capacidade não se sabe: mostra a energia) e
+//! quanto subiram ou desceram.
+use std::collections::{HashMap, HashSet};
+
 use ribossome::gpu::Gpu;
-use ribossome::params::{SpawnRequest, WorldConfig};
-use ribossome::world::{MAX_STEPS_PER_FRAME, World};
+use ribossome::params::WorldConfig;
+use ribossome::world::{MAX_STEPS_PER_FRAME, Scene, World};
 
 fn main() {
-    let gpu = Gpu::new_headless().unwrap();
-    let gain = std::env::var("GAIN").unwrap_or_default();
-    let cfg = WorldConfig::DEFAULT;
-    let mut w = World::new(&gpu, cfg, 2);
-    let n = cfg.cells() as usize;
-    w.custom_terrain = Some((vec![0; n], vec![0.0; n]));
-    w.seed_matter(&gpu, 2);
-    w.params.death_probability = 0.0;
-    w.params.pairing_rate = 0.0;
-    w.params.spawn_energy = 10.0;
     let envf = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
-    if let Some(v) = envf("YIELD") {
-        w.params.photo_yield = v;
+    let path = std::env::var("SCENE").unwrap_or_else(|_| "saves/autosave.ribo".into());
+    let gpu = Gpu::new_headless().unwrap();
+    let cfg = WorldConfig::DEFAULT;
+    let mut w = World::new(&gpu, cfg, 1);
+    w.load_scene(&gpu, &Scene::read(std::path::Path::new(&path)).unwrap()).unwrap();
+    let size = cfg.sim_size();
+    let organs: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.organs_buf)).to_vec();
+    struct S {
+        group: usize,
+        y0: f32,
+        e0: f32,
     }
-    if let Some(v) = envf("ABS") {
-        w.params.monomer_uv_absorb = v;
+    let mut st: HashMap<u32, S> = HashMap::new();
+    for (slot, a) in w.read_agents_blocking(&gpu).iter().enumerate().filter(|(_, a)| a.alive != 0) {
+        let photo = (0..a.body_len as usize).any(|r| {
+            let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
+            o != 0 && (o & 0x1F) - 1 == 10
+        });
+        let lit = a.pos_y / size > 0.875;
+        st.insert(a.id, S { group: photo as usize | ((lit as usize) << 1), y0: a.pos_y / size, e0: a.energy });
     }
-    // C (UGU) + S (UCU) = fotossistema A (eficiência 1, produtor).
-    let text = format!("AUG {} {} UAA", format!("UGU UCU {gain} GGU ").repeat(3), "GGU ".repeat(8));
-    let g: Vec<u8> = text.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect();
-    let s = cfg.sim_size();
-    let heights = [0.97f32, 0.9, 0.75, 0.5, 0.25];
-    let mut reqs = Vec::new();
-    for (hi, &h) in heights.iter().enumerate() {
-        for i in 0..200 {
-            let x = s * (0.05 + 0.9 * (i as f32 + 0.5) / 200.0);
-            let _ = hi;
-            reqs.push(SpawnRequest::with_genome(x, s * h, &g));
+    let steps = envf("STEPS").unwrap_or(3000.0) as u32;
+    println!("epoch {}, sol agora {:.2} (0 = noite), {steps} passos", w.params.epoch, w.params.daylight(w.params.epoch));
+    let mut kids: HashMap<u32, u32> = HashMap::new();
+    let mut seen: HashSet<u32> = st.keys().copied().collect();
+    let mut now: HashMap<u32, (f32, f32)> = HashMap::new();
+    let mut done = 0;
+    while done < steps {
+        let k = MAX_STEPS_PER_FRAME.min(steps - done);
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        w.encode_steps(&gpu.queue, &mut enc, k);
+        gpu.queue.submit([enc.finish()]);
+        gpu.wait_idle();
+        done += k;
+        now.clear();
+        for a in w.read_agents_blocking(&gpu).iter().filter(|a| a.alive != 0) {
+            now.insert(a.id, (a.pos_y / size, a.energy));
+            if seen.insert(a.id) && st.contains_key(&a.parent) {
+                *kids.entry(a.parent).or_default() += 1;
+            }
         }
     }
-    w.request_seeds(&reqs);
-    let run = |w: &mut World, steps: u32| {
-        let mut done = 0;
-        while done < steps {
-            let mut enc = gpu.device.create_command_encoder(&Default::default());
-            w.encode_steps(&gpu.queue, &mut enc, MAX_STEPS_PER_FRAME);
-            gpu.queue.submit([enc.finish()]);
-            gpu.wait_idle();
-            done += MAX_STEPS_PER_FRAME;
-        }
-    };
-    run(&mut w, 64);
-    let a0 = w.read_agents_blocking(&gpu);
-    let steps = 1000;
-    run(&mut w, steps);
-    let a1 = w.read_agents_blocking(&gpu);
-    let e0: std::collections::HashMap<u32, (f32, f32)> =
-        a0.iter().filter(|a| a.alive != 0).map(|a| (a.id, (a.energy, a.pos_y))).collect();
-    let body = a0.iter().find(|a| a.alive != 0).map(|a| a.body_len).unwrap_or(0);
-    println!(
-        "corpo {body} resíduos, intensidade '{gain}', sol {}, profundidade ótica {}, absorção monómeros {}, rendimento {}",
-        w.params.uv_strength, w.params.uv_depth, w.params.monomer_uv_absorb, w.params.photo_yield
-    );
-    let light = w.read_f32_blocking(&gpu, &w.light_buf);
-    let ls = (cfg.grid_size / ribossome::shaders::LIGHT_DIV) as usize;
-    let mono = w.read_cells_blocking(&gpu);
-    for &h in &heights {
-        let row = ((h * ls as f32) as usize).min(ls - 1);
-        let lmean = light[row * ls..(row + 1) * ls].iter().sum::<f32>() / ls as f32;
-        let gy = ((h * cfg.grid_size as f32) as usize).min(cfg.grid_size as usize - 1);
-        let g = cfg.grid_size as usize;
-        let m: u32 = (0..g).map(|x| (0..4).map(|c| { let v = mono[(gy * g + x) * 4 + c]; (v & 0xFFFF) + (v >> 16) }).sum::<u32>()).sum();
-        println!("  altura {h:.2}: luz {lmean:.3}, monómeros por célula {:.1}", m as f32 / g as f32);
-    }
-    for &h in &heights {
-        let d: Vec<f32> = a1
-            .iter()
-            .filter(|a| a.alive != 0)
-            .filter_map(|a| e0.get(&a.id).filter(|(_, y)| (y / s - h).abs() < 0.02).map(|_| a.energy))
-            .collect();
-        let alive = d.len();
-        let mean = d.iter().sum::<f32>() / alive.max(1) as f32;
-        println!("  altura {h:.2}: {alive:3}/200 vivos ao fim de {steps} passos, energia média {mean:.1}");
+    let names = ["sem fotossistema, no escuro", "COM fotossistema, no escuro", "sem fotossistema, na luz", "COM fotossistema, na luz"];
+    for (gi, name) in names.iter().enumerate() {
+        let ids: Vec<(&u32, &S)> = st.iter().filter(|(_, s)| s.group == gi).collect();
+        let n = ids.len().max(1) as f32;
+        let alive: Vec<&(&u32, &S)> = ids.iter().filter(|(id, _)| now.contains_key(id)).collect();
+        let na = alive.len().max(1) as f32;
+        println!(
+            "  {name:28} {:5} agentes: sobrevivem {:5.1}%  filhos/agente {:.2}  energia {:5.1} -> {:5.1}  altura {:.2} -> {:.2}",
+            ids.len(),
+            100.0 * alive.len() as f32 / n,
+            ids.iter().map(|(id, _)| *kids.get(id).unwrap_or(&0) as f32).sum::<f32>() / n,
+            alive.iter().map(|(_, s)| s.e0).sum::<f32>() / na,
+            alive.iter().map(|(id, _)| now[*id].1).sum::<f32>() / na,
+            alive.iter().map(|(_, s)| s.y0).sum::<f32>() / na,
+            alive.iter().map(|(id, _)| now[*id].0).sum::<f32>() / na,
+        );
     }
 }
