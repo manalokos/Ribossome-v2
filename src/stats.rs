@@ -249,7 +249,8 @@ fn groups() -> Vec<(&'static str, Vec<usize>)> {
     vec![
         ("População", vec![0]),
         ("Nascimentos e mortes", vec![1, 2]),
-        ("Órgãos (% dos agentes com cada um)", (12..12 + ORGAN_TYPES).collect()),
+        ("Órgãos (% dos agentes com cada um)", (BASE.len()..BASE.len() + ORGAN_TYPES).collect()),
+        ("Predação", vec![12]),
         ("Corpo e genoma", vec![4, 5, 9]),
         ("Energia, gerações e ligações", vec![3, 6, 7, 8]),
         ("Matéria", vec![10, 11]),
@@ -272,18 +273,33 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History) {
         ui.label("à espera de amostras…");
         return;
     }
-    let names = h.names.clone();
+    // Na legenda, cada série leva o valor da última amostra.
+    let last: Vec<f32> = h.last_rows(1).first().map(|(_, v)| v.to_vec()).unwrap_or_default();
+    let names: Vec<String> = h
+        .names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| match last.get(i) {
+            Some(v) if v.abs() >= 100.0 => format!("{n}: {v:.0}"),
+            Some(v) => format!("{n}: {v:.1}"),
+            None => n.clone(),
+        })
+        .collect();
     let series = h.plot_series();
     for (title, idx) in groups() {
         ui.separator();
         ui.strong(title);
+        // O gráfico dos órgãos tem uma linha por tipo: mais alto, para a
+        // legenda caber.
         egui_plot::Plot::new(title)
-            .height(160.0)
+            .height(if idx.len() > 8 { 40.0 + 16.0 * idx.len() as f32 } else { 160.0 })
             .legend(egui_plot::Legend::default().position(egui_plot::Corner::LeftTop))
             .allow_scroll(false)
             .show(ui, |p| {
                 for &i in &idx {
-                    p.line(egui_plot::Line::new(names[i].clone(), egui_plot::PlotPoints::from(series[i].clone())));
+                    // Identidade estável (o nome muda com o valor): esconder
+                    // uma série na legenda mantém-se de amostra para amostra.
+                    p.line(egui_plot::Line::new(names[i].clone(), egui_plot::PlotPoints::from(series[i].clone())).id(egui::Id::new(("serie", i))));
                 }
             });
     }
