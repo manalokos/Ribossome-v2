@@ -44,14 +44,20 @@ fn bases(s: &str) -> Vec<u8> {
 fn main() {
     let envf = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
     let code: serde_json::Value = serde_json::from_str(&std::fs::read_to_string("assets/codigo_orgaos.json").unwrap()).unwrap();
-    let ring = envf("RING", 19.0) as usize;
-    let k_loop = codon('K').repeat(ring);
+    let g12 = codon('G').repeat(12);
+    // Bias em β positivo + relé cópia β→γ (3.º codão UGU), para ativar a
+    // variante da protease que só atua com sinal γ.
+    let organs: serde_json::Value = serde_json::from_str(&std::fs::read_to_string("assets/orgaos.json").unwrap()).unwrap();
+    let bias_v = organs[13]["variantes"].as_array().unwrap().iter()
+        .position(|v| v["canal"].as_f64() == Some(1.0) && v["valor"].as_f64().unwrap_or(0.0) > 0.0).expect("bias β positivo") as u64;
+    let relay = format!("{}UGU", &organ(&code, 6, 1)[..6]);
     let designs = [
-        ("predador (S + lisinas + H)", format!("AUG{}{k_loop}{}UAA", codon('S'), codon('H'))),
-        ("controlo (A + lisinas + H)", format!("AUG{}{k_loop}{}UAA", codon('A'), codon('H'))),
+        ("protease fam. 1, sempre ativa", format!("AUG{}{g12}UAA", organ(&code, 11, 0))),
+        ("protease fam. 1 por γ, sem sinal", format!("AUG{}{g12}UAA", organ(&code, 11, 3))),
         ("presa K (12 lisinas)", format!("AUG{}UAA", codon('K').repeat(12))),
-        ("presa G (12 glicinas)", format!("AUG{}UAA", codon('G').repeat(12))),
-        ("bias de idade + 12 glicinas", format!("AUG{}{}UAA", organ(&code, 11, 0), codon('G').repeat(12))),
+        ("presa G (12 glicinas)", format!("AUG{}UAA", g12)),
+        ("bias de idade + 12 glicinas", format!("AUG{}{g12}UAA", organ(&code, 17, 0))),
+        ("bias β + relé β→γ + protease por γ", format!("AUG{}{relay}{}{g12}UAA", organ(&code, 13, bias_v), organ(&code, 11, 3))),
     ];
     let gpu = Gpu::new_headless().unwrap();
     let cfg = WorldConfig::TEST;
@@ -129,7 +135,7 @@ fn main() {
     let l0 = w.ledger_blocking(&gpu);
     let c0 = w.life_counters_blocking(&gpu);
     let e0 = sample(&w);
-    println!("anel de {ring} lisinas, força ×{}; idade 30: sinal α do bias de idade = {:+.2}", w.params.protease_power, e0[4].2);
+    println!("força ×{}; idade 30: sinal α do bias de idade = {:+.2}", w.params.protease_power, e0[4].2);
     let steps = envf("STEPS", 3000.0) as u32;
     let mut biting_frac = vec![0f32; designs.len()];
     let mut delta = vec![(0f32, 0u32); designs.len()];

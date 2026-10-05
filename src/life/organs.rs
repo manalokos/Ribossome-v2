@@ -27,14 +27,14 @@
 //! - boca: catálise ×(2 + p); músculo: resposta ×(2 + p/2);
 //!   armazenamento: +4·(p + 1) de capacidade;
 //! - fotossistema: bit 0 = energia da luz (0) ou reativar gastos (1);
-//! - bias de idade: sinal que decai com a idade (as proteases já não são um
-//!   órgão: formam-se por contacto entre resíduos, ver contact.wgsl).
+//! - protease: família (o que corta), força e canal que a ativa;
+//! - bias de idade: sinal que decai com a idade.
 //!
 //! Esta é a única fonte de verdade: o shader recebe as constantes geradas.
 
 use super::amino::{STOP, codon};
 
-pub const ORGAN_TYPES: usize = 17;
+pub const ORGAN_TYPES: usize = 18;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -49,12 +49,13 @@ pub enum Organ {
     FoodSensorDirectional = 8,
     LightSensorDirectional = 9,
     Photosystem = 10,
-    AgeBias = 11,
+    Protease = 11,
     Anchor = 12,
     Bias = 13,
     Chemosynthesis = 14,
     Proofreading = 15,
     Dormancy = 16,
+    AgeBias = 17,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -71,16 +72,17 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "sensor de comida direcional",
     "sensor de luz direcional",
     "fotossistema",
-    "bias de idade",
+    "protease",
     "âncora",
     "bias",
     "quimiossíntese",
     "revisão (menos mutações)",
     "dormência (metabolismo lento)",
+    "bias de idade",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'j', '⚓', 'b', 'χ', 'π', 'z'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -147,9 +149,9 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     LIGHT_SENSOR_PROPS,
     &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],
     &[
-        pd("canal", "0 = α, 1 = β"),
-        pd("valor", "sinal emitido ao nascer (× intensidade)"),
-        pd("meia_vida", "passos de vida até o sinal cair para metade"),
+        pd("familia", "o que corta na vítima: 1 = lisina e arginina, 2 = aspartato e asparagina, 3 = fenilalanina, tirosina, triptofano e leucina (coluna 'protease: alvo' dos aminoácidos)"),
+        pd("forca", "multiplica o risco de lise que causa (× intensidade)"),
+        pd("canal", "−1 = sempre ativa; 2 = só com sinal γ positivo; 3 = só com sinal δ positivo (proporcional ao sinal, até 1)"),
     ],
     &[
         pd("polaridade", "+1 ou −1: liga-se a âncoras de polaridade oposta de outros agentes"),
@@ -164,6 +166,11 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     &[
         pd("fator", "o metabolismo do agente (manutenção, comer, quimiossíntese e copiar, tudo junto) é multiplicado por isto quando o órgão está a atuar em pleno"),
         pd("canal", "−1 = atua sempre; 2 = só com sinal γ positivo; 3 = só com sinal δ positivo (proporcional ao sinal, até 1)"),
+    ],
+    &[
+        pd("canal", "0 = α, 1 = β"),
+        pd("valor", "sinal emitido ao nascer (× intensidade)"),
+        pd("meia_vida", "passos de vida até o sinal cair para metade"),
     ],
 ];
 
@@ -249,6 +256,20 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             v("fator").clamp(0.01, 1.0).powf(g),
             match v("canal") {
                 c if c < 0.0 => "sempre".to_string(),
+                c if c < 2.5 => "só com sinal γ positivo".to_string(),
+                _ => "só com sinal δ positivo".to_string(),
+            }
+        ),
+        11 => format!(
+            "protease [disco com dentes]: desfaz quem toca (corta {}), força ×{:.2}, {}; a prolina protege",
+            match v("familia") {
+                f if f < 1.5 => "lisina e arginina",
+                f if f < 2.5 => "aspartato e asparagina",
+                _ => "aromáticos e leucina",
+            },
+            v("forca") * g,
+            match v("canal") {
+                c if c < 0.0 => "sempre ativa".to_string(),
                 c if c < 2.5 => "só com sinal γ positivo".to_string(),
                 _ => "só com sinal δ positivo".to_string(),
             }
@@ -374,12 +395,13 @@ pub fn wgsl() -> String {
         "FOOD_SENSOR_DIR",
         "LIGHT_SENSOR_DIR",
         "PHOTOSYSTEM",
-        "AGE_BIAS",
+        "PROTEASE",
         "ANCHOR",
         "BIAS",
         "CHEMO",
         "PROOFREAD",
         "DORMANCY",
+        "AGE_BIAS",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");

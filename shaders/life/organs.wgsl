@@ -18,7 +18,7 @@ const SIGNAL_DECAY: f32 = 0.95;
 // deixa de tocar -> relaxa -> toca outra vez: o ritmo vem da forma. Grátis.
 const CONTACT_EMIT_RADIUS: f32 = 10.0;
 const CONTACT_EMIT: f32 = 1.0;
-// Sinal (canal δ) de um sítio de protease que está a cortar.
+// Sinal (canal δ) de uma protease que está a atacar.
 const PROTEASE_SIGNAL: f32 = 1.0;
 // Dinâmica do v3 (modo 0 dos sinais).
 const V3_SIGNAL_DECAY: f32 = 0.997;
@@ -376,10 +376,6 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         bend += abs(signal_deflection(slot, k));
         emit[k] = vec4<f32>(0.0);
         gate[k] = vec4<f32>(1.0);
-        // PROTEASE ATIVA: um sítio que está a atacar outro agente (em contacto
-        // com uma vítima vulnerável no passo anterior) emite no canal δ no
-        // seu nucleófilo: o corpo "sabe" que está a atacar e pode reagir.
-        if (biting && protease_site(slot, n, k, false) > 0u) { emit[k].w += PROTEASE_SIGNAL; }
         // Emissão por contacto (qualquer resíduo, com ou sem órgão).
         let cpr = aa_props[body_get(slot, k)];
         if (cpr.contact_channel >= 0.0) {
@@ -461,6 +457,12 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             continue;
         }
         switch t {
+            case ORGAN_PROTEASE: {
+                // PROTEASE A ATACAR (em contacto com uma vítima vulnerável
+                // no passo anterior): emite no canal δ. O corpo "sabe" que
+                // está a atacar e pode reagir (com um relé: parar, rodar...).
+                if (biting) { emit[k].w += PROTEASE_SIGNAL; }
+            }
             case ORGAN_AGE_BIAS: {
                 // BIAS DE IDADE: p0 canal, p1 valor, p2 meia-vida (passos).
                 // Emite p1 ao nascer e decai para zero com a idade: um

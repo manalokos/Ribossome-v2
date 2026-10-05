@@ -40,65 +40,44 @@ fn contact_insert(@builtin(global_invocation_id) gid: vec3<u32>) {
     contact_disp[slot] = vec4<f32>(0.0, 0.0, 0.0, pack_defence(slot, agents[slot].body_len));
 }
 
-// PROTEASES POR CONTACTO (predação química). Não há órgão: o sítio ativo de
-// uma protease forma-se quando a dobragem do corpo encosta dois resíduos NÃO
-// vizinhos na cadeia, como nas proteases reais:
-//   família 1, de serina:    serina + histidina    (tripsina)  corta K, R
-//   família 2, de cisteína:  cisteína + histidina  (caspases, legumaína) corta D, N
-//   família 3, aspártica:    aspartato + aspartato (pepsina)   corta F, Y, W, L
+// PROTEASE (predação química): um órgão. Cada variante tem uma FAMÍLIA, que
+// decide o que corta na vítima:
+//   família 1 (tipo tripsina):            lisina, arginina
+//   família 2 (tipo caspase / legumaína): aspartato, asparagina
+//   família 3 (tipo pepsina):             fenilalanina, tirosina, triptofano, leucina
+// e pode estar sempre ativa ou só com um sinal interno (γ ou δ) positivo: a
+// criatura pode evoluir "abrir a boca" só quando interessa.
 // (as classes vêm da tabela dos aminoácidos). LISE: uma vítima tocada por
 // sítios ativos tem, em cada passo, um RISCO de se desfazer por inteiro
 // (como uma célula que rebenta quando a parede cede: tudo ou nada). O risco
-// soma, por atacante, PRED_HAZARD × sítios × fração de resíduos da vítima
+// soma, por atacante, PRED_HAZARD × força das proteases × fração de resíduos da vítima
 // que a família corta × (1 − defesa da prolina) × params.protease_power.
 // A regra é cega (nenhum genoma é comparado): quem não tem os
 // aminoácidos-alvo é imune, e os parentes, com a mesma composição, poupam-se
-// uns aos outros por isso. Não há autodigestão: um sítio só corta OUTROS.
+// uns aos outros por isso. Não há autodigestão: uma protease só corta OUTROS.
 // A vítima morre COM a energia que tinha: uma fração (params.lysis_yield)
 // fica nos restos como ativação, um monómero por cada food_power de energia,
 // primeiro os do seu próprio genoma, depois gastos à volta (die_release). O
 // atacante não recebe nada diretamente: tem de comer os restos.
 const PRED_HAZARD: f32 = 0.01;
-// Um sítio contra uma vítima com 10% de resíduos-alvo = PRED_HAZARD por passo.
+// Força 1 contra uma vítima com 10% de resíduos-alvo = PRED_HAZARD por passo.
 const PRED_SITE_SCALE: f32 = 10.0;
 const PRED_PROLINE_DEFENSE: f32 = 0.9;
 const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 100000.0;
 const S_DIGEST: u32 = 13u;
 
-// Família (1..3) do sítio ativo formado no resíduo k, ou 0. `once`: num par
-// de dois nucleófilos da mesma família (aspartato + aspartato) só conta o
-// de índice menor.
-fn protease_site(slot: u32, n: u32, k: u32, once: bool) -> u32 {
-    let f = u32(max(aa_props[body_get(slot, k)].protease_site, 0.0) + 0.5);
-    // (Sem `return` nem `continue` dentro do ciclo: com eles, chamada a
-    // partir de agents_step, a GPU ficava presa e o dispositivo perdia-se.)
-    var found = 0u;
-    if (f != 0u) {
-        let bit = 1u << (f - 1u);
-        let base = slot * MAX_BODY;
-        let pk = body_pos[base + k];
-        for (var j = 0u; j < n; j++) {
-            let far = j + 2u < k || j > k + 2u;
-            let aj = body_get(slot, j);
-            let partner = (u32(max(aa_props[aj].protease_partner, 0.0) + 0.5) & bit) != 0u;
-            let twin = once && j < k && u32(max(aa_props[aj].protease_site, 0.0) + 0.5) == f;
-            let dj = body_pos[base + j] - pk;
-            if (far && partner && !twin && dot(dj, dj) < CONTACT_EMIT_RADIUS * CONTACT_EMIT_RADIUS) {
-                found = f;
-                break;
-            }
-        }
-    }
-    return found;
-}
-
-// Sítios ativos formados no corpo, por família.
+// Força das proteases ATIVAS do agente, por família.
 fn protease_sites(slot: u32, n: u32) -> vec3<f32> {
     var s = vec3<f32>(0.0);
     for (var k = 0u; k < n; k++) {
-        let f = protease_site(slot, n, k, true);
-        if (f > 0u) { s[f - 1u] += 1.0; }
+        let o = organ_get(slot, k);
+        if (organ_type(o) == ORGAN_PROTEASE) {
+            let v = organ_var(o);
+            var drive = 1.0;
+            if (v.p2 >= 0.0) { drive = clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p2, 0.0, 3.0))], 0.0, 1.0); }
+            s[u32(clamp(v.p0, 1.0, 3.0)) - 1u] += max(v.p1, 0.0) * organ_gain(o) * drive;
+        }
     }
     return s;
 }
