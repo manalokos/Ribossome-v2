@@ -58,10 +58,8 @@ fn main() {
         let bite: Vec<[f32; 4]> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.contact_disp_buf)).to_vec();
         for (slot, a) in agents.iter().enumerate().filter(|(_, a)| a.alive != 0) {
             let band = ((a.pos_y / size * BANDS as f32) as usize).min(BANDS - 1);
-            let pred = (0..a.body_len as usize).any(|r| {
-                let o = (organs[slot * 32 + r / 2] >> ((r % 2) * 16)) & 0xFFFF;
-                o != 0 && (o & 0x1F) - 1 == 11
-            });
+            // Já não há órgão: conta como predador quem tirou energia neste passo.
+            let pred = bite[slot][2] > 0.0;
             let e = &mut b[band];
             e.agents += 1.0;
             if pred {
@@ -82,7 +80,7 @@ fn main() {
         let e = b[band];
         let s = samples as f64;
         println!(
-            "  {:6.0} agentes, {:5.0} com protease ({:4.1}%): {:4.1}% deles a morder; ganho {:.4}/passo por predador (manutenção base do corpo {:.4}); {:4.1}% dos agentes a ser mordidos, perda {:.4}/passo cada; energia: predadores {:.1}, outros {:.1}",
+            "  {:6.0} agentes, {:5.0} a morder ({:4.1}%, {:4.1}%); energia tirada {:.4}/passo por atacante (manutenção base do corpo {:.4}); {:4.1}% dos agentes a ser mordidos, perda {:.4}/passo cada; energia: predadores {:.1}, outros {:.1}",
             e.agents / s,
             e.preds / s,
             100.0 * e.preds / e.agents.max(1.0),

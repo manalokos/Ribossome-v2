@@ -27,7 +27,8 @@
 //! - boca: catálise ×(2 + p); músculo: resposta ×(2 + p/2);
 //!   armazenamento: +4·(p + 1) de capacidade;
 //! - fotossistema: bit 0 = energia da luz (0) ou reativar gastos (1);
-//! - protease: mordida ×(1 + p/2).
+//! - bias de idade: sinal que decai com a idade (as proteases já não são um
+//!   órgão: formam-se por contacto entre resíduos, ver contact.wgsl).
 //!
 //! Esta é a única fonte de verdade: o shader recebe as constantes geradas.
 
@@ -48,7 +49,7 @@ pub enum Organ {
     FoodSensorDirectional = 8,
     LightSensorDirectional = 9,
     Photosystem = 10,
-    Protease = 11,
+    AgeBias = 11,
     Anchor = 12,
     Bias = 13,
     Chemosynthesis = 14,
@@ -70,7 +71,7 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "sensor de comida direcional",
     "sensor de luz direcional",
     "fotossistema",
-    "protease",
+    "bias de idade",
     "âncora",
     "bias",
     "quimiossíntese",
@@ -79,7 +80,7 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'j', '⚓', 'b', 'χ', 'π', 'z'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -145,7 +146,11 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
     &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],
-    &[pd("forca", "multiplica a mordida"), pd("alcance", "unidades do mundo além do contacto")],
+    &[
+        pd("canal", "0 = α, 1 = β"),
+        pd("valor", "sinal emitido ao nascer (× intensidade)"),
+        pd("meia_vida", "passos de vida até o sinal cair para metade"),
+    ],
     &[
         pd("polaridade", "+1 ou −1: liga-se a âncoras de polaridade oposta de outros agentes"),
         pd("quebra", "probabilidade por passo de se soltar (0 = permanente)"),
@@ -281,9 +286,10 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             fmt_canal(v("canal"))
         ),
         _ => format!(
-            "protease [disco com dentes]: tira energia a quem toca (fica com metade), força ×{:.2}, alcance +{:.0}; a prolina protege",
-            v("forca") * g,
-            v("alcance")
+            "bias de idade [meio disco]: emite {:+.2} em {} ao nascer; cai para metade a cada {:.0} passos de vida",
+            v("valor") * g,
+            fmt_canal(v("canal")),
+            v("meia_vida")
         ),
     }
 }
@@ -368,7 +374,7 @@ pub fn wgsl() -> String {
         "FOOD_SENSOR_DIR",
         "LIGHT_SENSOR_DIR",
         "PHOTOSYSTEM",
-        "PROTEASE",
+        "AGE_BIAS",
         "ANCHOR",
         "BIAS",
         "CHEMO",

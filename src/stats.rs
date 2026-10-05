@@ -23,7 +23,7 @@ const CSV_OLD: &str = "logs/estatisticas.1.csv";
 const CSV_MAX_BYTES: u64 = 20 << 20;
 
 /// Séries fixas (as dos órgãos vêm a seguir, uma por tipo).
-const BASE: [&str; 12] = [
+const BASE: [&str; 13] = [
     "vivos",
     "nascimentos / 1000 epochs",
     "mortes / 1000 epochs",
@@ -36,6 +36,7 @@ const BASE: [&str; 12] = [
     "órgãos por agente",
     "% monómeros livres ativados",
     "% matéria nos agentes",
+    "mordidas / 1000 epochs",
 ];
 
 pub fn series_names() -> Vec<String> {
@@ -54,7 +55,7 @@ pub struct History {
     stride: u32,
     seen: u32,
     /// Contadores da amostra anterior (para as taxas).
-    last: Option<(u32, u32, u32)>,
+    last: Option<(u32, u32, u32, u32)>,
     /// Epochs entre amostras.
     pub every: u32,
     pub next_epoch: u32,
@@ -97,15 +98,16 @@ impl History {
     pub fn push(&mut self, epoch: u32, w: &[u32], ledger: Option<Ledger>, c: Option<LifeCounters>) {
         let alive = w[0] as f32;
         let per = |x: u32| if alive > 0.0 { x as f32 / alive } else { 0.0 };
-        let (births, deaths) = match (c, self.last) {
-            (Some(c), Some((e0, b0, d0))) if epoch > e0 => {
+        let (births, deaths, bites) = match (c, self.last) {
+            (Some(c), Some((e0, b0, d0, m0))) if epoch > e0 => {
                 let k = 1000.0 / (epoch - e0) as f32;
-                (c.births.saturating_sub(b0) as f32 * k, c.deaths.saturating_sub(d0) as f32 * k)
+                // (As mordidas dão a volta aos 32 bits numa corrida longa.)
+                (c.births.saturating_sub(b0) as f32 * k, c.deaths.saturating_sub(d0) as f32 * k, c.bites.wrapping_sub(m0) as f32 * k)
             }
-            _ => (0.0, 0.0),
+            _ => (0.0, 0.0, 0.0),
         };
         if let Some(c) = c {
-            self.last = Some((epoch, c.births, c.deaths));
+            self.last = Some((epoch, c.births, c.deaths, c.bites));
         }
         let (act, held) = ledger.map_or((0.0, 0.0), |l| {
             let free = l.free_total().max(1) as f32;
@@ -125,6 +127,7 @@ impl History {
             per(w[7]),
             act,
             held,
+            bites,
         ];
         v.extend((0..ORGAN_TYPES).map(|t| 100.0 * per(w[8 + t])));
         self.write_csv(epoch, &v);

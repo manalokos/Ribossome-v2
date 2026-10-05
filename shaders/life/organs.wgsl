@@ -18,6 +18,8 @@ const SIGNAL_DECAY: f32 = 0.95;
 // deixa de tocar -> relaxa -> toca outra vez: o ritmo vem da forma. Grátis.
 const CONTACT_EMIT_RADIUS: f32 = 10.0;
 const CONTACT_EMIT: f32 = 1.0;
+// Sinal (canal δ) de um sítio de protease que está a cortar.
+const PROTEASE_SIGNAL: f32 = 1.0;
 // Dinâmica do v3 (modo 0 dos sinais).
 const V3_SIGNAL_DECAY: f32 = 0.997;
 const V3_SIGNAL_UPDATE: f32 = 0.75;
@@ -368,10 +370,16 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
     // Portas: 1 = o canal passa neste resíduo, 0 = travado (relés).
     var gate: array<vec4<f32>, 64>;
     var bend = 0.0;
+    // Este agente tirou energia a outro no passo anterior (contact_apply).
+    let biting = contact_disp[slot].z > 0.0;
     for (var k = 0u; k < n; k++) {
         bend += abs(signal_deflection(slot, k));
         emit[k] = vec4<f32>(0.0);
         gate[k] = vec4<f32>(1.0);
+        // PROTEASE ATIVA: um sítio que está a cortar outro agente (mordeu no
+        // passo anterior) emite no canal δ no seu nucleófilo: o corpo "sabe"
+        // que está a comer e pode reagir (com um relé, fechar-se, parar...).
+        if (biting && protease_site(slot, n, k, false) > 0u) { emit[k].w += PROTEASE_SIGNAL; }
         // Emissão por contacto (qualquer resíduo, com ou sem órgão).
         let cpr = aa_props[body_get(slot, k)];
         if (cpr.contact_channel >= 0.0) {
@@ -453,6 +461,14 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             continue;
         }
         switch t {
+            case ORGAN_AGE_BIAS: {
+                // BIAS DE IDADE: p0 canal, p1 valor, p2 meia-vida (passos).
+                // Emite p1 ao nascer e decai para zero com a idade: um
+                // programa de desenvolvimento (o recém-nascido tem outra
+                // forma ou outro comportamento que o adulto).
+                let v = ov.p1 * organ_gain(o) * exp2(-f32(a.age) / max(ov.p2, 1.0));
+                if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }
+            }
             case ORGAN_BIAS: {
                 // p0 canal, p1 valor: emite sempre o mesmo (um "bias").
                 let v = ov.p1 * organ_gain(o);

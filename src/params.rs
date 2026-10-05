@@ -673,6 +673,15 @@ gpu_struct! {
         pub contact_want: f32,
         /// Classe deste aminoácido como parceiro de contacto (0 = nenhuma).
         pub contact_class: f32,
+        /// PROTEASES POR CONTACTO (sítio ativo = dois resíduos não vizinhos
+        /// que a dobragem encosta). Família de que este aminoácido é o
+        /// nucleófilo: 0 nenhuma, 1 serina, 2 cisteína, 3 aspártica.
+        pub protease_site: f32,
+        /// Máscara das famílias de que é o PARCEIRO (bit 0 = família 1...).
+        pub protease_partner: f32,
+        /// Máscara das famílias que o CORTAM numa vítima.
+        pub protease_target: f32,
+        pub _pad_protease: f32,
     }
 }
 

@@ -34,34 +34,94 @@ fn contact_insert(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (slot >= params.max_agents || agents[slot].alive == 0u) { return; }
     let c = contact_cell_xy(vec2<f32>(agents[slot].pos_x, agents[slot].pos_y));
     contact_next[slot] = atomicExchange(&contact_head[u32(c.y) * CONTACT_N + u32(c.x)], slot);
-    // Defesa contra proteases (fração de prolina), calculada uma vez por
-    // passo: os atacantes leem-na em contact_disp.w.
-    contact_disp[slot] = vec4<f32>(0.0, 0.0, 0.0, proline_fraction(slot, agents[slot].body_len));
+    // O que os atacantes precisam de saber desta vítima (frações de
+    // resíduos-alvo de cada família e de prolina), calculado uma vez por
+    // passo e empacotado em contact_disp.w (4 × 6 bits, exato num f32).
+    contact_disp[slot] = vec4<f32>(0.0, 0.0, 0.0, pack_defence(slot, agents[slot].body_len));
 }
 
-// PROTEASE (predação química): ao tocar noutro agente, um agente com
-// proteases parte-lhe proteína e tira-lhe energia (fica com PRED_EFFICIENCY
-// dela). A matéria fica com a vítima e volta ao meio quando ela morre.
-// Defesa química: corpos ricos em PROLINA resistem (como algumas proteínas
-// reais). Nenhuma regra olha para o genoma.
+// PROTEASES POR CONTACTO (predação química). Não há órgão: o sítio ativo de
+// uma protease forma-se quando a dobragem do corpo encosta dois resíduos NÃO
+// vizinhos na cadeia, como nas proteases reais:
+//   família 1, de serina:    serina + histidina    (tripsina)  corta K, R
+//   família 2, de cisteína:  cisteína + histidina  (caspases, legumaína) corta D, N
+//   família 3, aspártica:    aspartato + aspartato (pepsina)   corta F, Y, W, L
+// (as classes vêm da tabela dos aminoácidos). Ao tocar noutro agente, cada
+// sítio formado tira-lhe energia em proporção da fração de resíduos da
+// vítima que a sua família corta. A regra é cega (nenhum genoma é
+// comparado): quem não tem os aminoácidos-alvo é imune, e os parentes, com
+// a mesma composição, poupam-se uns aos outros por isso. A prolina resiste.
+// DIGESTÃO: a energia tirada NÃO vai para o atacante; reativa monómeros
+// gastos na célula da vítima (contact_apply), que qualquer boca pode comer.
+// Não há autodigestão: um sítio só corta OUTROS agentes.
 const PRED_BITE: f32 = 0.01;
-const PRED_EFFICIENCY: f32 = 0.5;
+// Um sítio contra uma vítima com 10% de resíduos-alvo = PRED_BITE.
+const PRED_SITE_SCALE: f32 = 10.0;
 const PRED_PROLINE_DEFENSE: f32 = 0.9;
 const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 1000.0;
+const S_DIGEST: u32 = 13u;
 
-// (força total, alcance máximo) das proteases do agente (variantes).
-fn protease_power(slot: u32, n: u32) -> vec2<f32> {
-    var pw = vec2<f32>(0.0);
-    for (var k = 0u; k < n; k++) {
-        let o = organ_get(slot, k);
-        if (organ_type(o) == ORGAN_PROTEASE) {
-            let v = organ_var(o);
-            pw.x += max(v.p0, 0.0) * organ_gain(o);
-            pw.y = max(pw.y, v.p1);
+// Família (1..3) do sítio ativo formado no resíduo k, ou 0. `once`: num par
+// de dois nucleófilos da mesma família (aspartato + aspartato) só conta o
+// de índice menor.
+fn protease_site(slot: u32, n: u32, k: u32, once: bool) -> u32 {
+    let f = u32(max(aa_props[body_get(slot, k)].protease_site, 0.0) + 0.5);
+    // (Sem `return` nem `continue` dentro do ciclo: com eles, chamada a
+    // partir de agents_step, a GPU ficava presa e o dispositivo perdia-se.)
+    var found = 0u;
+    if (f != 0u) {
+        let bit = 1u << (f - 1u);
+        let base = slot * MAX_BODY;
+        let pk = body_pos[base + k];
+        for (var j = 0u; j < n; j++) {
+            let far = j + 2u < k || j > k + 2u;
+            let aj = body_get(slot, j);
+            let partner = (u32(max(aa_props[aj].protease_partner, 0.0) + 0.5) & bit) != 0u;
+            let twin = once && j < k && u32(max(aa_props[aj].protease_site, 0.0) + 0.5) == f;
+            let dj = body_pos[base + j] - pk;
+            if (far && partner && !twin && dot(dj, dj) < CONTACT_EMIT_RADIUS * CONTACT_EMIT_RADIUS) {
+                found = f;
+                break;
+            }
         }
     }
-    return pw;
+    return found;
+}
+
+// Sítios ativos formados no corpo, por família.
+fn protease_sites(slot: u32, n: u32) -> vec3<f32> {
+    var s = vec3<f32>(0.0);
+    for (var k = 0u; k < n; k++) {
+        let f = protease_site(slot, n, k, true);
+        if (f > 0u) { s[f - 1u] += 1.0; }
+    }
+    return s;
+}
+
+// Fração dos resíduos do corpo que cada família corta.
+fn protease_targets(slot: u32, n: u32) -> vec3<f32> {
+    var t = vec3<f32>(0.0);
+    if (n == 0u) { return t; }
+    for (var k = 0u; k < n; k++) {
+        let m = u32(max(aa_props[body_get(slot, k)].protease_target, 0.0) + 0.5);
+        if ((m & 1u) != 0u) { t.x += 1.0; }
+        if ((m & 2u) != 0u) { t.y += 1.0; }
+        if ((m & 4u) != 0u) { t.z += 1.0; }
+    }
+    return t / f32(n);
+}
+
+// (alvo fam. 1, alvo fam. 2, alvo fam. 3, prolina), cada um 0..1 em 6 bits.
+fn pack_defence(slot: u32, n: u32) -> f32 {
+    let t = protease_targets(slot, n);
+    let q = vec4<u32>(round(clamp(vec4<f32>(t, proline_fraction(slot, n)), vec4<f32>(0.0), vec4<f32>(1.0)) * 63.0));
+    return f32(q.x | (q.y << 6u) | (q.z << 12u) | (q.w << 18u));
+}
+
+fn unpack_defence(w: f32) -> vec4<f32> {
+    let u = u32(max(w, 0.0));
+    return vec4<f32>(f32(u & 63u), f32((u >> 6u) & 63u), f32((u >> 12u) & 63u), f32((u >> 18u) & 63u)) / 63.0;
 }
 
 fn proline_fraction(slot: u32, n: u32) -> f32 {
@@ -82,8 +142,9 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p = vec2<f32>(a.pos_x, a.pos_y);
     let c = contact_cell_xy(p);
     var push = vec2<f32>(0.0);
-    let prot = protease_power(slot, a.body_len);
-    let power = prot.x;
+    let sites = protease_sites(slot, a.body_len);
+    let armed = sites.x + sites.y + sites.z > 0.0;
+    // Energia tirada a outros neste passo (não fica com ela: ver DIGESTÃO).
     var gained = 0.0;
     for (var dy = -1; dy <= 1; dy++) {
         for (var dx = -1; dx <= 1; dx++) {
@@ -106,16 +167,16 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         if (dist > 1e-4) { dir = d / dist; }
                         push += dir * overlap;
                     }
-                    // Mordida: em contacto, ou até ao alcance da protease.
-                    if (overlap + prot.y > 0.0) {
-                        if (power > 0.0 && b.energy > 0.0) {
-                            let resist = 1.0 - PRED_PROLINE_DEFENSE * contact_disp[e].w;
-                            let bite = min(PRED_BITE * max(params.protease_power, 0.0) * power * resist, b.energy);
-                            if (bite > 0.0) {
-                                atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
-                                gained += bite * PRED_EFFICIENCY;
-                                atomicAdd(&life_counters[LC_BITES], 1u);
-                            }
+                    // Mordida: só em contacto.
+                    if (overlap > 0.0 && armed && b.energy > 0.0) {
+                        let def = unpack_defence(contact_disp[e].w);
+                        let power = dot(sites, def.xyz) * PRED_SITE_SCALE;
+                        let resist = 1.0 - PRED_PROLINE_DEFENSE * def.w;
+                        let bite = min(PRED_BITE * max(params.protease_power, 0.0) * power * resist, b.energy);
+                        if (bite > 0.0) {
+                            atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
+                            gained += bite;
+                            atomicAdd(&life_counters[LC_BITES], 1u);
                         }
                     }
                 }
@@ -144,13 +205,28 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
         a.pos_x = np.x;
         a.pos_y = np.y;
     }
-    // Predação: o que este agente mordeu e o que lhe morderam.
+    // Predação: o que lhe morderam sai da energia e é DIGERIDO para o meio:
+    // reativa gastos da célula onde está (um por cada food_power de energia,
+    // com arredondamento ao acaso). Sem gastos ali, essa energia perde-se.
     let lost = f32(atomicExchange(&bitten[slot], 0u)) / BITE_SCALE;
+    if (lost > 0.0) {
+        let q = rng_f4(a.id, params.epoch, S_DIGEST);
+        let want = lost / max(params.food_power, 1e-3);
+        var count = u32(want);
+        if (q.x < fract(want)) { count += 1u; }
+        let cell = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
+        let ch0 = min(u32(q.y * 4.0), 3u);
+        for (var i = 0u; i < min(count, 8u); i++) {
+            for (var t = 0u; t < 4u; t++) {
+                if (chem_activate_one(cell * 4u + (ch0 + i + t) % 4u)) { break; }
+            }
+        }
+    }
     a.rot += bd.z;
-    a.energy = min(max(a.energy + contact_disp[slot].z + bd.w, 0.0), energy_capacity(slot, a)) - lost;
+    a.energy = min(max(a.energy + bd.w, 0.0), energy_capacity(slot, a)) - lost;
     agents[slot] = a;
-    // Para a vista (flash das proteases): .x = energia que lhe morderam
-    // neste passo, .z = a que ganhou a morder. contact_build repõe tudo no
+    // Para a vista (flash) e para o sinal das proteases: .x = energia que
+    // lhe morderam neste passo, .z = a que tirou a outros. contact_build repõe tudo no
     // passo seguinte.
     contact_disp[slot] = vec4<f32>(lost, 0.0, contact_disp[slot].z, contact_disp[slot].w);
 }

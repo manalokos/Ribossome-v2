@@ -59,6 +59,16 @@ pub struct AminoRow {
     pub contacto_quer: f32,
     #[serde(default)]
     pub contacto_classe: f32,
+    /// Proteases por contacto: família de que é o nucleófilo (0 nenhuma, 1
+    /// serina, 2 cisteína, 3 aspártica), máscara das famílias de que é o
+    /// parceiro (1 = fam. 1, 2 = fam. 2, 4 = fam. 3; soma-se) e máscara das
+    /// famílias que o cortam numa vítima.
+    #[serde(default)]
+    pub protease_sitio: f32,
+    #[serde(default)]
+    pub protease_par: f32,
+    #[serde(default)]
+    pub protease_alvo: f32,
     #[serde(rename = "substrato_A")]
     pub substrato_a: f32,
     #[serde(rename = "substrato_U")]
@@ -324,6 +334,10 @@ pub fn to_gpu(rows: &[AminoRow]) -> Vec<AaProps> {
             contact_channel: r.contacto_canal,
             contact_want: r.contacto_quer,
             contact_class: r.contacto_classe,
+            protease_site: r.protease_sitio,
+            protease_partner: r.protease_par,
+            protease_target: r.protease_alvo,
+            _pad_protease: 0.0,
         })
         .collect()
 }

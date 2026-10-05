@@ -32,9 +32,9 @@
 // que ganhou a morder (shaders/life/contact.wgsl).
 @group(0) @binding(13) var<storage, read> bite_view: array<vec4<f32>>;
 
-// FLASH DAS PROTEASES: quem está a morder fica com as proteases maiores e
-// amarelo-claras; a vítima fica com o corpo vermelho vivo.
-const BITE_ORGAN_GROW: f32 = 2.2;
+// FLASH DAS PROTEASES: em quem está a morder, os resíduos que podem formar
+// sítios ativos (nucleófilos e parceiros) ficam amarelo-claros; a vítima
+// fica com o corpo vermelho vivo.
 const BITE_ATTACK_COLOR: vec3<f32> = vec3<f32>(1.0, 0.95, 0.45);
 const BITE_VICTIM_COLOR: vec3<f32> = vec3<f32>(1.0, 0.12, 0.08);
 
@@ -115,7 +115,7 @@ fn organ_extent(t: u32) -> f32 {
         case ORGAN_MUSCLE: { return 1.6; }
         case ORGAN_STORAGE: { return 1.9; }
         case ORGAN_PHOTOSYSTEM: { return 1.8; }
-        case ORGAN_PROTEASE: { return 1.7; }
+        case ORGAN_AGE_BIAS: { return 1.2; }
         case ORGAN_ANCHOR: { return 1.5; }
         case ORGAN_BIAS: { return 1.0; }
         case NO_ORGAN: { return 1.0; }
@@ -178,16 +178,16 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         // Estruturais finos (a cadeia); os órgãos destacam-se (ORGAN_SCALE).
         r_world = 2.6 * sqrt(aa_props_view[aa].volume / 130.0) + 1.3;
         col = class_color(aa);
+        let app = aa_props_view[aa];
+        if (bite.z > 0.0 && bite.x <= 0.0 && (app.protease_site > 0.5 || app.protease_partner > 0.5)) { flash = BITE_ATTACK_COLOR; }
         let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
         if (oc != 0u) {
             organ = (oc & 0x1Fu) - 1u;
             r_world *= ORGAN_SCALE;
-            if (organ == ORGAN_PROTEASE) {
-                col = vec3<f32>(0.9, 0.2, 0.2);
-                if (bite.z > 0.0 && glyph) {
-                    flash = BITE_ATTACK_COLOR;
-                    r_world *= BITE_ORGAN_GROW;
-                }
+            if (organ == ORGAN_AGE_BIAS) {
+                let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
+                let beta = organ_variants_view[ORGAN_AGE_BIAS * ORGAN_VARIANTS + p].p0 >= 0.5;
+                col = select(vec3<f32>(1.0, 0.55, 0.15), vec3<f32>(0.35, 0.95, 0.35), beta);
             }
             if (organ == ORGAN_BIAS) {
                 let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
@@ -550,12 +550,12 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             if (bite < core * 0.8) { discard; }
             return vec4<f32>(0.72, 0.82, 1.0, 1.0);
         }
-        case ORGAN_PROTEASE: {
-            // Disco com dentes (6 triângulos à volta).
-            let ang = atan2(v, u);
-            let tooth = core + (0.95 - core) * max(0.0, 1.0 - abs(fract(ang / 1.0471976) - 0.5) * 4.0);
-            if (d > tooth) { discard; }
-            return vec4<f32>(select(in.color, mix(in.color, vec3<f32>(1.0), 0.8), d > core), 1.0);
+        case ORGAN_AGE_BIAS: {
+            // Meio disco cheio (laranja = α, verde = β), meio só contorno:
+            // um bias que se vai apagando.
+            if (d > core) { discard; }
+            let hollow = u > 0.0 && d < core * 0.7;
+            return vec4<f32>(select(in.color, in.color * 0.25, hollow), 1.0);
         }
         default: {
             // Armazenamento: disco com anéis concêntricos.

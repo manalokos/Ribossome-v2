@@ -616,7 +616,7 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.separator();
     ui.strong("Predação");
     ui.add(egui::Slider::new(&mut p.protease_power, 0.0..=30.0).logarithmic(true).smallest_positive(0.1).text("força das proteases ×"))
-        .on_hover_text("multiplica a energia que uma protease tira por passo de contacto (o atacante fica com metade). 1 = o de sempre; 0 = sem predação. A prolina do corpo da vítima continua a defender");
+        .on_hover_text("multiplica a energia que os sítios de protease tiram por passo de contacto. Os sítios formam-se quando a dobragem encosta serina + histidina, cisteína + histidina ou aspartato + aspartato; a energia tirada reativa gastos junto da vítima (não vai para o atacante). 0 = sem predação. A prolina da vítima defende");
     ui.separator();
     ui.strong("Ligações entre agentes (órgão âncora: + liga a −)");
     ui.add(egui::Slider::new(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formação"))
