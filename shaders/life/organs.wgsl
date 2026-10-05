@@ -83,16 +83,7 @@ fn organ_cost(o: u32) -> OrganProps {
     return organ_props[organ_type(o) * ORGAN_VARIANTS + min(organ_param(o), ORGAN_VARIANTS - 1u)];
 }
 
-// Capacidade extra de energia e custo de manutenção dos órgãos do agente.
-fn organ_capacity(slot: u32, n: u32) -> f32 {
-    var c = 0.0;
-    for (var k = 0u; k < n; k++) {
-        let o = organ_get(slot, k);
-        if (organ_type(o) == ORGAN_STORAGE) { c += max(organ_var(o).p0, 0.0) * organ_gain(o); }
-    }
-    return c;
-}
-
+// Custo de manutenção dos órgãos do agente.
 fn organ_upkeep(slot: u32, n: u32) -> f32 {
     var u = 0.0;
     for (var k = 0u; k < n; k++) {

@@ -857,7 +857,7 @@ impl Running {
         let ctx = self.egui_state.egui_ctx().clone();
         let mut out = ctx.run_ui(raw, |root| {
             ui::draw(root.ctx(), &mut self.ui, &mut self.world, &mut self.profiler);
-            ui::inspector::draw(root.ctx(), &mut self.inspector, &self.world.organ_table);
+            ui::inspector::draw(root.ctx(), &mut self.inspector, &self.world.organ_table, &self.world.amino);
         });
         self.egui_state.handle_platform_output(&self.window, out.platform_output);
         let jobs = ctx.tessellate(out.shapes, out.pixels_per_point);

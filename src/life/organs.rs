@@ -25,7 +25,8 @@
 //! - relógio: canal, período e modulação por α/β vêm das variantes (assets/orgaos.json);
 //! - relé: bits 0–1 modo (α->β, β->α, inverte α, inverte β), bit 2 ganho ×2;
 //! - boca: catálise ×(2 + p); músculo: resposta ×(2 + p/2);
-//!   armazenamento: +4·(p + 1) de capacidade;
+//!   armazenamento: DESATIVADO (a capacidade de energia vem do volume dos
+//!   aminoácidos do corpo; o tipo fica só para ler cenas antigas);
 //! - fotossistema: bit 0 = energia da luz (0) ou reativar gastos (1);
 //! - protease: família (o que corta), força e canal que a ativa;
 //! - bias de idade: sinal que decai com a idade.
@@ -144,7 +145,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("ganho", "multiplica o que emite (× a força do 3.º codão)"),
         pd("limiar", "limiar das portas e do modo 5 (módulo do sinal de entrada)"),
     ],
-    &[pd("capacidade", "energia extra que guarda")],
+    &[pd("capacidade", "sem efeito: o órgão está desativado (a capacidade vem do volume dos aminoácidos)")],
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
     &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],
@@ -274,7 +275,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
                 _ => "só com sinal δ positivo".to_string(),
             }
         ),
-        7 => format!("armazenamento [disco com anéis]: +{:.1} de capacidade de energia", v("capacidade") * g),
+        7 => "armazenamento [disco com anéis]: DESATIVADO (já não se forma; a capacidade de energia vem do volume dos aminoácidos do corpo)".to_string(),
         8 => format!("{} · sente {}", sensor("sensor de comida DIRECIONAL (esquerda − direita)", "2 antenas verdes"), alvo()),
         9 => format!("{} · sente {}", sensor("sensor físico DIRECIONAL (esquerda − direita)", "2 antenas amarelas"), alvo_fisico()),
         10 => format!(

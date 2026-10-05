@@ -198,7 +198,10 @@ fn colored_seq(ui: &mut egui::Ui, items: impl Iterator<Item = (char, egui::Color
     });
 }
 
-pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life::table::OrganRow]) {
+/// Volume médio dos 20 aminoácidos (igual a CAP_VOLUME_REF no shader).
+const CAP_VOLUME_REF: f32 = 141.26;
+
+pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life::table::OrganRow], amino: &[crate::life::table::AminoRow]) {
     if !ins.open {
         return;
     }
@@ -228,18 +231,9 @@ pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life
             );
             row("geração", a.generation.to_string());
             row("idade", format!("{} passos", a.age));
-            // Capacidade real: 1 por resíduo + o armazenamento (variante × ganho).
-            let storage: f32 = d
-                .organs
-                .iter()
-                .filter(|&&o| o != 0 && (o & 0x1F) as usize - 1 == 7)
-                .map(|&o| {
-                    let p = (((o >> 5) & 0x7) as usize).min(5);
-                    let cap = organ_table.get(7).and_then(|r| r.variantes.get(p)).and_then(|m| m.get("capacidade")).copied();
-                    cap.unwrap_or(0.0) * crate::life::organs::organ_gain((o >> 8) as u8)
-                })
-                .sum();
-            row("energia", format!("{:.2} / {:.1}", a.energy, a.body_len.max(1) as f32 + storage));
+            // Capacidade: o volume dos aminoácidos do corpo (em média 1 por resíduo).
+            let cap = (d.body.iter().map(|&aa| amino.get(aa as usize).map_or(0.0, |r| r.volume)).sum::<f32>() / CAP_VOLUME_REF).max(1.0);
+            row("energia", format!("{:.2} / {:.1}", a.energy, cap));
             row("cópia", format!("{} / {} bases", a.pair_count, a.gene_len));
             row(
                 "corpo",

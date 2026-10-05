@@ -177,7 +177,9 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         tangent = vec2<f32>(cr * tn.x - sr * tn.y, sr * tn.x + cr * tn.y);
         // Espessura (v3): 4·√(volume/130), mais folga para os discos se tocarem.
         // Estruturais finos (a cadeia); os órgãos destacam-se (ORGAN_SCALE).
-        r_world = 2.6 * sqrt(aa_props_view[aa].volume / 130.0) + 1.3;
+        // (Contraste forte de propósito: o volume é a capacidade de energia
+        // do resíduo; glicina ~2, alanina ~2,6, médio ~4, triptofano ~7,5.)
+        r_world = 0.9 + 3.0 * pow(aa_props_view[aa].volume / 130.0, 1.4);
         col = class_color(aa);
         let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
         if (oc != 0u) {

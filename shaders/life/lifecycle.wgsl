@@ -298,9 +298,17 @@ fn die_release(slot: u32, a_in: Agent, budget_in: u32) {
     if (a.energy < 1.0) { atomicAdd(&life_counters[LC_STARVED], 1u); }
 }
 
+// CAPACIDADE DE ENERGIA = o corpo. Cada aminoácido guarda em proporção do
+// volume da sua cadeia lateral (em média 1 por resíduo: CAP_VOLUME_REF é o
+// volume médio dos 20). Um corpo de aminoácidos grandes (W, Y, F) é uma
+// pilha maior, e mais pesada; um de glicina e alanina é leve e guarda pouco.
+// Não há órgão de armazenamento: viver de reservas pede um corpo maior. O
+// RNA nu guarda 1.
+const CAP_VOLUME_REF: f32 = 141.26;
 fn energy_capacity(slot: u32, a: Agent) -> f32 {
-    // v3: cada aminoácido guarda 1 (o RNA nu guarda 1); o armazenamento soma.
-    return max(f32(a.body_len), 1.0) + organ_capacity(slot, a.body_len);
+    var vol = 0.0;
+    for (var k = 0u; k < a.body_len; k++) { vol += aa_props[body_get(slot, k)].volume; }
+    return max(vol / CAP_VOLUME_REF, 1.0);
 }
 
 @compute @workgroup_size(64)
