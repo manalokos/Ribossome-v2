@@ -616,9 +616,11 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.separator();
     ui.strong("Predação");
     ui.add(egui::Slider::new(&mut p.protease_power, 0.0..=30.0).logarithmic(true).smallest_positive(0.1).text("força das proteases ×"))
-        .on_hover_text("multiplica o risco, por passo de contacto, de uma vítima se desfazer (lise). O risco vem dos órgãos de protease do atacante (força × intensidade × sinal que os ativa); cada família corta certos aminoácidos da vítima e a prolina defende. 0 = sem predação");
-    ui.add(egui::Slider::new(&mut p.lysis_yield, 0.0..=1.0).text("rendimento da lise"))
-        .on_hover_text("fração da energia da vítima que fica nos restos como monómeros ativados (um por cada 'energia por monómero'): primeiro os do seu genoma, depois gastos à volta. O atacante tem de os comer");
+        .on_hover_text("multiplica a energia que as proteases tiram à vítima por passo de contacto (base: 0,2 × força × intensidade para uma vítima com 10% de resíduos-alvo). Quando a energia da vítima chega a zero, morre. Cada família corta certos aminoácidos e a prolina defende. 0 = sem predação");
+    ui.add(egui::Slider::new(&mut p.protease_direct, 0.0..=1.0).text("fração direta para o predador"))
+        .on_hover_text("parte da energia tirada que entra diretamente no atacante. O resto vai para o meio (ver o slider seguinte). 0 = o predador tem de comer os restos; 1 = aspira tudo");
+    ui.add(egui::Slider::new(&mut p.lysis_yield, 0.0..=1.0).text("rendimento dos restos"))
+        .on_hover_text("da energia que não vai direta para o predador, a fração que fica no meio como monómeros ativados junto da vítima (um por cada 'energia por monómero'); o resto perde-se");
     ui.separator();
     ui.strong("Ligações entre agentes (órgão âncora: + liga a −)");
     ui.add(egui::Slider::new(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formação"))
