@@ -248,10 +248,28 @@ fn agent_matter(slot: u32) -> vec4<u32> {
 // para a cópia em curso voltam ATIVADOS: foram tirados ativados e ainda só
 // estavam emparelhados, não ligados (a ativação não foi gasta).
 fn die(slot: u32, a_in: Agent) {
+    die_release(slot, a_in, 0u);
+}
+
+// Morte em que `budget` monómeros dos restos saem ATIVADOS além dos
+// complementos (LISE por protease: a energia que a vítima tinha fica nos
+// pedaços). Primeiro os do próprio agente; o que sobrar do orçamento
+// reativa gastos das células onde o corpo estava.
+fn die_release(slot: u32, a_in: Agent, budget_in: u32) {
     var a = a_in;
     var m_act = vec4<u32>(0u);
     for (var i = 0u; i < min(a.pair_count, a.gene_len); i++) { m_act[genome_get(slot, i) ^ 1u] += 1u; }
-    let m_spent = agent_matter(slot) - m_act;
+    var m_spent = agent_matter(slot) - m_act;
+    var budget = budget_in;
+    for (var i = 0u; i < 512u; i++) {
+        if (budget == 0u || m_spent.x + m_spent.y + m_spent.z + m_spent.w == 0u) { break; }
+        let ch = i % 4u;
+        if (m_spent[ch] > 0u) {
+            m_spent[ch] -= 1u;
+            m_act[ch] += 1u;
+            budget -= 1u;
+        }
+    }
     let n = max(a.body_len, 1u);
     for (var k = 0u; k < n; k++) {
         var pk = vec2<f32>(a.pos_x, a.pos_y);
@@ -264,6 +282,14 @@ fn die(slot: u32, a_in: Agent) {
             let s_ac = m_act[ch] / n + select(0u, 1u, k < m_act[ch] % n);
             if (s_ac > 0u) { chem_add_state(cell, ch, s_ac, false); }
         }
+    }
+    // O que sobrou do orçamento: gastos já livres à volta do corpo.
+    for (var i = 0u; i < 64u; i++) {
+        if (budget == 0u) { break; }
+        var pk = vec2<f32>(a.pos_x, a.pos_y);
+        if (a.body_len > 0u) { pk = residue_world(slot, a, i % n); }
+        let cell = world_to_cell(pk);
+        if (chem_activate_one(cell * 4u + (i / n) % 4u)) { budget -= 1u; }
     }
     a.alive = 0u;
     agents[slot] = a;

@@ -320,10 +320,12 @@ gpu_struct! {
         /// maior = corpos enrolados/dobrados, mais perto dos ângulos de uma
         /// proteína real (50–90° por resíduo).
         pub rest_angle_mult: f32,
-        /// PREDAÇÃO: multiplicador da energia que uma protease tira por passo
-        /// de contacto (base: 0,01 × força da variante × intensidade).
+        /// PREDAÇÃO: multiplicador do risco de lise por passo de contacto com
+        /// um sítio de protease (ver contact.wgsl).
         pub protease_power: f32,
-        pub _pad_f2: u32,
+        /// LISE: fração da energia de uma vítima de protease que fica nos
+        /// seus restos como ativação (o resto perde-se como calor).
+        pub lysis_yield: f32,
         pub _pad_f3: u32,
     }
 }
@@ -491,7 +493,7 @@ impl Default for SimParams {
             paint_grains: 0.0,
             rest_angle_mult: 1.0,
             protease_power: 1.0,
-            _pad_f2: 0,
+            lysis_yield: 0.7,
             _pad_f3: 0,
         }
     }

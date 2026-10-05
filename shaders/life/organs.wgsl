@@ -370,15 +370,15 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
     // Portas: 1 = o canal passa neste resíduo, 0 = travado (relés).
     var gate: array<vec4<f32>, 64>;
     var bend = 0.0;
-    // Este agente tirou energia a outro no passo anterior (contact_apply).
+    // Este agente estava a atacar outro no passo anterior (contact_resolve).
     let biting = contact_disp[slot].z > 0.0;
     for (var k = 0u; k < n; k++) {
         bend += abs(signal_deflection(slot, k));
         emit[k] = vec4<f32>(0.0);
         gate[k] = vec4<f32>(1.0);
-        // PROTEASE ATIVA: um sítio que está a cortar outro agente (mordeu no
-        // passo anterior) emite no canal δ no seu nucleófilo: o corpo "sabe"
-        // que está a comer e pode reagir (com um relé, fechar-se, parar...).
+        // PROTEASE ATIVA: um sítio que está a atacar outro agente (em contacto
+        // com uma vítima vulnerável no passo anterior) emite no canal δ no
+        // seu nucleófilo: o corpo "sabe" que está a atacar e pode reagir.
         if (biting && protease_site(slot, n, k, false) > 0u) { emit[k].w += PROTEASE_SIGNAL; }
         // Emissão por contacto (qualquer resíduo, com ou sem órgão).
         let cpr = aa_props[body_get(slot, k)];

@@ -46,20 +46,24 @@ fn contact_insert(@builtin(global_invocation_id) gid: vec3<u32>) {
 //   família 1, de serina:    serina + histidina    (tripsina)  corta K, R
 //   família 2, de cisteína:  cisteína + histidina  (caspases, legumaína) corta D, N
 //   família 3, aspártica:    aspartato + aspartato (pepsina)   corta F, Y, W, L
-// (as classes vêm da tabela dos aminoácidos). Ao tocar noutro agente, cada
-// sítio formado tira-lhe energia em proporção da fração de resíduos da
-// vítima que a sua família corta. A regra é cega (nenhum genoma é
-// comparado): quem não tem os aminoácidos-alvo é imune, e os parentes, com
-// a mesma composição, poupam-se uns aos outros por isso. A prolina resiste.
-// DIGESTÃO: a energia tirada NÃO vai para o atacante; reativa monómeros
-// gastos na célula da vítima (contact_apply), que qualquer boca pode comer.
-// Não há autodigestão: um sítio só corta OUTROS agentes.
-const PRED_BITE: f32 = 0.01;
-// Um sítio contra uma vítima com 10% de resíduos-alvo = PRED_BITE.
+// (as classes vêm da tabela dos aminoácidos). LISE: uma vítima tocada por
+// sítios ativos tem, em cada passo, um RISCO de se desfazer por inteiro
+// (como uma célula que rebenta quando a parede cede: tudo ou nada). O risco
+// soma, por atacante, PRED_HAZARD × sítios × fração de resíduos da vítima
+// que a família corta × (1 − defesa da prolina) × params.protease_power.
+// A regra é cega (nenhum genoma é comparado): quem não tem os
+// aminoácidos-alvo é imune, e os parentes, com a mesma composição, poupam-se
+// uns aos outros por isso. Não há autodigestão: um sítio só corta OUTROS.
+// A vítima morre COM a energia que tinha: uma fração (params.lysis_yield)
+// fica nos restos como ativação, um monómero por cada food_power de energia,
+// primeiro os do seu próprio genoma, depois gastos à volta (die_release). O
+// atacante não recebe nada diretamente: tem de comer os restos.
+const PRED_HAZARD: f32 = 0.01;
+// Um sítio contra uma vítima com 10% de resíduos-alvo = PRED_HAZARD por passo.
 const PRED_SITE_SCALE: f32 = 10.0;
 const PRED_PROLINE_DEFENSE: f32 = 0.9;
 const AA_PROLINE: u32 = 12u;
-const BITE_SCALE: f32 = 1000.0;
+const BITE_SCALE: f32 = 100000.0;
 const S_DIGEST: u32 = 13u;
 
 // Família (1..3) do sítio ativo formado no resíduo k, ou 0. `once`: num par
@@ -144,7 +148,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     var push = vec2<f32>(0.0);
     let sites = protease_sites(slot, a.body_len);
     let armed = sites.x + sites.y + sites.z > 0.0;
-    // Energia tirada a outros neste passo (não fica com ela: ver DIGESTÃO).
+    // Risco de lise que este agente está a causar a outros neste passo.
     var gained = 0.0;
     for (var dy = -1; dy <= 1; dy++) {
         for (var dx = -1; dx <= 1; dx++) {
@@ -167,16 +171,15 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         if (dist > 1e-4) { dir = d / dist; }
                         push += dir * overlap;
                     }
-                    // Mordida: só em contacto.
-                    if (overlap > 0.0 && armed && b.energy > 0.0) {
+                    // Ataque: só em contacto.
+                    if (overlap > 0.0 && armed) {
                         let def = unpack_defence(contact_disp[e].w);
                         let power = dot(sites, def.xyz) * PRED_SITE_SCALE;
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * def.w;
-                        let bite = min(PRED_BITE * max(params.protease_power, 0.0) * power * resist, b.energy);
-                        if (bite > 0.0) {
-                            atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
-                            gained += bite;
-                            atomicAdd(&life_counters[LC_BITES], 1u);
+                        let hazard = min(PRED_HAZARD * max(params.protease_power, 0.0) * power * resist, 1.0);
+                        if (hazard > 0.0) {
+                            atomicAdd(&bitten[e], u32(hazard * BITE_SCALE));
+                            gained += hazard;
                         }
                     }
                 }
@@ -205,28 +208,24 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
         a.pos_x = np.x;
         a.pos_y = np.y;
     }
-    // Predação: o que lhe morderam sai da energia e é DIGERIDO para o meio:
-    // reativa gastos da célula onde está (um por cada food_power de energia,
-    // com arredondamento ao acaso). Sem gastos ali, essa energia perde-se.
-    let lost = f32(atomicExchange(&bitten[slot], 0u)) / BITE_SCALE;
-    if (lost > 0.0) {
-        let q = rng_f4(a.id, params.epoch, S_DIGEST);
-        let want = lost / max(params.food_power, 1e-3);
-        var count = u32(want);
-        if (q.x < fract(want)) { count += 1u; }
-        let cell = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
-        let ch0 = min(u32(q.y * 4.0), 3u);
-        for (var i = 0u; i < min(count, 8u); i++) {
-            for (var t = 0u; t < 4u; t++) {
-                if (chem_activate_one(cell * 4u + (ch0 + i + t) % 4u)) { break; }
-            }
-        }
-    }
     a.rot += bd.z;
-    a.energy = min(max(a.energy + bd.w, 0.0), energy_capacity(slot, a)) - lost;
+    a.energy = min(max(a.energy + bd.w, 0.0), energy_capacity(slot, a));
+    // LISE: o risco somado de todos os atacantes; um só sorteio por vítima.
+    let hazard = f32(atomicExchange(&bitten[slot], 0u)) / BITE_SCALE;
+    let ql = rng_f4(a.id, params.epoch, S_DIGEST);
+    if (hazard > 0.0 && ql.x < hazard) {
+        // Monómeros que saem ativados (arredondamento ao acaso da fração).
+        let want = max(a.energy, 0.0) * clamp(params.lysis_yield, 0.0, 1.0) / max(params.food_power, 1e-3);
+        var budget = u32(want);
+        if (ql.y < fract(want)) { budget += 1u; }
+        atomicAdd(&life_counters[LC_BITES], 1u);
+        die_release(slot, a, min(budget, 512u));
+        contact_disp[slot] = vec4<f32>(0.0);
+        return;
+    }
     agents[slot] = a;
-    // Para a vista (flash) e para o sinal das proteases: .x = energia que
-    // lhe morderam neste passo, .z = a que tirou a outros. contact_build repõe tudo no
+    // Para a vista (flash) e para o sinal das proteases: .x = risco de lise
+    // que sofreu neste passo, .z = o que causou a outros. contact_build repõe tudo no
     // passo seguinte.
-    contact_disp[slot] = vec4<f32>(lost, 0.0, contact_disp[slot].z, contact_disp[slot].w);
+    contact_disp[slot] = vec4<f32>(hazard, 0.0, contact_disp[slot].z, contact_disp[slot].w);
 }

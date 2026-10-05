@@ -36,7 +36,7 @@ const BASE: [&str; 13] = [
     "órgãos por agente",
     "% monómeros livres ativados",
     "% matéria nos agentes",
-    "mordidas / 1000 epochs",
+    "mortes por protease / 1000 epochs",
 ];
 
 pub fn series_names() -> Vec<String> {

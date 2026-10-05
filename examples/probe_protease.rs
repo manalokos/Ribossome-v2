@@ -151,22 +151,25 @@ fn main() {
     let e1 = sample(&w);
     let l1 = w.ledger_blocking(&gpu);
     let c1 = w.life_counters_blocking(&gpu);
-    let mut lost_total = 0.0;
+    let mut dead_energy = 0.0;
     for (i, (name, _)) in designs.iter().enumerate() {
-        let lost = (e0[i].0 - e1[i].0) * e1[i].1 as f32;
-        lost_total += lost;
+        let dead = e0[i].1.saturating_sub(e1[i].1);
+        dead_energy += dead as f32 * e0[i].0;
         println!(
-            "  {name:30} {:3} agentes: energia {:5.2} -> {:5.2}; a morder {:4.1}% do tempo; sinal δ quando morde {:.2}",
+            "  {name:30} {:3} -> {:3} agentes ({:3} desfeitos); energia dos vivos {:5.2} -> {:5.2}; a atacar {:4.1}% do tempo; sinal δ quando ataca {:.2}",
+            e0[i].1,
             e1[i].1,
+            dead,
             e0[i].0,
             e1[i].0,
             100.0 * biting_frac[i],
             delta[i].0 / delta[i].1.max(1) as f32
         );
     }
+    let lost_total = dead_energy * w.params.lysis_yield;
     let act = |l: &ribossome::world::Ledger| l.act.iter().map(|&x| x as u64).sum::<u64>();
     println!(
-        "mordidas {}; energia perdida no total {:.1}; monómeros reativados {} (esperado ~{:.0} = energia / {}); matéria {} -> {}",
+        "mortes por protease {}; energia dos desfeitos × rendimento {:.1}; monómeros que saíram ativados {} (esperado ~{:.0} = energia / {}); matéria {} -> {}",
         c1.bites.wrapping_sub(c0.bites),
         lost_total,
         act(&l1) as i64 - act(&l0) as i64,

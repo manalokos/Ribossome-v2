@@ -332,7 +332,7 @@ pub struct LifeCounters {
     pub births: u32,
     /// Mortes com energia < 1.
     pub starved: u32,
-    /// Mordidas de protease (acumulado).
+    /// Mortes por protease, lise (acumulado).
     pub bites: u32,
 }
 
