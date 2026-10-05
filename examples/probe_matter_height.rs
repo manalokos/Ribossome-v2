@@ -52,8 +52,14 @@ fn main() {
     let report = |w: &World, done: u32| {
         let cells = w.read_cells_blocking(&gpu);
         let (mut tot, mut hsum, mut top) = (0u64, 0f64, 0u64);
+        let mut xsum = 0f64;
         for y in 0..n {
-            let row: u64 = (0..n * 4).map(|i| { let v = cells[y * n * 4 + i]; ((v & 0xFFFF) + (v >> 16)) as u64 }).sum();
+            let mut row = 0u64;
+            for x in 0..n {
+                let c: u64 = (0..4).map(|ch| { let v = cells[(y * n + x) * 4 + ch]; ((v & 0xFFFF) + (v >> 16)) as u64 }).sum();
+                row += c;
+                xsum += c as f64 * (x as f64 + 0.5) / n as f64;
+            }
             tot += row;
             hsum += row as f64 * (y as f64 + 0.5) / n as f64;
             if y >= n * 3 / 4 {
@@ -62,8 +68,9 @@ fn main() {
         }
         let alive = w.read_agents_blocking(&gpu).iter().filter(|a| a.alive != 0).count();
         println!(
-            "+{done:6}: altura média da matéria livre {:.3}; {:4.1}% no quarto de cima; {alive} agentes",
+            "+{done:6}: altura média da matéria livre {:.3}; posição horizontal média {:.3} (0 = esquerda); {:4.1}% no quarto de cima; {alive} agentes",
             hsum / tot.max(1) as f64,
+            xsum / tot.max(1) as f64,
             100.0 * top as f64 / tot.max(1) as f64
         );
     };
