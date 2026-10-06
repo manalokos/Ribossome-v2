@@ -28,9 +28,9 @@ struct Running {
     ui: UiState,
     /// Posição do rato em píxeis, RELATIVA ao canto do viewport da simulação.
     cursor: [f32; 2],
-    /// Onde a simulação é desenhada na janela: x, y, lado (píxeis). É o
-    /// maior quadrado que cabe entre as barras da interface.
-    viewport: [f32; 3],
+    /// Onde a simulação é desenhada na janela: x, y, largura, altura
+    /// (píxeis). É todo o espaço livre entre as barras da interface.
+    viewport: [f32; 4],
     /// Os gráficos tapam a simulação (não se desenha).
     covered: bool,
     dragging: bool,
@@ -281,7 +281,7 @@ impl Running {
             profiler: Profiler::from_env(),
             ui: UiState::new(baseline),
             cursor: [0.0; 2],
-            viewport: [0.0; 3],
+            viewport: [0.0; 4],
             covered: false,
             dragging: false,
             painting: false,
@@ -728,9 +728,9 @@ impl Running {
     }
 
     /// Tamanho, em píxeis, da área onde a simulação é desenhada (o viewport
-    /// quadrado): é o "ecrã" para a câmara.
+    /// entre as barras): é o "ecrã" para a câmara.
     fn screen(&self) -> [f32; 2] {
-        [self.viewport[2].max(1.0), self.viewport[2].max(1.0)]
+        [self.viewport[2].max(1.0), self.viewport[3].max(1.0)]
     }
 
     fn reconfigure(&mut self) {
@@ -923,22 +923,23 @@ impl Running {
         let mut out = ctx.run_ui(raw, |root| {
             free = ui::draw(root, &mut self.ui, &mut self.world, &mut self.profiler, &mut self.inspector);
         });
-        // Viewport da simulação: o maior quadrado centrado no espaço livre.
+        // Viewport da simulação: todo o espaço livre entre as barras.
         self.covered = free.is_none();
         if let Some(r) = free {
             let ppp = out.pixels_per_point;
-            let side = (r.width().min(r.height()) * ppp).floor().max(64.0);
+            let (w, h) = ((r.width() * ppp).floor().max(64.0), (r.height() * ppp).floor().max(64.0));
             let old = self.viewport;
-            self.viewport = [((r.center().x * ppp) - side * 0.5).round().max(0.0), ((r.center().y * ppp) - side * 0.5).round().max(0.0), side];
+            self.viewport = [(r.left() * ppp).round().max(0.0), (r.top() * ppp).round().max(0.0), w, h];
             // O rato é guardado relativo ao viewport: acompanha-o se mudar.
             self.cursor[0] += old[0] - self.viewport[0];
             self.cursor[1] += old[1] - self.viewport[1];
-            if old[2] <= 0.0 {
-                // Primeiro frame: o mundo inteiro no quadrado.
-                self.cam = Camera::fit(&self.world.cfg, [side, side]);
-            } else if old[2] != side {
+            let (side, old_side) = (w.min(h), old[2].min(old[3]));
+            if old_side <= 0.0 {
+                // Primeiro frame: o mundo inteiro à vista.
+                self.cam = Camera::fit(&self.world.cfg, [w, h]);
+            } else if old_side != side {
                 // O mesmo pedaço de mundo continua à vista quando a área muda.
-                self.cam.zoom *= side / old[2];
+                self.cam.zoom *= side / old_side;
             }
         }
         let screen = self.screen();
@@ -1037,12 +1038,12 @@ impl Running {
                     multiview_mask: None,
                 })
                 .forget_lifetime();
-            // A simulação só no seu quadrado (o egui repõe o viewport inteiro).
+            // A simulação só no espaço livre (o egui repõe o viewport inteiro).
             let (sw, sh) = (sd.size_in_pixels[0] as f32, sd.size_in_pixels[1] as f32);
-            let side = vp[2].min(sw - vp[0]).min(sh - vp[1]);
-            if !covered && side >= 1.0 {
-                pass.set_viewport(vp[0], vp[1], side, side, 0.0, 1.0);
-                pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, side as u32, side as u32);
+            let (w, h) = (vp[2].min(sw - vp[0]), vp[3].min(sh - vp[1]));
+            if !covered && w >= 1.0 && h >= 1.0 {
+                pass.set_viewport(vp[0], vp[1], w, h, 0.0, 1.0);
+                pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, w as u32, h as u32);
                 view.draw(&mut pass);
             }
             egui_renderer.render(&mut pass, &jobs, &sd);

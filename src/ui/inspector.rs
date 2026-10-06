@@ -19,8 +19,8 @@ const READ_BYTES: u64 = 896;
 /// Candidatos (os de centro mais próximo) a que o clique mede a distância
 /// resíduo a resíduo.
 const PICK_CANDIDATES: usize = 48;
-/// Folga à volta do corpo na imagem (órgãos e espessura), em unidades do mundo.
-const PREVIEW_MARGIN: f32 = 16.0;
+/// Folga à volta do corpo na imagem (órgãos com antenas, espessura), em unidades do mundo.
+const PREVIEW_MARGIN: f32 = 40.0;
 const PREVIEW_SIZE: u32 = 256;
 
 #[derive(Clone, Copy)]
