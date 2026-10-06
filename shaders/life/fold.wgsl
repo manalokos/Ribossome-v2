@@ -367,7 +367,12 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     var prev_active = 0.0;
     for (var k = 0u; k < n; k++) {
         let st = joint_state[base + k];
-        let motor = select(select(0.0, -params.motor_amplitude, st == 2u), params.motor_amplitude, st == 1u);
+        // Só o ciclo catalítico de uma BOCA mexe a junta. A absorção lenta
+        // pela "pele" dos outros resíduos não é um motor: um corpo sem boca
+        // fica quieto (senão todas as juntas se debatiam a cada monómero).
+        let is_mouth = organ_type(organ_get(slot, k)) == ORGAN_MOUTH;
+        let amp = select(0.0, params.motor_amplitude, is_mouth);
+        let motor = select(select(0.0, -amp, st == 2u), amp, st == 1u);
         let here = joint_active[base + k];
         joint_active[base + k] = motor + params.joint_coupling * prev_active;
         prev_active = here;
@@ -449,7 +454,11 @@ fn push_fluid(slot: u32, a: Agent, c: RftCtx, old: ptr<function, array<vec2<f32>
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
         // Só o arrasto com a ÁGUA a empurra (o dos grãos fica no entulho);
         // a água real no resíduo é uf × drag (ver joints_step).
-        let rr = (tt + max(params.swim_grip, 1.0) * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k));
+        // A força devolvida à ÁGUA usa a anisotropia da água (2), não a
+        // aderência da natação: essa representa um meio que agarra o corpo
+        // (gel), e com ela a 30 um corpo parado no entulho travava e agitava
+        // a corrente 15 vezes mais do que devia.
+        let rr = (tt + min(max(params.swim_grip, 1.0), 2.0) * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k));
         // Velocidade do resíduo RELATIVA à água (quem só é levado não empurra).
         let v = s.xy + s.z * vec2<f32>(-r.y, r.x) + u - env.xy * env.z;
         let f_body = rr * v;

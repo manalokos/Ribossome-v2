@@ -601,7 +601,7 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.mouth_leak, 0.0..=2.0).text("fuga por boca aberta ×"))
         .on_hover_text("o que deixa entrar também deixa sair: cada boca padrão aberta soma isto ao multiplicador da manutenção (bocas mais fortes somam mais; uma boca fechada não soma). Com 0,3, um corpo de três bocas paga o mesmo que antes");
     ui.add(egui::Slider::new(&mut p.skin_uptake, 0.0..=5.0).text("absorção sem boca ×"))
-        .on_hover_text("quanto os resíduos sem boca absorvem (× a catálise do aminoácido; uma boca vale 20 a 80×). 1 = um corpo de 30 resíduos sem boca come cerca de metade de uma boca fraca; 0 = só as bocas comem");
+        .on_hover_text("quanto os resíduos sem boca absorvem (× a catálise do aminoácido; uma boca vale 20 a 80×). 0,2 = um corpo de 30 resíduos sem boca come cerca de um décimo de uma boca fraca; 0 = só as bocas comem");
     ui.add(egui::Slider::new(&mut p.metabolic_q10, 1.0..=4.0).text("metabolismo: Q10"))
         .on_hover_text("quanto a química da vida acelera por cada 'escala' de temperatura (1 = não depende da temperatura). Multiplica manutenção, comer, quimiossíntese e emparelhamento; a luz não");
     ui.add(egui::Slider::new(&mut p.metabolic_span, 0.5..=12.0).text("metabolismo: escala (unidades de T por Q10)"));

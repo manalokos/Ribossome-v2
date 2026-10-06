@@ -469,7 +469,7 @@ impl Default for SimParams {
             // 0 por omissão (pedido do Filipe): sem tremor térmico, o movimento
             // próprio vem só dos sinais.
             thermal_kt: 0.0,
-            motor_amplitude: 1.0,
+            motor_amplitude: 0.0,
             rft_enabled: 1,
             require_start: 1,
             joint_coupling: 0.0,
@@ -531,8 +531,8 @@ impl Default for SimParams {
             swim_memory: 1.0,
             mouth_leak: 0.3,
             leak_base: 0.1,
-            skin_uptake: 1.0,
-            death_metab: 1.0,
+            skin_uptake: 0.2,
+            death_metab: 0.25,
             _pad_h0: 0,
         }
     }
