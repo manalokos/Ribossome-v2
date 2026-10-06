@@ -674,8 +674,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
         .on_hover_text("quantos passos dura o deslizar quando o ganho é maior que 1. 20 = como no v3 (a velocidade perdia 5% por passo); 100 = o que o v4 tinha até agora. Com o ganho a 1 não faz nada");
     ui.add(egui::Slider::new(&mut p.swim_wobble, 0.0..=1.0).text("vaivém da natação"))
         .on_hover_text("1 = balanço físico de cada batida; 0 = só o avanço médio");
-    ui.add(egui::Slider::new(&mut p.motion_cost, 0.0..=2.0).text("custo de dissipação do movimento"))
-        .on_hover_text("energia = isto × Σ √arrasto·dθ² das juntas: bater depressa custa ao quadrado");
+    ui.add(egui::Slider::new(&mut p.motion_cost, 0.0..=2.0).logarithmic(true).smallest_positive(0.001).text("custo do movimento"))
+        .on_hover_text("energia gasta a mexer o corpo: a dissipação na água (isto × Σ √arrasto·dθ² das juntas: bater depressa custa ao quadrado) e o dobrar das juntas pelos sinais, que segue o mesmo valor. 0,02 = nadar custa cerca de um terço da manutenção de um corpo sem boca; 0,1 = o valor antigo (nadar custava mais do que estar vivo)");
     ui.add(egui::Slider::new(&mut p.inertia, 0.0..=10.0).text("inércia dos pesados (não física)"))
         .on_hover_text("0 = físico: à escala molecular a água amortece tudo, um corpo que pára de bater pára logo. Acima de 0 a velocidade aproxima-se da pedida com peso 1/(1 + isto × massa/massa de um corpo médio): os pesados deslizam e aceleram devagar, como nadadores grandes");
     ui.add(egui::Slider::new(&mut p.flow_coupling, 0.0..=1.0).text("arrasto pela corrente"))

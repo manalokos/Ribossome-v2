@@ -34,6 +34,7 @@ const SIGNAL_GAIN: f32 = 4.0;
 const SIGNAL_UNIFORM_SENS: f32 = 0.3;
 // Energia gasta por passo por radiano de desvio mantido (todas as juntas).
 const BEND_COST: f32 = 0.0005;
+const BEND_COST_REF: f32 = 0.1;
 // Raio de amostragem dos sensores de comida e luz (unidades do mundo).
 // Raio do disco dos sensores (mundo): 6 células (era 3: com ~0,4 ativados por
 // célula, cada lado via ~4 monómeros e o ruído de contagem afogava o sinal).
@@ -591,5 +592,7 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         signals[base + k] = clamp(s, vec4<f32>(-lim), vec4<f32>(lim));
         prev = here * gate[k];
     }
-    return bend * BEND_COST;
+    // O custo de dobrar por sinais segue o mesmo slider que a dissipação na
+    // água (params.motion_cost; BEND_COST é o valor com o slider a 0,1).
+    return bend * BEND_COST * max(params.motion_cost, 0.0) / BEND_COST_REF;
 }

@@ -494,7 +494,7 @@ impl Default for SimParams {
             agent_fluid_push: 0.2,
             swim_wobble: 1.0,
             fluid_swim_only: 0,
-            motion_cost: 0.1,
+            motion_cost: 0.02,
             bond_rate: 0.05,
             bond_energy_share: 0.01,
             bond_signal: 0.5,
