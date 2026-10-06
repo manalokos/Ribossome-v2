@@ -648,7 +648,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let bm_r = sqrt(-2.0 * log(max(bq.x, 1e-7)));
     let gauss = vec2<f32>(bm_r * cos(6.2831853 * bq.y), bm_r * sin(6.2831853 * bq.y));
     dp += gauss * params.brownian / sqrt(radius);
-    a.rot += (bq.z * 2.0 - 1.0) * 1.7320508 * 0.15 / pow(radius, 1.5);
+    a.rot += (bq.z * 2.0 - 1.0) * 1.7320508 * 0.15 * max(params.brownian_rot, 0.0) / pow(radius, 1.5);
     let np2 = clamp(p + dp, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
     if (gamma_count(world_to_cell(np2)) < GAMMA_SOLID_THRESHOLD) {
         p = np2;

@@ -367,7 +367,11 @@ gpu_struct! {
         /// (do que tem a cópia mais adiantada para o que a tem mais
         /// atrasada, quando a base serve). 0 = não partilham matéria.
         pub bond_matter_share: f32,
-        pub _pad_i0: u32,
+        /// ROTAÇÃO browniana: multiplica o desvio de orientação por passo
+        /// (0,15 rad ÷ raio^1,5; o raio conta-se em resíduos, √n). Era fixa
+        /// e não seguia o slider do movimento browniano. 1 = a de sempre;
+        /// 0 = os corpos só rodam por nadar, pela água ou por contacto.
+        pub brownian_rot: f32,
         pub _pad_i1: u32,
         pub _pad_i2: u32,
     }
@@ -547,7 +551,7 @@ impl Default for SimParams {
             death_metab: 0.25,
             salvage: 0.0,
             bond_matter_share: 0.1,
-            _pad_i0: 0,
+            brownian_rot: 1.0,
             _pad_i1: 0,
             _pad_i2: 0,
         }

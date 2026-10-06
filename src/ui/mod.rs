@@ -751,6 +751,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.motor_amplitude, 0.0..=1.0).text("curso do motor (rad)"));
     ui.add(egui::Slider::new(&mut p.joint_coupling, 0.0..=0.95).text("acoplamento entre juntas"));
     ui.add(egui::Slider::new(&mut p.brownian, 0.0..=20.0).text("movimento browniano"));
+    ui.add(egui::Slider::new(&mut p.brownian_rot, 0.0..=5.0).text("rotação browniana"))
+        .on_hover_text("a agitação térmica também roda os corpos ao acaso: 0,15 rad por passo ÷ raio^1,5 (o raio conta-se em resíduos, √n), vezes isto. Um RNA nu roda muito; um corpo de 16 resíduos, ~0,02 rad por passo. 1 = o valor de sempre; 0 = só rodam por nadar, pela água ou por contacto");
     ui.add(egui::Slider::new(&mut p.phoretic_gain, 0.0..=500.0).text("difusioforese"));
     ui.checkbox(&mut world.settings.contact_enabled, "repulsão entre agentes");
 }
