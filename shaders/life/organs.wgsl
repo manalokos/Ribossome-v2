@@ -387,6 +387,7 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
     var bend = 0.0;
     // Este agente estava a atacar outro no passo anterior (contact_resolve).
     let biting = contact_disp[slot].z > 0.0;
+    var chir = 1.0;
     for (var k = 0u; k < n; k++) {
         bend += abs(signal_deflection(slot, k));
         emit[k] = vec4<f32>(0.0);
@@ -408,6 +409,9 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         let o = organ_get(slot, k);
         let t = organ_type(o);
         if (t == 0xFFu) { continue; }
+        // QUIRAL: daqui em diante a cadeia está espelhada; os sensores
+        // direcionais trocam a esquerda com a direita.
+        if (t == ORGAN_CHIRAL) { chir = -chir; }
         let p = organ_param(o);
         let s = signals[base + k];
         // SENSORES (comida, luz, energia): bit 0 = canal (α/β), bit 1 =
@@ -468,6 +472,7 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 v = q;
             }
             v *= ov.p1 * organ_gain(o);
+            if (t == ORGAN_FOOD_SENSOR_DIR || t == ORGAN_LIGHT_SENSOR_DIR) { v *= chir; }
             if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }
             continue;
         }

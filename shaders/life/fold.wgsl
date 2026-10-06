@@ -274,6 +274,8 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     if (n < 2u) { return none; }
     let base = slot * MAX_BODY;
     var old: array<vec2<f32>, 64>;
+    // Lado das dobras (órgãos quirais), ao longo da cadeia.
+    var chir = 1.0;
     for (var k = 0u; k < n; k++) { old[k] = body_pos[base + k]; }
 
     // CARGA DAS JUNTAS: a baixo Reynolds o que trava uma dobra é o ARRASTO
@@ -337,7 +339,10 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
         let drag_here = anchor_drag(pw_k);
         // Alvo: forma de repouso + a deformação ATIVA da junta (estado
         // catalítico, propagado N->C com atraso) + o desvio pelos sinais.
-        let goal = joint_base[base + k] * params.rest_angle_mult + joint_active[base + k] + signal_deflection(slot, k);
+        // (joint_base já nasce com o lado trocado pelos órgãos quirais; a
+        // resposta aos sinais troca aqui.)
+        if (organ_type(organ_get(slot, k)) == ORGAN_CHIRAL) { chir = -chir; }
+        let goal = joint_base[base + k] * params.rest_angle_mult + joint_active[base + k] + chir * signal_deflection(slot, k);
         let theta = joint_angle[base + k];
         let tau = -joint_stiffness(slot, k) * (theta - goal);
         // Ruído térmico (Langevin sobreamortecido): σ = √(2·μ·kT).

@@ -110,6 +110,9 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
     *span = start | (min(i, gene_len) << 16u);
     // Geometria inicial: dobras homoquirais pela tendência local; a
     // dobragem (fold.wgsl) parte daqui nos primeiros passos de vida.
+    // QUIRAL (v3): o órgão troca o lado de todas as dobras daí até à ponta C
+    // (ele incluído); dois na mesma cadeia anulam-se.
+    var chir = 1.0;
     for (var k = 0u; k < n; k++) {
         // O órgão pode ter o seu ângulo de repouso (tabela dos órgãos, v3).
         var b = residue_bend(body_get(slot, k));
@@ -118,6 +121,8 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
             let oa = organ_cost(ob).rest_angle;
             if (oa < 1e8) { b = oa; }
         }
+        if (organ_type(ob) == ORGAN_CHIRAL) { chir = -chir; }
+        b *= chir;
         joint_angle[slot * MAX_BODY + k] = b * params.rest_angle_mult;
         joint_base[slot * MAX_BODY + k] = b;
         joint_state[slot * MAX_BODY + k] = 0u;

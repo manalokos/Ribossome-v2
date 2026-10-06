@@ -35,7 +35,7 @@
 
 use super::amino::{STOP, codon};
 
-pub const ORGAN_TYPES: usize = 19;
+pub const ORGAN_TYPES: usize = 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -58,6 +58,7 @@ pub enum Organ {
     Dormancy = 16,
     AgeBias = 17,
     Holdfast = 18,
+    Chiral = 19,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -82,10 +83,11 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "dormência (metabolismo lento)",
     "bias de idade",
     "ventosa (fixa-se ao terreno)",
+    "quiral (inverte o lado das dobras)",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -184,6 +186,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("larga", "−1 = agarra sempre; 2 = larga com sinal γ positivo; 3 = larga com sinal δ positivo"),
         pd("emite", "canal do sinal que emite enquanto está agarrada (2 = γ, 3 = δ; −1 = nenhum)"),
     ],
+    &[],
 ];
 
 fn fmt_canal(v: f32) -> &'static str {
@@ -305,6 +308,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
                 _ => "emite δ enquanto agarra",
             }
         ),
+        19 => "quiral [disco partido ao meio]: daqui até à ponta C, todos os resíduos e órgãos dobram para o lado contrário (ângulo de repouso e resposta aos sinais) e os sensores direcionais trocam a esquerda com a direita. Dois na mesma cadeia anulam-se".to_string(),
         7 => "armazenamento [disco com anéis]: DESATIVADO (já não se forma; a capacidade de energia vem do volume dos aminoácidos do corpo)".to_string(),
         8 => format!("{} · sente {}", sensor("sensor de comida DIRECIONAL (esquerda − direita)", "2 antenas verdes"), alvo()),
         9 => format!("{} · sente {}", sensor("sensor físico DIRECIONAL (esquerda − direita)", "2 antenas amarelas"), alvo_fisico()),
@@ -434,6 +438,7 @@ pub fn wgsl() -> String {
         "DORMANCY",
         "AGE_BIAS",
         "HOLDFAST",
+        "CHIRAL",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");
