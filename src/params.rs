@@ -496,7 +496,7 @@ impl Default for SimParams {
             fluid_swim_only: 0,
             motion_cost: 0.02,
             bond_rate: 0.05,
-            bond_energy_share: 0.01,
+            bond_energy_share: 0.1,
             bond_signal: 0.5,
             aggregation: 0.02,
             photo_yield: 0.5,

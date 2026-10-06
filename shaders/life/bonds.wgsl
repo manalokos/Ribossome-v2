@@ -142,8 +142,15 @@ fn bond_maintain(@builtin(global_invocation_id) gid: vec3<u32>) {
                     let r = ra - pa;
                     drot += (r.x * f.y - r.y * f.x) / (dot(r, r) + a.radius * a.radius + 1.0);
                 }
-                // Energia por gradiente (os dois lados veem as mesmas energias).
-                de += params.bond_energy_share * 0.5 * (o.energy - a.energy);
+                // ENERGIA: difusão pela ligação. Corre do mais CHEIO para o
+                // mais vazio (energia ÷ capacidade), até os dois ficarem com
+                // o mesmo enchimento; um corpo com pilha grande não esvazia
+                // um pequeno. Os dois lados veem os mesmos valores, por isso
+                // o que um perde é exatamente o que o outro ganha.
+                let cap_a = energy_capacity(slot, a);
+                let cap_o = energy_capacity(b.x, o);
+                let cap_red = cap_a * cap_o / max(cap_a + cap_o, 1e-6);
+                de += clamp(params.bond_energy_share, 0.0, 0.5) * cap_red * (o.energy / max(cap_o, 1e-6) - a.energy / max(cap_a, 1e-6));
             }
         }
         if (!keep) {
