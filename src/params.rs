@@ -514,8 +514,8 @@ impl Default for SimParams {
             lysis_yield: 0.7,
             protease_direct: 0.5,
             joint_load: 1.0,
-            swim_grip: 5.0,
-            swim_memory: 20.0,
+            swim_grip: 30.0,
+            swim_memory: 1.0,
             _pad_g3: 0,
         }
     }
