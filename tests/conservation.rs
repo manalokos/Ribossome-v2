@@ -247,3 +247,24 @@ fn live_terrain_and_painting_conserve_matter() {
     let painted = Ledger::from_cells(&world.read_cells_blocking(&gpu));
     assert_eq!(channels(&painted), channels(&before), "pintar rocha mudou a matéria por canal");
 }
+
+/// "Recomeçar": o terreno fica exatamente como estava na GPU, não há
+/// agentes, a epoch volta a zero e a matéria semeada é a que lá fica.
+#[test]
+fn restart_keeps_the_terrain() {
+    let gpu = Gpu::new_headless().expect("este teste precisa de uma GPU");
+    let mut world = World::new(&gpu, WorldConfig::TEST, 21);
+    world.seed_matter(&gpu, 21);
+    let mut enc = gpu.device.create_command_encoder(&Default::default());
+    world.encode_steps(&gpu.queue, &mut enc, 20);
+    gpu.queue.submit([enc.finish()]);
+    gpu.wait_idle();
+    let terrain_before = gpu.read_buffer_blocking(&world.gamma_buf);
+    let seeded = world.restart_keeping_terrain(&gpu, 22);
+    assert_eq!(world.params.epoch, 0);
+    assert_eq!(gpu.read_buffer_blocking(&world.gamma_buf), terrain_before);
+    assert_eq!(world.read_agents_blocking(&gpu).iter().filter(|a| a.alive != 0).count(), 0);
+    let now = world.ledger_blocking(&gpu);
+    assert_eq!(now.total(), seeded.total());
+    assert_eq!(now.held_total(), 0);
+}

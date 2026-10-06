@@ -20,6 +20,8 @@ pub struct UiState {
     pub ledger: Option<Ledger>,
     pub ledger_epoch: u32,
     pub reseed: bool,
+    /// Recomeçar: sopa e vida novas, epoch a zero, mesmo terreno e parâmetros.
+    pub restart: bool,
     pub vsync: bool,
     /// Brilho da camada de monómeros na vista normal.
     pub monomer_brightness: f32,
@@ -174,6 +176,7 @@ impl UiState {
             ledger: None,
             ledger_epoch: 0,
             reseed: false,
+            restart: false,
             vsync: true,
             monomer_brightness: 0.5,
             coc_radius: 0.35,
@@ -236,6 +239,13 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
         }
         if ui.button("nova semente").clicked() {
             st.reseed = true;
+        }
+        if ui
+            .button("recomeçar")
+            .on_hover_text("começa de novo no mesmo sítio: sopa nova, sem agentes e epoch a zero, mas com o terreno tal como está agora e todos os parâmetros que tens. (\"nova semente\" gera também um terreno novo, se não for de imagem, e não mexe na epoch)")
+            .clicked()
+        {
+            st.restart = true;
         }
     });
     if world.params.day_period >= 1.0 {

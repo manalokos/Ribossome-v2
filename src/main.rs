@@ -860,6 +860,20 @@ impl Running {
         if let Some(action) = self.ui.terrain_action.take() {
             self.terrain_action(action);
         }
+        if self.ui.restart {
+            self.ui.restart = false;
+            self.seed += 1;
+            self.ui.baseline = if lab_mode() {
+                self.world.params.epoch = 0;
+                self.world.seed_lab(&self.gpu, self.seed, LAB_PER_CHANNEL)
+            } else {
+                self.world.restart_keeping_terrain(&self.gpu, self.seed)
+            };
+            self.ui.ledger = None;
+            self.ui.history = ribossome::stats::History::default();
+            self.last_autosave = 0;
+            log::info!("recomeço: mesmo terreno e parâmetros, epoch 0");
+        }
         if self.ui.reseed {
             self.ui.reseed = false;
             self.seed += 1;

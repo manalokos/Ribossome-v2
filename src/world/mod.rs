@@ -922,6 +922,23 @@ impl World {
         Ledger::from_cells(&cells)
     }
 
+    /// RECOMEÇAR no mesmo sítio: sopa nova e sem agentes, epoch a zero, mas
+    /// com o TERRENO TAL COMO ESTÁ agora na GPU (gerado, de imagem, pintado
+    /// ou já mexido pelo sedimento e pelos agentes), as mesmas fumarolas e
+    /// todos os parâmetros. Só a matéria e a vida recomeçam.
+    pub fn restart_keeping_terrain(&mut self, gpu: &Gpu, seed: u64) -> Ledger {
+        let gamma: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&self.gamma_buf)).to_vec();
+        let mut cells = seed_cells(&self.cfg, seed, self.seed_density, self.seed_active);
+        fit_matter_to_terrain(&mut cells, &gamma, seed);
+        gpu.queue.write_buffer(&self.chem_buf, 0, bytemuck::cast_slice(&cells));
+        self.clear_agents(gpu);
+        // Ligações antigas não podem apanhar agentes novos com o mesmo id.
+        gpu.queue.write_buffer(&self.bonds_buf, 0, &vec![0xFFu8; self.bonds_buf.size() as usize]);
+        self.light_dirty = true;
+        self.params.epoch = 0;
+        Ledger::from_cells(&cells)
+    }
+
     /// MODO LABORATÓRIO: piscina sem terreno, cheia de monómeros ATIVADOS por
     /// igual (em média `per_channel` por canal e célula, arredondamento ao
     /// acaso para densidades fracionárias). Limpa os agentes.
