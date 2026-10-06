@@ -8,6 +8,11 @@ use crate::world::{Ledger, MAX_STEPS_PER_FRAME, World};
 pub struct UiState {
     pub paused: bool,
     pub steps_per_frame: u32,
+    /// Refresco fluido: faz menos passos por frame do que os pedidos quando
+    /// a placa não aguenta (o ecrã fica a ~30 imagens por segundo).
+    pub smooth_refresh: bool,
+    /// Passos feitos no último frame (para mostrar).
+    pub steps_done: u32,
     /// 0 = normal, 1–4 = ativados A U G C, 5 = gastos, 6 terreno, 7 temperatura, 8 UV, 9 fluido.
     pub view_mode: u32,
     /// Contagem exata escrita na sementeira (base do Δ).
@@ -162,6 +167,8 @@ impl UiState {
         Self {
             paused: false,
             steps_per_frame: 1,
+            smooth_refresh: true,
+            steps_done: 1,
             view_mode: 0,
             baseline,
             ledger: None,
@@ -252,6 +259,11 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
     ui.horizontal(|ui| {
         ui.add(egui::Slider::new(&mut st.steps_per_frame, 1..=MAX_STEPS_PER_FRAME).text("passos/frame"));
         ui.checkbox(&mut st.vsync, "vsync");
+        ui.checkbox(&mut st.smooth_refresh, "ecrã fluido")
+            .on_hover_text("os passos por frame passam a ser um máximo: se a placa não os faz todos a tempo, fazem-se menos por frame e o ecrã refresca a ~30 imagens por segundo. A simulação anda à mesma velocidade (a máxima da placa)");
+        if st.smooth_refresh && st.steps_done < st.steps_per_frame {
+            ui.label(format!("a fazer {}", st.steps_done));
+        }
     });
 
     // ---- Separadores ----

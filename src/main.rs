@@ -48,6 +48,10 @@ struct Running {
     /// Mapa genético: id do agente de referência e frames até recalcular.
     kin_id: Option<u32>,
     kin_frames: u32,
+    /// Refresco fluido: instante do frame anterior e passos por frame que a
+    /// placa está a aguentar (ver `adaptive_steps`).
+    last_frame: std::time::Instant,
+    steps_eff: f32,
 }
 
 #[derive(Default)]
@@ -285,6 +289,8 @@ impl Running {
             last_autosave,
             kin_id: None,
             kin_frames: 0,
+            last_frame: std::time::Instant::now(),
+            steps_eff: 1.0,
         };
         r.ui.autosave_path = autosave_path;
         r.ui.scene_msg = scene_msg;
@@ -784,6 +790,30 @@ impl Running {
         }
     }
 
+    /// REFRESCO FLUIDO: os passos por frame pedidos são um MÁXIMO. Se a placa
+    /// não os faz todos a tempo, o ecrã ficava a 5–10 imagens por segundo
+    /// (e a interface presa). Em vez disso faz-se, em cada frame, só os
+    /// passos que cabem em ~33 ms: a simulação anda à mesma velocidade (a
+    /// máxima da placa) e o ecrã refresca a ~30 imagens por segundo.
+    fn adaptive_steps(&mut self) -> u32 {
+        const TARGET_MS: f32 = 33.0;
+        let now = std::time::Instant::now();
+        let frame_ms = now.duration_since(self.last_frame).as_secs_f32() * 1000.0;
+        self.last_frame = now;
+        let want = self.ui.steps_per_frame.max(1) as f32;
+        if !self.ui.smooth_refresh || self.ui.paused {
+            self.steps_eff = want;
+        } else if frame_ms > 0.0 && frame_ms < 2000.0 {
+            // Passos que caberiam no alvo, ao ritmo do frame anterior;
+            // aproxima-se aos poucos para não oscilar.
+            let fit = self.steps_eff * TARGET_MS / frame_ms;
+            self.steps_eff = (self.steps_eff + 0.25 * (fit - self.steps_eff)).clamp(1.0, want);
+        }
+        let n = (self.steps_eff.round() as u32).clamp(1, self.ui.steps_per_frame.max(1));
+        self.ui.steps_done = n;
+        n
+    }
+
     fn redraw(&mut self) {
         self.runlog.before_frame(&mut self.profiler);
         if let Some(ed) = &self.editor {
@@ -915,10 +945,11 @@ impl Running {
         }
         let want_stats = epoch_now >= self.ui.history.next_epoch;
 
+        let n_steps = self.adaptive_steps();
         let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, .. } = self;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {
-            let n = st.steps_per_frame;
+            let n = n_steps;
             frame.segment("world", |enc| world.encode_steps(&gpu.queue, enc, n));
         }
         frame.segment("ledger", |enc| world.encode_ledger_readback(enc));
