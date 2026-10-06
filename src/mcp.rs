@@ -118,6 +118,10 @@ fn tools() -> Value {
                 "view": { "type": "integer", "description": "vista (por omissão 0)" },
                 "size": { "type": "integer", "description": "lado em píxeis (por omissão 768, máx. 2048)" },
                 "camera": { "type": "boolean", "description": "usar o enquadramento do ecrã" },
+                "x": { "type": "number", "description": "com 'span': centro, fração 0..1 da largura do mundo" },
+                "y": { "type": "number", "description": "com 'span': centro, fração 0..1 da altura (1 = topo)" },
+                "span": { "type": "number", "description": "largura do enquadramento em células do ambiente (ex.: 40 para ver monómeros de perto)" },
+                "coc": { "type": "number", "description": "círculo de confusão dos monómeros em células (por omissão o do ecrã; 0 = quadrados)" },
                 "brightness": { "type": "number", "description": "brilho dos monómeros (por omissão 0.5)" },
                 "mark_organ": { "type": "integer", "description": "marca com uma bola ciano os agentes com este tipo de órgão (0 boca, 1 músculo, 2 sensor de comida, 3 sensor físico, 4 sensor de energia, 5 relógio, 6 relé, 7 armazenamento, 8 sensor de comida direcional, 9 sensor físico direcional, 10 fotossistema, 11 protease, 12 âncora, 13 bias, 14 quimiossíntese)" }
             }), &[]),

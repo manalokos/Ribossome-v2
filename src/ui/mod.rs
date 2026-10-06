@@ -18,6 +18,8 @@ pub struct UiState {
     pub vsync: bool,
     /// Brilho da camada de monómeros na vista normal.
     pub monomer_brightness: f32,
+    /// Círculo de confusão dos monómeros (células; 0 = quadrados).
+    pub coc_radius: f32,
     /// Cor dos agentes: 0 química, 1 sinal α, 2 sinal β, 3 α e β.
     pub signal_view: u32,
     /// Órgão a marcar no mapa: tipo + 1 (0 = nenhum).
@@ -167,6 +169,7 @@ impl UiState {
             reseed: false,
             vsync: true,
             monomer_brightness: 0.5,
+            coc_radius: 0.35,
             signal_view: 0,
             mark_organ: 0,
             stats: Stats::default(),
@@ -350,6 +353,8 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
         }
     });
     ui.add(egui::Slider::new(&mut st.monomer_brightness, 0.0..=1.0).text("brilho dos monómeros"));
+    ui.add(egui::Slider::new(&mut st.coc_radius, 0.0..=1.0).text("círculo de confusão dos monómeros (células)"))
+        .on_hover_text("de perto, cada monómero desenha-se como um disco suave deste raio, numa posição própria dentro da célula (só para o desenho: a simulação conta monómeros por célula). Pequeno = moléculas soltas; grande = névoa contínua; 0 = quadrados, uma cor por célula");
     const SIGNAL_VIEWS: [&str; 6] = [
         "química",
         "sinal α",

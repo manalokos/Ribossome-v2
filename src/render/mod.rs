@@ -55,6 +55,8 @@ pub struct WorldView {
     pub daylight: std::cell::Cell<f32>,
     /// Órgão a marcar no mapa: tipo + 1 (0 = nenhum).
     pub mark_organ: std::cell::Cell<u32>,
+    /// Raio do círculo de confusão dos monómeros (células; 0 = quadrados).
+    pub coc_radius: std::cell::Cell<f32>,
 }
 
 impl WorldView {
@@ -280,6 +282,7 @@ impl WorldView {
             uv_depth: std::cell::Cell::new(11.0),
             daylight: std::cell::Cell::new(1.0),
             mark_organ: std::cell::Cell::new(0),
+            coc_radius: std::cell::Cell::new(0.35),
         }
     }
 
@@ -305,6 +308,10 @@ impl WorldView {
             uv_depth: self.uv_depth.get(),
             daylight: self.daylight.get(),
             mark_organ: self.mark_organ.get(),
+            coc_radius: self.coc_radius.get(),
+            _pad_v0: 0,
+            _pad_v1: 0,
+            _pad_v2: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }

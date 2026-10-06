@@ -305,6 +305,7 @@ impl Running {
             "steps_per_frame": self.ui.steps_per_frame,
             "view_mode": self.ui.view_mode,
             "monomer_brightness": self.ui.monomer_brightness,
+            "coc_radius": self.ui.coc_radius,
             "signal_view": self.ui.signal_view,
             "seed_count": self.ui.seed_count,
             "seed_len": self.ui.seed_len,
@@ -327,6 +328,9 @@ impl Running {
         }
         if let Some(n) = u("view_mode") {
             self.ui.view_mode = (n as u32).min(10);
+        }
+        if let Some(x) = v["coc_radius"].as_f64() {
+            self.ui.coc_radius = x as f32;
         }
         if let Some(x) = v["monomer_brightness"].as_f64() {
             self.ui.monomer_brightness = x as f32;
@@ -631,12 +635,19 @@ impl Running {
                 let cam = if args["camera"].as_bool().unwrap_or(false) {
                     let [_, h] = self.screen();
                     Camera { center: self.cam.center, zoom: self.cam.zoom * size as f32 / h.max(1.0) }
+                } else if let Some(span) = args["span"].as_f64().filter(|v| *v > 0.0) {
+                    // Enquadramento pedido: centro em frações do mundo e largura em células.
+                    let fx = args["x"].as_f64().unwrap_or(0.5) as f32;
+                    let fy = args["y"].as_f64().unwrap_or(0.5) as f32;
+                    let units = span as f32 * self.world.cfg.world_units_per_cell as f32;
+                    Camera { center: [fx * s, fy * s], zoom: size as f32 / units }
                 } else {
                     Camera { center: [0.5 * s, 0.5 * s], zoom: size as f32 / s }
                 };
                 let cap = ribossome::render::capture::Capture::new(&self.gpu, &self.world, size);
                 // Marcar um órgão (tipo 0..14), como na vista "marcar quem tem o órgão".
                 cap.view.mark_organ.set(args["mark_organ"].as_u64().map_or(0, |t| t as u32 + 1));
+                cap.view.coc_radius.set(args["coc"].as_f64().map_or(self.ui.coc_radius, |v| v as f32));
                 let rgba = cap.render(&self.gpu, &self.world, &cam, view, bright);
                 let bytes = cap.encode_png(&rgba).map_err(|e| format!("png: {e}"))?;
                 Ok(vec![png(&bytes), text(format!("vista {view}, epoch {}", self.world.params.epoch))])
@@ -873,6 +884,7 @@ impl Running {
         self.view.uv_depth.set(self.world.params.uv_depth);
         self.view.daylight.set(self.world.params.daylight(self.world.params.epoch));
         self.view.mark_organ.set(self.ui.mark_organ);
+        self.view.coc_radius.set(self.ui.coc_radius);
         self.view.update(
             &self.gpu.queue,
             &self.cam,

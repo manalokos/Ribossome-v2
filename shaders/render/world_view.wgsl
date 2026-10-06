@@ -58,6 +58,80 @@ fn channel_color(ch: u32) -> vec3<f32> {
     }
 }
 
+// MONÓMEROS COMO PONTOS (de perto). A simulação só sabe quantos monómeros
+// há em cada célula; para o desenho, cada um ganha uma posição própria
+// dentro da célula (um hash da célula, do canal, do estado e do seu índice:
+// fica no mesmo sítio enquanto lá estiver) e desenha-se como um disco suave
+// de raio view.coc_radius (o círculo de confusão). A soma dos discos é uma
+// DENSIDADE em monómeros por célula, que entra na mesma paleta das contagens:
+// com o raio grande dá a névoa de sempre, sem quadrados; com o raio pequeno
+// veem-se as moléculas.
+// Discos desenhados por (célula, canal, estado); acima disto cada disco
+// representa vários monómeros (o total conserva-se).
+const DOTS_PER_KIND: u32 = 10u;
+// Tamanho de um píxel (em células) abaixo do qual se desenham pontos; entre
+// os dois valores faz-se a transição para a cor por célula.
+// Densidade (monómeros por célula) no centro de um disco isolado.
+const DOT_PEAK: f32 = 3.0;
+const DOTS_PIXEL_FULL: f32 = 0.25;
+const DOTS_PIXEL_NONE: f32 = 0.6;
+
+fn dot_hash(n: u32) -> u32 {
+    var x = n * 747796405u + 2891336453u;
+    x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+    return (x >> 22u) ^ x;
+}
+
+// Posição (0..1)² do monómero k do tipo `kind` (canal·2 + estado) na célula.
+fn dot_pos(cell: u32, kind: u32, k: u32) -> vec2<f32> {
+    let h = dot_hash(cell * 97u + kind * 8191u + k * 131071u + 1u);
+    return vec2<f32>(f32(h & 0xFFFFu), f32(h >> 16u)) / 65536.0;
+}
+
+struct Soup {
+    act: vec4<f32>,
+    spent: vec4<f32>,
+}
+
+// Densidade de monómeros (por célula de área) no ponto pc (em células),
+// somando os discos das células à volta. A rocha não tem monómeros.
+fn soup_at(pc: vec2<f32>, radius: f32) -> Soup {
+    var s: Soup;
+    s.act = vec4<f32>(0.0);
+    s.spent = vec4<f32>(0.0);
+    let r = clamp(radius, 0.05, 1.0);
+    // Núcleo (1 − d²/r²)² com integral 1: 3/(π r²). Com o raio pequeno isso
+    // daria um pico enorme e o disco saturava (ficava um confete de borda
+    // dura): limita-se o pico a DOT_PEAK, e o disco esbate-se até à borda.
+    let norm = min(3.0 / (3.14159265 * r * r), DOT_PEAK);
+    let lo = vec2<i32>(floor(pc - vec2<f32>(r)));
+    let hi = vec2<i32>(floor(pc + vec2<f32>(r)));
+    for (var cy = lo.y; cy <= hi.y; cy++) {
+        for (var cx = lo.x; cx <= hi.x; cx++) {
+            if (cx >= 0 && cy >= 0 && cx < i32(GRID_SIZE) && cy < i32(GRID_SIZE)) {
+                let cell = u32(cy) * GRID_SIZE + u32(cx);
+                let origin = vec2<f32>(f32(cx), f32(cy));
+                for (var ch = 0u; ch < 4u; ch++) {
+                    let v = chem_view[cell * 4u + ch];
+                    for (var st = 0u; st < 2u; st++) {
+                        let count = select(v >> 16u, v & 0xFFFFu, st == 0u);
+                        let shown = min(count, DOTS_PER_KIND);
+                        var sum = 0.0;
+                        for (var k = 0u; k < shown; k++) {
+                            let d = pc - (origin + dot_pos(cell, ch * 2u + st, k));
+                            let q = 1.0 - dot(d, d) / (r * r);
+                            sum += max(q, 0.0) * max(q, 0.0);
+                        }
+                        let dens = sum * norm * f32(count) / f32(max(shown, 1u));
+                        if (st == 0u) { s.act[ch] += dens; } else { s.spent[ch] += dens; }
+                    }
+                }
+            }
+        }
+    }
+    return s;
+}
+
 @fragment
 fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     // Píxel -> mundo (y invertido: o ecrã cresce para baixo, o mundo para cima).
@@ -76,6 +150,15 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         let v = chem_view[idx * 4u + ch];
         act[ch] = f32(v & 0xFFFFu);
         spent[ch] = f32(v >> 16u);
+    }
+    // De perto: monómeros como pontos (ver soup_at). pixel_cells = tamanho
+    // de um píxel em células.
+    let pixel_cells = 1.0 / (view.zoom * f32(WORLD_UNITS_PER_CELL));
+    let dots = (1.0 - smoothstep(DOTS_PIXEL_FULL, DOTS_PIXEL_NONE, pixel_cells)) * step(1e-4, view.coc_radius);
+    if (dots > 0.0 && view.view_mode <= 5u) {
+        let soup = soup_at(world / f32(WORLD_UNITS_PER_CELL), view.coc_radius);
+        act = mix(act, soup.act, dots);
+        spent = mix(spent, soup.spent, dots);
     }
     // LUZ como SOMA DOURADA: onde chega luz soma-se um brilho dourado; a
     // sombra (do terreno e dos agentes) é a falta dele. Não multiplica nada,

@@ -789,6 +789,13 @@ gpu_struct! {
         pub daylight: f32,
         /// Marcar com uma bola os agentes que têm este órgão: tipo + 1 (0 = nenhum).
         pub mark_organ: u32,
+        /// CÍRCULO DE CONFUSÃO dos monómeros, em células: de perto, cada
+        /// monómero desenha-se como um disco suave deste raio numa posição
+        /// própria dentro da célula. 0 = quadrados (uma cor por célula).
+        pub coc_radius: f32,
+        pub _pad_v0: u32,
+        pub _pad_v1: u32,
+        pub _pad_v2: u32,
     }
 }
 
