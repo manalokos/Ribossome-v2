@@ -25,7 +25,7 @@ fn main() {
             }
         }
     }
-    let genome = bases(&format!("AUG{clock}{}UAA", "GGU".repeat(15)));
+    let genome = bases(&format!("AUG{clock}{}UAA", "GUU".repeat(15)));
     let gpu = Gpu::new_headless().unwrap();
     let cfg = WorldConfig::TEST;
     let mut w = World::new(&gpu, cfg, 3);
@@ -39,14 +39,14 @@ fn main() {
     w.params.uv_strength = 0.0;
     w.params.death_probability = 0.0;
     w.params.maintenance_cost = 0.0;
-    w.params.motion_cost = 0.0;
+    w.params.motion_cost = envf("MOTION_COST", 0.1);
     w.params.pairing_rate = 0.0;
     w.params.uptake_rate = 0.0;
     w.params.spawn_energy = 60.0;
     w.params.signal_mode = envf("MODE", 2.0);
-    w.params.swim_gain = envf("GAIN", 10.0);
+    w.params.swim_gain = envf("GAIN", 1.0);
     w.params.sedimentation = 0.0;
-    w.params.swim_grip = envf("GRIP", 2.0);
+    w.params.swim_grip = envf("GRIP", 30.0);
     w.params.inertia = envf("INERTIA", 0.0);
     w.params.joint_load = envf("LOAD", 1.0);
     let mut rng = ribossome::life::SplitMix(5);
@@ -87,6 +87,24 @@ fn main() {
     let a1 = pos(&w);
     let net: f32 = a1.iter().filter_map(|(id, b)| a0.get(id).map(|a| ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt())).sum::<f32>() / a1.len().max(1) as f32 / wpc;
     println!("aderência {}, ganho {}: avanço líquido {:.2} células em 600 passos", w.params.swim_grip, w.params.swim_gain, net);
+    // Custo de se mexer: a manutenção está a 0, por isso a energia que
+    // desce nestes 600 passos é só movimento (dissipação + dobrar por sinais).
+    let energy = |w: &World| -> f32 {
+        let a: Vec<f32> = w.read_agents_blocking(&gpu).iter().filter(|a| a.alive != 0).map(|a| a.energy).collect();
+        a.iter().sum::<f32>() / a.len().max(1) as f32
+    };
+    let e0 = energy(&w);
+    for _ in 0..30 {
+        step(&mut w, 10);
+    }
+    let e1 = energy(&w);
+    let b0 = pos(&w);
+    println!(
+        "custo do movimento {}: {:.4} de energia por passo a nadar (energia {e0:.2} -> {e1:.2} em 300 passos); {} agentes vivos",
+        w.params.motion_cost,
+        (e0 - e1) / 300.0,
+        b0.len()
+    );
     let before = speed(&mut w, 60);
     let v0 = before.iter().sum::<f32>() / before.len() as f32;
     w.params.clock_mute = 1.0;
