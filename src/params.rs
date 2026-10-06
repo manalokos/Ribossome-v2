@@ -329,10 +329,11 @@ gpu_struct! {
         /// Fração da energia tirada por uma protease que vai DIRETAMENTE para
         /// o atacante (o resto, × lysis_yield, reativa gastos junto da vítima).
         pub protease_direct: f32,
-        /// CARGA DAS JUNTAS: quanto a massa a mover trava a dobra de uma
-        /// junta. A dobra é ÷ (1 + isto × I/I_ref), com I o momento de inércia
-        /// reduzido dos dois lados da junta (o lado leve é o que roda). 0 =
-        /// todas as juntas dobram ao mesmo ritmo, seja qual for o peso.
+        /// CARGA DAS JUNTAS: quanto o arrasto da água sobre o que tem de
+        /// rodar trava a dobra de uma junta, em relação ao atrito interno da
+        /// junta. A dobra é ÷ (1 + isto × ζ/ζ_ref), com ζ a resistência
+        /// reduzida à rotação dos dois lados. 0 = todas as juntas dobram ao
+        /// mesmo ritmo.
         pub joint_load: f32,
         pub _pad_g1: u32,
         pub _pad_g2: u32,
@@ -477,7 +478,7 @@ impl Default for SimParams {
             photo_yield: 0.5,
             heat_kill: 0.1,
             flow_coupling: 1.0,
-            inertia: 2.0,
+            inertia: 0.0,
             death_energy_cap: 20.0,
             chemo_yield: 1.0,
             redox_decay: 0.02,
@@ -692,7 +693,9 @@ gpu_struct! {
         /// Máscara das famílias de protease que cortam este aminoácido numa
         /// vítima (bit 0 = família 1...).
         pub protease_target: f32,
-        pub _pad_p0: f32,
+        /// Arrasto do resíduo na água (multiplicador; 1 = só o comprimento
+        /// do segmento conta). Independente da massa.
+        pub drag: f32,
         pub _pad_p1: f32,
         pub _pad_p2: f32,
     }

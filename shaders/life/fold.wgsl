@@ -18,9 +18,10 @@
 // atraso artificial que fazia nadar os relógios lentos).
 const JOINT_MOBILITY: f32 = 0.01;
 const JOINT_MAX_STEP: f32 = 0.2;
-// Momento reduzido da junta do meio de um corpo médio (16 resíduos de massa
-// 0,02 e 10 unidades de comprimento): com joint_load = 1 dobra a metade.
-const JOINT_LOAD_REF: f32 = 200.0;
+// Resistência reduzida à rotação na junta do meio de um corpo médio (16
+// resíduos de arrasto 1 e 10 unidades de comprimento): com joint_load = 1
+// essa junta dobra a metade.
+const JOINT_LOAD_REF: f32 = 10000.0;
 const S_JOINT: u32 = 5u << 16u;     // + índice da junta
 
 fn joint_stiffness(slot: u32, k: u32) -> f32 {
@@ -80,10 +81,17 @@ struct RftCtx {
     soft: u32,
 }
 
-// Multiplicador de arrasto do resíduo k (órgãos volumosos arrastam mais).
+// Multiplicador de arrasto do resíduo k: o do aminoácido (tabela; não
+// depende da massa) × o do órgão (os volumosos arrastam mais).
 fn residue_drag_mult(slot: u32, k: u32) -> f32 {
     let o = organ_get(slot, k);
-    return select(1.0, max(organ_cost(o).drag_mult, 0.05), o != 0u);
+    let aa_drag = max(aa_props[body_get(slot, k)].drag, 0.05);
+    return aa_drag * select(1.0, max(organ_cost(o).drag_mult, 0.05), o != 0u);
+}
+
+// Arrasto do resíduo k para a carga das juntas (o peso que o RFT usa).
+fn joint_drag_weight(slot: u32, k: u32) -> f32 {
+    return residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k);
 }
 
 // Posição nova (alinhada) do resíduo k.
@@ -249,14 +257,17 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     var old: array<vec2<f32>, 64>;
     for (var k = 0u; k < n; k++) { old[k] = body_pos[base + k]; }
 
-    // CARGA DAS JUNTAS: somas da massa para o momento de inércia de cada
-    // lado de cada junta (em O(n): Σm, Σm·p, Σm·|p|²).
+    // CARGA DAS JUNTAS: a baixo Reynolds o que trava uma dobra é o ARRASTO
+    // da água sobre o que tem de rodar, não a massa. Somas do arrasto de
+    // cada resíduo (o mesmo peso que o RFT usa: comprimento do segmento ×
+    // multiplicador do órgão) para a resistência à rotação de cada lado de
+    // cada junta (em O(n): Σξ, Σξ·p, Σξ·|p|²).
     var tm = 0.0;
     var ts = vec2<f32>(0.0);
     var tq = 0.0;
     if (params.joint_load > 0.0) {
         for (var k = 0u; k < n; k++) {
-            let m = residue_mass(slot, k);
+            let m = joint_drag_weight(slot, k);
             tm += m;
             ts += m * old[k];
             tq += m * dot(old[k], old[k]);
@@ -267,7 +278,7 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     var ns = vec2<f32>(0.0);
     var nq = 0.0;
     if (params.joint_load > 0.0) {
-        let m0 = residue_mass(slot, 0u);
+        let m0 = joint_drag_weight(slot, 0u);
         nm = m0;
         ns = m0 * old[0];
         nq = m0 * dot(old[0], old[0]);
@@ -279,14 +290,16 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     var dissipated = 0.0;
     for (var k = 1u; k < n; k++) { // θ_0 é a orientação global (o corpo roda livre)
         // A junta k roda os resíduos k+1.. em relação aos 0..k, à volta do
-        // resíduo k. Os dois lados rodam em sentidos opostos na razão inversa
-        // dos seus momentos de inércia: quem trava a dobra é o momento
-        // REDUZIDO I_N·I_C/(I_N + I_C), dominado pelo lado mais leve. Uma
-        // ponta dobra depressa; o tronco de um corpo pesado, devagar; um
-        // órgão pesado numa ponta torna essa ponta lenta.
+        // resíduo k. Com binário τ, cada lado roda a τ/ζ (ζ = Σ ξ·d², a sua
+        // resistência à rotação na água) em sentidos opostos: a dobra anda a
+        // τ·(1/ζ_N + 1/ζ_C) = τ/ζ_red, com ζ_red = ζ_N·ζ_C/(ζ_N + ζ_C),
+        // dominada pelo lado que roda mais facilmente. Somada ao atrito
+        // interno da própria junta (o 1): velocidade ∝ 1/(1 + carga·ζ_red).
+        // Uma ponta dobra depressa; o tronco de um corpo comprido, devagar;
+        // um órgão volumoso numa ponta torna essa ponta lenta.
         var load = 1.0;
         if (params.joint_load > 0.0) {
-            let m = residue_mass(slot, k);
+            let m = joint_drag_weight(slot, k);
             nm += m;
             ns += m * old[k];
             nq += m * dot(old[k], old[k]);

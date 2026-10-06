@@ -654,8 +654,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
         .on_hover_text("1 = balanço físico de cada batida; 0 = só o avanço médio");
     ui.add(egui::Slider::new(&mut p.motion_cost, 0.0..=2.0).text("custo de dissipação do movimento"))
         .on_hover_text("energia = isto × Σ √arrasto·dθ² das juntas: bater depressa custa ao quadrado");
-    ui.add(egui::Slider::new(&mut p.inertia, 0.0..=10.0).text("inércia dos pesados"))
-        .on_hover_text("a velocidade aproxima-se da alvo (natação + corrente) com peso 1/(1 + isto × massa/massa de um corpo médio): os pesados aceleram devagar e perdem as rajadas; 0 = sem inércia");
+    ui.add(egui::Slider::new(&mut p.inertia, 0.0..=10.0).text("inércia dos pesados (não física)"))
+        .on_hover_text("0 = físico: à escala molecular a água amortece tudo, um corpo que pára de bater pára logo. Acima de 0 a velocidade aproxima-se da pedida com peso 1/(1 + isto × massa/massa de um corpo médio): os pesados deslizam e aceleram devagar, como nadadores grandes");
     ui.add(egui::Slider::new(&mut p.flow_coupling, 0.0..=1.0).text("arrasto pela corrente"))
         .on_hover_text("1 = físico (um corpo livre segue a água); menos = experiência: as correntes levam-nos menos e eles também empurram menos a água");
     ui.add(egui::Slider::new(&mut p.agent_fluid_push, -1.0..=1.0).text("agentes empurram a água"))
@@ -671,8 +671,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
     ui.separator();
     ui.strong("Juntas e contacto");
     ui.add(egui::Slider::new(&mut p.chain_stiffness, 1.0..=100.0).text("rigidez das juntas"));
-    ui.add(egui::Slider::new(&mut p.joint_load, 0.0..=5.0).text("carga das juntas (peso a mover)"))
-        .on_hover_text("quanto a massa trava a dobra de cada junta. Cada junta roda os dois lados do corpo em sentidos opostos; o que a trava é o lado mais leve. Com isto ligado as pontas dobram depressa, o tronco de um corpo pesado dobra devagar e um órgão pesado numa ponta torna essa ponta lenta: corpos pesados nadam mais devagar. 0 = todas as juntas ao mesmo ritmo; 1 = a junta do meio de um corpo médio dobra a metade");
+    ui.add(egui::Slider::new(&mut p.joint_load, 0.0..=5.0).text("carga das juntas (arrasto a rodar)"))
+        .on_hover_text("quanto a água trava a dobra de cada junta. Cada junta roda os dois lados do corpo em sentidos opostos e o que a trava é o arrasto do lado que roda mais facilmente (comprimento dos segmentos × arrasto dos órgãos × distância²). As pontas dobram depressa, o tronco de um corpo comprido dobra devagar e um órgão volumoso numa ponta torna essa ponta lenta. 0 = todas as juntas ao mesmo ritmo; 1 = a junta do meio de um corpo médio dobra a metade");
     ui.add(egui::Slider::new(&mut p.rest_angle_mult, 0.0..=6.0).text("× ângulos de repouso"))
         .on_hover_text("multiplica o ângulo de repouso de todas as juntas (aminoácidos e órgãos). 1 = os da tabela (corpos quase direitos); 3–4 dá dobras de 50–90° como numa proteína real: corpos enrolados, com mais contactos entre resíduos");
     ui.add(egui::Slider::new(&mut p.thermal_kt, 0.0..=5.0).text("agitação térmica (kT)"));

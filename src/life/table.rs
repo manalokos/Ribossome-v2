@@ -63,6 +63,10 @@ pub struct AminoRow {
     /// vítima (1 = família 1, 2 = família 2, 4 = família 3; soma-se).
     #[serde(default)]
     pub protease_alvo: f32,
+    /// Arrasto do resíduo na água (multiplicador do arrasto do segmento),
+    /// independente da massa: entra na natação e na carga das juntas.
+    #[serde(default = "one")]
+    pub arrasto: f32,
     #[serde(rename = "substrato_A")]
     pub substrato_a: f32,
     #[serde(rename = "substrato_U")]
@@ -329,7 +333,7 @@ pub fn to_gpu(rows: &[AminoRow]) -> Vec<AaProps> {
             contact_want: r.contacto_quer,
             contact_class: r.contacto_classe,
             protease_target: r.protease_alvo,
-            _pad_p0: 0.0,
+            drag: r.arrasto,
             _pad_p1: 0.0,
             _pad_p2: 0.0,
         })
