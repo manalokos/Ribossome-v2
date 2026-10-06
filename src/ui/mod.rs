@@ -288,7 +288,7 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
         ui.add(egui::Slider::new(&mut st.steps_per_frame, 1..=MAX_STEPS_PER_FRAME).text("passos/frame"));
         ui.checkbox(&mut st.vsync, "vsync");
         ui.checkbox(&mut st.smooth_refresh, "ecrã fluido")
-            .on_hover_text("os passos por frame passam a ser um máximo: se a placa não os faz todos a tempo, fazem-se menos por frame e o ecrã refresca a ~30 imagens por segundo. A simulação anda à mesma velocidade (a máxima da placa)");
+            .on_hover_text("os passos por frame passam a ser um máximo: se a placa não os faz todos a tempo, fazem-se menos por frame para o ecrã não ficar preso. O ecrã refresca a ~30 imagens por segundo quando o desenho é barato; quando é caro (muitos agentes à vista) refresca mais devagar, até 15 por segundo, para a simulação ficar com até 80% do tempo da placa");
         if st.smooth_refresh && st.steps_done < st.steps_per_frame {
             ui.label(format!("a fazer {}", st.steps_done));
         }

@@ -28,6 +28,11 @@ const SLOT_WORDS: u64 = 16;
 /// vec4<u32> por slot no buffer das ligações (MAX_BONDS + a proposta;
 /// shaders/life/bonds.wgsl).
 pub const BOND_STRIDE: u64 = 5;
+/// Retângulo de desenho que apanha todos os agentes.
+const DRAW_EVERYTHING: [f32; 4] = [-1e30, -1e30, 1e30, 1e30];
+/// Folga do retângulo de desenho: o maior corpo (64 resíduos) mais os fios
+/// de RNA e uma ligação, em unidades do mundo.
+const DRAW_MARGIN: f32 = 1000.0;
 
 /// Contagem exata da matéria livre, por canal (A U G C) e estado.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -499,11 +504,13 @@ impl World {
         let tail_buf = storage_buffer(device, "rna tails", max_agents * 32);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
-            // Dois draws indiretos: o completo (0) e o da vista afastada (16).
-            size: 32,
+            // Dois draws indiretos: o completo (0) e o da vista afastada (16);
+            // depois, o retângulo à vista (4 × f32; ver set_draw_rect).
+            size: 48,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        gpu.queue.write_buffer(&draw_args_buf, 32, bytemuck::cast_slice(&DRAW_EVERYTHING));
         let free_slots: Vec<u32> = (0..cfg.max_agents).rev().collect();
         let free_buf = storage_buffer(device, "free slots", max_agents * 4);
         gpu.queue.write_buffer(&free_buf, 0, bytemuck::cast_slice(&free_slots));
@@ -1470,9 +1477,21 @@ impl World {
         self.params.epoch = self.params.epoch.wrapping_add(steps);
     }
 
+    /// Limita a lista de desenho aos agentes dentro do retângulo [min, max]
+    /// (unidades do mundo) nas próximas chamadas a `encode_draw_list`: com
+    /// zoom, só se desenham os que estão à vista. A folga para o tamanho dos
+    /// corpos é somada aqui. `None` = todos.
+    pub fn set_draw_rect(&self, queue: &wgpu::Queue, rect: Option<([f32; 2], [f32; 2])>) {
+        let r = match rect {
+            Some((lo, hi)) => [lo[0] - DRAW_MARGIN, lo[1] - DRAW_MARGIN, hi[0] + DRAW_MARGIN, hi[1] + DRAW_MARGIN],
+            None => DRAW_EVERYTHING,
+        };
+        queue.write_buffer(&self.draw_args_buf, 32, bytemuck::cast_slice(&r));
+    }
+
     /// Grava a lista dos agentes vivos e os argumentos do draw indireto.
     pub fn encode_draw_list(&self, enc: &mut wgpu::CommandEncoder) {
-        enc.clear_buffer(&self.draw_args_buf, 0, None);
+        enc.clear_buffer(&self.draw_args_buf, 0, Some(32));
         let mut pass =
             enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("draw list"), timestamp_writes: None });
         pass.set_bind_group(0, &self.frame_bg, &[0]);

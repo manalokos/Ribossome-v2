@@ -58,6 +58,12 @@ struct Running {
     /// placa está a aguentar (ver `adaptive_steps`).
     last_frame: std::time::Instant,
     steps_eff: f32,
+    /// Estimativa de frame = o + n·s (ver adaptive_steps): médias de n, f,
+    /// n², n·f e o peso acumulado; passos do frame anterior; alvo atual.
+    fit: [f32; 5],
+    last_n: f32,
+    target_ms: f32,
+    dither: u32,
 }
 
 #[derive(Default)]
@@ -299,6 +305,10 @@ impl Running {
             kin_frames: 0,
             last_frame: std::time::Instant::now(),
             steps_eff: 1.0,
+            fit: [0.0; 5],
+            last_n: 1.0,
+            target_ms: 33.0,
+            dither: 0,
         };
         r.ui.autosave_path = autosave_path;
         r.ui.scene_msg = scene_msg;
@@ -801,25 +811,64 @@ impl Running {
     }
 
     /// REFRESCO FLUIDO: os passos por frame pedidos são um MÁXIMO. Se a placa
-    /// não os faz todos a tempo, o ecrã ficava a 5–10 imagens por segundo
-    /// (e a interface presa). Em vez disso faz-se, em cada frame, só os
-    /// passos que cabem em ~33 ms: a simulação anda à mesma velocidade (a
-    /// máxima da placa) e o ecrã refresca a ~30 imagens por segundo.
+    /// não os faz todos a tempo, o ecrã ficava a 5–10 imagens por segundo (e
+    /// a interface presa); em vez disso faz-se, em cada frame, só os passos
+    /// que cabem no tempo-alvo do frame.
+    ///
+    /// O alvo NÃO é fixo: se o desenho for caro (muitos agentes à vista), um
+    /// alvo de 33 ms deixava a simulação com os restos (com 14 ms de desenho
+    /// ficava com metade do tempo). Estima-se, dos próprios frames, quanto
+    /// custa o que não é simulação (o) e cada passo (s), por mínimos
+    /// quadrados sobre frame = o + n·s, e escolhe-se o alvo para a simulação
+    /// ficar com SIM_SHARE do tempo: alvo = o / (1 − SIM_SHARE), entre 33 ms
+    /// (30 imagens/s) e 66 ms (15 imagens/s).
     fn adaptive_steps(&mut self) -> u32 {
         const TARGET_MS: f32 = 33.0;
+        const MAX_TARGET_MS: f32 = 66.0;
+        const SIM_SHARE: f32 = 0.8;
+        // Memória da estimativa (~40 frames).
+        const FORGET: f32 = 0.025;
         let now = std::time::Instant::now();
         let frame_ms = now.duration_since(self.last_frame).as_secs_f32() * 1000.0;
         self.last_frame = now;
         let want = self.ui.steps_per_frame.max(1) as f32;
         if !self.ui.smooth_refresh || self.ui.paused {
             self.steps_eff = want;
+            self.fit = [0.0; 5];
         } else if frame_ms > 0.0 && frame_ms < 2000.0 {
-            // Passos que caberiam no alvo, ao ritmo do frame anterior;
-            // aproxima-se aos poucos para não oscilar.
-            let fit = self.steps_eff * TARGET_MS / frame_ms;
-            self.steps_eff = (self.steps_eff + 0.25 * (fit - self.steps_eff)).clamp(1.0, want);
+            // Regressão com esquecimento: médias de n, f, n², n·f e o peso.
+            let n = self.last_n;
+            let f = &mut self.fit;
+            let k = if f[4] < 1.0 { 1.0 / (f[4] * 40.0 + 1.0).max(1.0) } else { FORGET };
+            f[0] += k * (n - f[0]);
+            f[1] += k * (frame_ms - f[1]);
+            f[2] += k * (n * n - f[2]);
+            f[3] += k * (n * frame_ms - f[3]);
+            f[4] = (f[4] + 0.025).min(1.0);
+            let var = f[2] - f[0] * f[0];
+            let cov = f[3] - f[0] * f[1];
+            let mut target = TARGET_MS;
+            let mut goal = self.steps_eff * TARGET_MS / frame_ms;
+            if f[4] >= 1.0 && var > 0.05 && cov > 0.0 {
+                let step_ms = (cov / var).max(0.02);
+                let other_ms = (f[1] - step_ms * f[0]).max(0.0);
+                target = (other_ms / (1.0 - SIM_SHARE)).clamp(TARGET_MS, MAX_TARGET_MS);
+                goal = ((target - other_ms) / step_ms).max(1.0);
+                // Nunca muito além do que o frame anterior mostrou caber.
+                goal = goal.min(self.steps_eff * target / frame_ms * 1.5 + 1.0);
+            }
+            self.target_ms = target;
+            // Aproxima-se aos poucos para não oscilar.
+            self.steps_eff = (self.steps_eff + 0.25 * (goal - self.steps_eff)).clamp(1.0, want);
         }
-        let n = (self.steps_eff.round() as u32).clamp(1, self.ui.steps_per_frame.max(1));
+        let mut n = (self.steps_eff.round() as u32).clamp(1, self.ui.steps_per_frame.max(1));
+        // De vez em quando um frame com mais passos, para a regressão ter
+        // dois pontos mesmo quando o número de passos está parado.
+        self.dither = self.dither.wrapping_add(1);
+        if self.ui.smooth_refresh && !self.ui.paused && self.dither % 12 == 0 {
+            n = (n + (n / 4).max(1)).min(self.ui.steps_per_frame.max(1));
+        }
+        self.last_n = n as f32;
         self.ui.steps_done = n;
         n
     }
@@ -991,6 +1040,11 @@ impl Running {
 
         let n_steps = self.adaptive_steps();
         let (vp, covered) = (self.viewport, self.covered);
+        // Só se desenham os agentes à vista (aqui, mesmo antes de a lista
+        // ser feita: um screenshot pelo MCP pode ter posto outro retângulo).
+        let (hw, hh) = (0.5 * screen[0] / self.cam.zoom, 0.5 * screen[1] / self.cam.zoom);
+        let c = self.cam.center;
+        self.world.set_draw_rect(&self.gpu.queue, Some(([c[0] - hw, c[1] - hh], [c[0] + hw, c[1] + hh])));
         let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, .. } = self;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {

@@ -85,6 +85,9 @@ impl Capture {
         self.view.update(&gpu.queue, cam, [s, s], view_mode, brightness, self.signal_view.get());
         let target = self.texture.create_view(&Default::default());
         let mut enc = gpu.device.create_command_encoder(&Default::default());
+        // Lista de desenho para ESTA câmara (a da janela pode estar noutro sítio).
+        let half = 0.5 * s / cam.zoom;
+        world.set_draw_rect(&gpu.queue, Some(([cam.center[0] - half, cam.center[1] - half], [cam.center[0] + half, cam.center[1] + half])));
         world.encode_draw_list(&mut enc);
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
