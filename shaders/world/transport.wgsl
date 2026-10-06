@@ -222,12 +222,17 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     // só salta para mais ativados à volta com exp(−ε·aumento/T).
     var accept_spent = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
     if (params.aggregation > 0.0 && src_total <= chem_capacity(idx)) {
-        // Vizinhos ativados aqui e nos 4 destinos (pré-calculados em agg_nb).
-        var e = array<f32, 5>(f32(agg_nb[idx]), 0.0, 0.0, 0.0, 0.0);
-        if (x + 1u < GRID_SIZE) { e[1] = f32(agg_nb[idx + 1u]); }
-        if (x > 0u) { e[2] = f32(agg_nb[idx - 1u]); }
-        if (y + 1u < GRID_SIZE) { e[3] = f32(agg_nb[idx + GRID_SIZE]); }
-        if (y > 0u) { e[4] = f32(agg_nb[idx - GRID_SIZE]); }
+        // Ativados no bloco 3×3 centrado aqui e em cada um dos 4 destinos:
+        // os das 8 células à volta (agg_nb) MAIS os da própria célula
+        // (agg_act). Os companheiros de célula também seguram: sem eles, dez
+        // ativados juntos numa célula não se atraíam e o grumo mais pequeno
+        // tinha de ocupar várias células (a agregação só "pegava" a partir
+        // de um certo tamanho).
+        var e = array<f32, 5>(f32(agg_nb[idx] + agg_act[idx]), 0.0, 0.0, 0.0, 0.0);
+        if (x + 1u < GRID_SIZE) { e[1] = f32(agg_nb[idx + 1u] + agg_act[idx + 1u]); }
+        if (x > 0u) { e[2] = f32(agg_nb[idx - 1u] + agg_act[idx - 1u]); }
+        if (y + 1u < GRID_SIZE) { e[3] = f32(agg_nb[idx + GRID_SIZE] + agg_act[idx + GRID_SIZE]); }
+        if (y > 0u) { e[4] = f32(agg_nb[idx - GRID_SIZE] + agg_act[idx - GRID_SIZE]); }
         let fx = min((x * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
         let fy = min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
         // T = 1 na água à temperatura ambiente; no limiar da ativação térmica, 2.
@@ -238,13 +243,16 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         let room = clamp(5.0 * (1.0 - f32(src_total) / f32(max(chem_capacity(idx), 1u))), 0.0, 1.0);
         let k_e = params.aggregation * room / t_rel;
         for (var d = 0u; d < 4u; d++) {
-            // No destino, a célula de origem (com o próprio) conta como vizinha: −1.
-            let drop = e[0] - (e[d + 1u] - 1.0);
+            // O próprio conta nos dois blocos (na origem está na célula do
+            // centro; visto do destino, numa vizinha): a diferença de
+            // companheiros é simplesmente a diferença das somas.
+            let drop = e[0] - e[d + 1u];
             if (drop > 0.0) { accept[d] = exp(-k_e * drop); }
             let rise = e[d + 1u] - e[0];
             if (rise > 0.0) { accept_spent[d] = exp(-k_e * rise); }
         }
-        p_bound = 1.0 - exp(-k_e * min(e[0], 48.0));
+        // (e[0] − 1: os companheiros, sem contar o próprio.)
+        p_bound = 1.0 - exp(-k_e * min(max(e[0] - 1.0, 0.0), 48.0));
     }
 
     for (var ch = 0u; ch < 4u; ch++) {
