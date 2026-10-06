@@ -469,7 +469,8 @@ fn tab_light(ui: &mut egui::Ui, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.monomer_uv_absorb, 0.0..=5.0).text("absorção UV pelos monómeros"));
     ui.add(egui::Slider::new(&mut p.photo_yield, 0.0..=0.5).logarithmic(true).smallest_positive(0.005).text("rendimento fotossintético"))
         .on_hover_text("energia por unidade de luz absorvida por um fotossistema (o reciclador converte a mesma energia em ativados)");
-    ui.add(egui::Slider::new(&mut p.uv_damage, 1.0..=50.0).text("dano UV"));
+    ui.add(egui::Slider::new(&mut p.uv_damage, 1.0..=50.0).text("dano UV"))
+        .on_hover_text("risco de morte por passo à luz = mortalidade base × (isto − 1) × luz × 0,01, e cai com a fração de aminoácidos aromáticos do corpo (triptofano, tirosina: o protetor solar). 30 em sol pleno e sem proteção dá cerca de 140 passos de vida; 1 = sem dano");
     ui.add(
         egui::Slider::new(&mut world.settings.light_rows_per_step, 0..=16)
             .text("velocidade da luz (linhas/passo; 0 = varredura)"),

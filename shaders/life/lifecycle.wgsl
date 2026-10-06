@@ -24,7 +24,11 @@ const PAIRING_REACH: f32 = 30.0;
 // Mortalidade (v3): frio ×0,1, quente ×10 (T >= 8); risco UV independente da energia.
 const COLD_DEATH_MULT: f32 = 0.1;
 const HOT_DEATH_MULT: f32 = 10.0;
-const UV_HAZARD_SCALE: f32 = 0.001;
+// (0,01: com dano UV 30 e mortalidade base 0,025, sol pleno sem proteção
+// dá ~0,007 por passo, cerca de 140 passos de vida. Era 0,001 e não se notava.)
+const UV_HAZARD_SCALE: f32 = 0.01;
+// Um corpo com 10% de triptofano fica com exp(−1,5) = 22% do risco UV.
+const UV_SHIELD: f32 = 15.0;
 const MIN_GENE_LEN: u32 = 6u;
 const S_BROWN: u32 = 9u;
 const S_BIOTURB: u32 = 10u;
@@ -660,7 +664,18 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let wt = temp_in[fi];
     var thermal = mix(COLD_DEATH_MULT, 1.0, clamp(wt / 2.0, 0.0, 1.0));
     if (wt > 2.0) { thermal = mix(1.0, HOT_DEATH_MULT, clamp((wt - 2.0) / 6.0, 0.0, 1.0)); }
-    let uv_hazard = params.death_probability * (uv_mult - 1.0) * UV_HAZARD_SCALE;
+    // PROTETOR SOLAR: os aminoácidos aromáticos absorvem UV (a mesma coluna
+    // que faz a sombra: W 1, Y 0,27, F 0,04) e protegem o corpo que os tem,
+    // como os pigmentos anti-UV das algas, que derivam de aromáticos. O
+    // risco cai com a FRAÇÃO do corpo que absorve: exp(−UV_SHIELD × fração).
+    // Viver à luz pede um corpo rico em triptofano e tirosina.
+    var shield = 1.0;
+    if (light > 0.0 && a.body_len > 0u) {
+        var absorb = 0.0;
+        for (var k = 0u; k < a.body_len; k++) { absorb += max(aa_props[body_get(slot, k)].uv_absorb, 0.0); }
+        shield = exp(-UV_SHIELD * absorb / f32(a.body_len));
+    }
+    let uv_hazard = params.death_probability * (uv_mult - 1.0) * UV_HAZARD_SCALE * shield;
     // DESNATURAÇÃO: acima do limiar, o calor desfaz as proteínas (não
     // depende de estar bem alimentado); a composição do corpo protege.
     var heat_hazard = 0.0;
