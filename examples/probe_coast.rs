@@ -46,6 +46,7 @@ fn main() {
     w.params.signal_mode = envf("MODE", 2.0);
     w.params.swim_gain = envf("GAIN", 10.0);
     w.params.sedimentation = 0.0;
+    w.params.swim_grip = envf("GRIP", 2.0);
     w.params.inertia = envf("INERTIA", 0.0);
     w.params.joint_load = envf("LOAD", 1.0);
     let mut rng = ribossome::life::SplitMix(5);
@@ -78,6 +79,14 @@ fn main() {
         }
         out
     };
+    // Avanço líquido (do princípio ao fim) em 600 passos.
+    let a0 = pos(&w);
+    for _ in 0..60 {
+        step(&mut w, 10);
+    }
+    let a1 = pos(&w);
+    let net: f32 = a1.iter().filter_map(|(id, b)| a0.get(id).map(|a| ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt())).sum::<f32>() / a1.len().max(1) as f32 / wpc;
+    println!("aderência {}, ganho {}: avanço líquido {:.2} células em 600 passos", w.params.swim_grip, w.params.swim_gain, net);
     let before = speed(&mut w, 60);
     let v0 = before.iter().sum::<f32>() / before.len() as f32;
     w.params.clock_mute = 1.0;

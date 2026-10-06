@@ -28,8 +28,6 @@ const UV_HAZARD_SCALE: f32 = 0.001;
 const MIN_GENE_LEN: u32 = 6u;
 const S_BROWN: u32 = 9u;
 const S_BIOTURB: u32 = 10u;
-// Passos da média da velocidade de natação (o avanço que o ganho amplifica).
-const SWIM_AVG_STEPS: f32 = 100.0;
 const S_PHOTOSYS: u32 = 7u << 16u;   // + índice do resíduo
 const S_CHEMO: u32 = 9u << 16u;      // + índice do resíduo
 // Quimiossíntese: fração do redutor da célula do fluido que cada órgão
@@ -365,7 +363,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let fc = clamp(params.flow_coupling, 0.0, 1.0);
     let rot_mid = a.rot + 0.5 * (js.swim.z + fc * js.flow.z);
     let sv_phys = rotate(js.swim.xy, rot_mid);
-    let avg = mix(aux.zw, sv_phys, 1.0 / SWIM_AVG_STEPS);
+    let avg = mix(aux.zw, sv_phys, 1.0 / max(params.swim_memory, 1.0));
     aux = vec4<f32>(aux.xy, avg);
     // Avanço médio × ganho + vaivém (o resto) × swim_wobble.
     let sv = max(params.swim_gain, 0.0) * avg + clamp(params.swim_wobble, 0.0, 1.0) * (sv_phys - avg);

@@ -62,7 +62,7 @@ fn rebuild_body(slot: u32, n: u32) {
 // inércia). A velocidade de cada resíduo no mundo é V + Ω×r + u, onde u é a
 // mudança de forma. É um sistema linear 3×3 em (Vx, Vy, Ω). Um movimento
 // recíproco não desloca nada (teorema da vieira).
-const RFT_PERP_RATIO: f32 = 2.0;
+// (A razão ξ⊥/ξ∥ é params.swim_grip; 2 = água.)
 
 // Tangente da cadeia no resíduo k, a MEIO do passo (média das posições
 // antigas e novas alinhadas).
@@ -189,7 +189,7 @@ fn rft_solve(slot: u32, c: RftCtx, old: ptr<function, array<vec2<f32>, 64>>) -> 
         // entulho é igual em todas as direções (env.z − 1), por isso dilui a
         // anisotropia e a propulsão perde eficiência no sedimento.
         let lw = residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k);
-        let rr = (tt + RFT_PERP_RATIO * (id - tt) + (env.z - 1.0) * id) * lw;
+        let rr = (tt + max(params.swim_grip, 1.0) * (id - tt) + (env.z - 1.0) * id) * lw;
         // Colunas de D: ∂v/∂Vx = (1,0), ∂v/∂Vy = (0,1), ∂v/∂Ω = (−r.y, r.x).
         let d0 = vec2<f32>(1.0, 0.0);
         let d1 = vec2<f32>(0.0, 1.0);
@@ -449,7 +449,7 @@ fn push_fluid(slot: u32, a: Agent, c: RftCtx, old: ptr<function, array<vec2<f32>
         let tt = mat2x2<f32>(vec2<f32>(t.x * t.x, t.x * t.y), vec2<f32>(t.y * t.x, t.y * t.y));
         // Só o arrasto com a ÁGUA a empurra (o dos grãos fica no entulho);
         // a água real no resíduo é uf × drag (ver joints_step).
-        let rr = (tt + RFT_PERP_RATIO * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k));
+        let rr = (tt + max(params.swim_grip, 1.0) * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k));
         // Velocidade do resíduo RELATIVA à água (quem só é levado não empurra).
         let v = s.xy + s.z * vec2<f32>(-r.y, r.x) + u - env.xy * env.z;
         let f_body = rr * v;

@@ -649,7 +649,12 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
     let mut rft = p.rft_enabled != 0;
     ui.checkbox(&mut rft, "natação (RFT)");
     p.rft_enabled = rft as u32;
-    ui.add(egui::Slider::new(&mut p.swim_gain, 0.0..=50.0).text("ganho da natação"));
+    ui.add(egui::Slider::new(&mut p.swim_grip, 1.0..=30.0).logarithmic(true).text("aderência da natação (2 = água)"))
+        .on_hover_text("quanto mais o meio trava um segmento a andar de lado do que ao comprido. 2 = água, o limite físico de um corpo fino. Mais = um meio que agarra de lado (gel, muco): cada batida rende mais avanço, NA HORA; quando o corpo pára de bater, pára. 5 dá cerca de 6 vezes o avanço da água num nadador ondulante");
+    ui.add(egui::Slider::new(&mut p.swim_gain, 0.0..=50.0).text("ganho da natação (com memória; 1 = desligado)"))
+        .on_hover_text("multiplica a MÉDIA do avanço dos últimos passos (ver a memória, a seguir): acima de 1 os agentes continuam a deslizar na direção antiga depois de pararem ou virarem (não é físico). 1 = só a física das batidas");
+    ui.add(egui::Slider::new(&mut p.swim_memory, 1.0..=200.0).logarithmic(true).text("memória do ganho (passos)"))
+        .on_hover_text("quantos passos dura o deslizar quando o ganho é maior que 1. 20 = como no v3 (a velocidade perdia 5% por passo); 100 = o que o v4 tinha até agora. Com o ganho a 1 não faz nada");
     ui.add(egui::Slider::new(&mut p.swim_wobble, 0.0..=1.0).text("vaivém da natação"))
         .on_hover_text("1 = balanço físico de cada batida; 0 = só o avanço médio");
     ui.add(egui::Slider::new(&mut p.motion_cost, 0.0..=2.0).text("custo de dissipação do movimento"))

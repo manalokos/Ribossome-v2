@@ -335,8 +335,15 @@ gpu_struct! {
         /// reduzida à rotação dos dois lados. 0 = todas as juntas dobram ao
         /// mesmo ritmo.
         pub joint_load: f32,
-        pub _pad_g1: u32,
-        pub _pad_g2: u32,
+        /// ADERÊNCIA DA NATAÇÃO: razão entre o arrasto de um segmento a
+        /// andar de lado e a andar ao comprido. 2 = água (o limite de um
+        /// corpo fino num líquido simples). Mais = o meio agarra o corpo de
+        /// lado (como um gel ou muco): cada batida rende mais avanço, na
+        /// hora, sem memória.
+        pub swim_grip: f32,
+        /// Passos da média do avanço que swim_gain amplifica (a "memória" do
+        /// ganho). O v3 perdia 5% da velocidade por passo: ~20 passos.
+        pub swim_memory: f32,
         pub _pad_g3: u32,
     }
 }
@@ -458,7 +465,7 @@ impl Default for SimParams {
             pairing_cost: 0.3,
             reactivation_rate: 0.0,
             // 10: com 1 a natação era lenta demais para dar vantagem visível.
-            swim_gain: 10.0,
+            swim_gain: 1.0,
             bioturbation: 0.1,
             bioturbation_cost: 0.05,
             monomer_uv_absorb: 0.0,
@@ -507,8 +514,8 @@ impl Default for SimParams {
             lysis_yield: 0.7,
             protease_direct: 0.5,
             joint_load: 1.0,
-            _pad_g1: 0,
-            _pad_g2: 0,
+            swim_grip: 5.0,
+            swim_memory: 20.0,
             _pad_g3: 0,
         }
     }
