@@ -1,7 +1,7 @@
 //! Custo do desenho do fundo: tempo por frame (só o desenho, sem ler de
 //! volta) de uma imagem SIZE × SIZE da cena, para vários enquadramentos
 //! (largura em células) e raios do círculo de confusão. A/B no mesmo
-//! processo; mostra o MÍNIMO de N repetições (a GPU pode estar ocupada).
+//! processo; mostra o MÍNIMO de 120 repetições de 8 desenhos (a GPU pode estar ocupada).
 use std::time::Instant;
 
 use ribossome::gpu::Gpu;
@@ -28,16 +28,16 @@ fn main() {
         cap.view.coc_radius.set(coc);
         let cam = Camera { center: [0.5 * s, 0.5 * s], zoom: size as f32 / (span * cfg.world_units_per_cell as f32) };
         let mut best = f32::MAX;
-        for _ in 0..25 {
+        for _ in 0..120 {
             let mut enc = gpu.device.create_command_encoder(&Default::default());
             // 4 desenhos por medida, para o tempo de submeter pesar menos.
-            for _ in 0..4 {
+            for _ in 0..8 {
                 cap.encode(&gpu.queue, &mut enc, &cam, 0, 0.5);
             }
             let t = Instant::now();
             gpu.queue.submit([enc.finish()]);
             gpu.wait_idle();
-            best = best.min(t.elapsed().as_secs_f32() * 1000.0 / 4.0);
+            best = best.min(t.elapsed().as_secs_f32() * 1000.0 / 8.0);
         }
         best
     };
