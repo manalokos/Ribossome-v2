@@ -329,6 +329,14 @@ gpu_struct! {
         /// Fração da energia tirada por uma protease que vai DIRETAMENTE para
         /// o atacante (o resto, × lysis_yield, reativa gastos junto da vítima).
         pub protease_direct: f32,
+        /// CARGA DAS JUNTAS: quanto a massa a mover trava a dobra de uma
+        /// junta. A dobra é ÷ (1 + isto × I/I_ref), com I o momento de inércia
+        /// reduzido dos dois lados da junta (o lado leve é o que roda). 0 =
+        /// todas as juntas dobram ao mesmo ritmo, seja qual for o peso.
+        pub joint_load: f32,
+        pub _pad_g1: u32,
+        pub _pad_g2: u32,
+        pub _pad_g3: u32,
     }
 }
 
@@ -497,6 +505,10 @@ impl Default for SimParams {
             protease_power: 1.0,
             lysis_yield: 0.7,
             protease_direct: 0.5,
+            joint_load: 1.0,
+            _pad_g1: 0,
+            _pad_g2: 0,
+            _pad_g3: 0,
         }
     }
 }

@@ -18,6 +18,9 @@
 // atraso artificial que fazia nadar os relógios lentos).
 const JOINT_MOBILITY: f32 = 0.01;
 const JOINT_MAX_STEP: f32 = 0.2;
+// Momento reduzido da junta do meio de um corpo médio (16 resíduos de massa
+// 0,02 e 10 unidades de comprimento): com joint_load = 1 dobra a metade.
+const JOINT_LOAD_REF: f32 = 200.0;
 const S_JOINT: u32 = 5u << 16u;     // + índice da junta
 
 fn joint_stiffness(slot: u32, k: u32) -> f32 {
@@ -246,11 +249,53 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
     var old: array<vec2<f32>, 64>;
     for (var k = 0u; k < n; k++) { old[k] = body_pos[base + k]; }
 
+    // CARGA DAS JUNTAS: somas da massa para o momento de inércia de cada
+    // lado de cada junta (em O(n): Σm, Σm·p, Σm·|p|²).
+    var tm = 0.0;
+    var ts = vec2<f32>(0.0);
+    var tq = 0.0;
+    if (params.joint_load > 0.0) {
+        for (var k = 0u; k < n; k++) {
+            let m = residue_mass(slot, k);
+            tm += m;
+            ts += m * old[k];
+            tq += m * dot(old[k], old[k]);
+        }
+    }
+    // Lado N acumulado (resíduos 0..k).
+    var nm = 0.0;
+    var ns = vec2<f32>(0.0);
+    var nq = 0.0;
+    if (params.joint_load > 0.0) {
+        let m0 = residue_mass(slot, 0u);
+        nm = m0;
+        ns = m0 * old[0];
+        nq = m0 * dot(old[0], old[0]);
+    }
+
     let cr0 = cos(a.rot);
     let sr0 = sin(a.rot);
     var pushed = 0u;
     var dissipated = 0.0;
     for (var k = 1u; k < n; k++) { // θ_0 é a orientação global (o corpo roda livre)
+        // A junta k roda os resíduos k+1.. em relação aos 0..k, à volta do
+        // resíduo k. Os dois lados rodam em sentidos opostos na razão inversa
+        // dos seus momentos de inércia: quem trava a dobra é o momento
+        // REDUZIDO I_N·I_C/(I_N + I_C), dominado pelo lado mais leve. Uma
+        // ponta dobra depressa; o tronco de um corpo pesado, devagar; um
+        // órgão pesado numa ponta torna essa ponta lenta.
+        var load = 1.0;
+        if (params.joint_load > 0.0) {
+            let m = residue_mass(slot, k);
+            nm += m;
+            ns += m * old[k];
+            nq += m * dot(old[k], old[k]);
+            let pk = old[k];
+            let i_n = max(nq - 2.0 * dot(pk, ns) + dot(pk, pk) * nm, 0.0);
+            let i_c = max((tq - nq) - 2.0 * dot(pk, ts - ns) + dot(pk, pk) * (tm - nm), 0.0);
+            let i_red = i_n * i_c / max(i_n + i_c, 1e-9);
+            load = 1.0 / (1.0 + params.joint_load * i_red / JOINT_LOAD_REF);
+        }
         let aa = body_get(slot, k);
         // No sedimento a junta dobra mais devagar: tem de empurrar os grãos.
         // Mobilidade ÷ √arrasto (com ÷ arrasto inteiro, ~1/50, a junta ficava
@@ -266,9 +311,9 @@ fn joints_step(slot: u32, a: Agent, kt: f32) -> JointsOut {
         // Ruído térmico (Langevin sobreamortecido): σ = √(2·μ·kT).
         let q = rng_f4(a.id, params.epoch, S_JOINT + k);
         let bm = sqrt(-2.0 * log(max(q.x, 1e-7))) * cos(6.2831853 * q.y);
-        let drive = clamp(JOINT_MOBILITY * tau / sqrt(drag_here), -JOINT_MAX_STEP, JOINT_MAX_STEP);
+        let drive = clamp(JOINT_MOBILITY * load * tau / sqrt(drag_here), -JOINT_MAX_STEP, JOINT_MAX_STEP);
         dissipated += sqrt(drag_here) * drive * drive;
-        let dth = drive + bm * sqrt(2.0 * JOINT_MOBILITY * max(kt, 0.0));
+        let dth = drive + bm * sqrt(2.0 * JOINT_MOBILITY * load * max(kt, 0.0));
         joint_angle[base + k] = theta + dth;
 
         // ESCAVAR: o segmento seguinte, ao dobrar, empurra o grão de entulho
