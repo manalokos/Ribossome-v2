@@ -345,6 +345,9 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         dorm *= pow(clamp(dv.p0, 0.01, 1.0), organ_gain(od) * drive);
     }
     metab *= max(dorm, DORMANCY_FLOOR);
+    // FUGA: o que deixa entrar também deixa sair. A manutenção (e, com
+    // death_metab, o envelhecimento) escala com a absorção aberta do corpo.
+    let leak = max(params.leak_base + params.mouth_leak * body_absorption(slot, a.body_len), 0.0);
     // O ganho de natação escala SÓ a translação. A rotação fica a física:
     // escalá-la exagerava o balanço de cada abrir-e-fechar (o corpo rodava
     // muito para um lado e para o outro) e a orientação errada estragava a
@@ -580,7 +583,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     }
-    a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * metab * (f32(a.body_len) + organ_upkeep(slot, a.body_len));
+    a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * metab * leak * (f32(a.body_len) + organ_upkeep(slot, a.body_len));
 
     // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n × massa média por resíduo (os
     // órgãos pesados, como o armazenamento, afundam mais), só a parte em
@@ -643,7 +646,11 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // A reserva de energia protege até death_energy_cap (0 = sem teto, v3).
     var e_eff = max(a.energy, 0.01);
     if (params.death_energy_cap > 0.0) { e_eff = min(e_eff, params.death_energy_cap); }
-    let p_death = clamp(params.death_probability / e_eff * thermal + uv_hazard + heat_hazard, 0.0, 1.0);
+    // RITMO DE VIDA: quem gasta devagar (dormência, bocas fechadas ou sem
+    // boca, frio) também envelhece devagar; é o que deixa existir formas de
+    // resistência (cistos, esporos) que atravessam zonas sem comida.
+    let pace = mix(1.0, clamp(metab * leak, 0.02, 4.0), clamp(params.death_metab, 0.0, 1.0));
+    let p_death = clamp(params.death_probability / e_eff * thermal * pace + uv_hazard + heat_hazard, 0.0, 1.0);
     if (a.energy <= 0.0 || rng_f4(a.id, params.epoch, S_DEATH).x < p_death) {
         die(slot, a);
         return;
@@ -816,11 +823,18 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
         let tp = clamp(cp + vec2<f32>(cos(ang), sin(ang)) * (5.0 + 10.0 * q.y), vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(tp)) < GAMMA_SOLID_THRESHOLD) { cp = tp; break; }
     }
-    // Energia (v3): metade para o filho, metade fica com o pai.
-    let half = a.energy * 0.5;
-    new_agent(child, cp, mr.w * 6.2831853, half, n, a.generation + 1u, a.id);
+    // Energia: reparte-se em proporção da CAPACIDADE de cada um (um filho
+    // com o dobro da pilha do pai fica com dois terços), sem passar da
+    // capacidade do filho. O filho nasce primeiro com 0 para se saber a sua.
+    new_agent(child, cp, mr.w * 6.2831853, 0.0, n, a.generation + 1u, a.id);
+    var born = agents[child];
+    let cap_child = energy_capacity(child, born);
+    let cap_parent = energy_capacity(slot, a);
+    let share = min(a.energy * cap_child / max(cap_child + cap_parent, 1e-6), cap_child);
+    born.energy = share;
+    agents[child] = born;
     birth_bond(slot, a, child, bk);
-    a.energy -= half;
+    a.energy -= share;
     a.pair_count = 0u;
     agents[slot] = a;
     atomicAdd(&life_counters[LC_BIRTHS], 1u);

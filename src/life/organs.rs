@@ -129,7 +129,11 @@ const FOOD_SENSOR_PROPS: &[PropDef] = &[
 
 /// Propriedades de cada tipo de órgão, por ordem (a mesma na GPU).
 pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
-    &[pd("forca", "multiplica a catálise do promotor"), pd("vies_AU", "-1..1: prefere A/U (+) ou G/C (−)")],
+    &[
+        pd("forca", "multiplica a catálise do promotor"),
+        pd("vies_AU", "-1..1: prefere A/U (+) ou G/C (−)"),
+        pd("fecha", "−1 = sempre aberta; 2 = fecha com sinal γ positivo; 3 = fecha com sinal δ positivo (fechada não come nem deixa fugir energia)"),
+    ],
     &[pd("amplificacao", "multiplica a dobra da junta pelos sinais"), pd("canal", "0 = só α, 1 = só β, 2 = ambos")],
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
@@ -211,12 +215,17 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
     };
     match t {
         0 => format!(
-            "boca [disco com abertura escura]: come monómeros ativados, força ×{:.2}, {}",
+            "boca [disco com abertura escura]: come monómeros ativados, força ×{:.2}, {}, {}",
             v("forca") * g,
             match v("vies_AU") {
                 x if x > 0.05 => format!("prefere A/U ({x:+.2})"),
                 x if x < -0.05 => format!("prefere G/C ({x:+.2})"),
                 _ => "sem preferência extra".into(),
+            },
+            match v("fecha") {
+                c if c < 0.0 => "sempre aberta",
+                c if c < 2.5 => "fecha com sinal γ positivo",
+                _ => "fecha com sinal δ positivo",
             }
         ),
         1 => format!(

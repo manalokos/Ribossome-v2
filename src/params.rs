@@ -344,7 +344,20 @@ gpu_struct! {
         /// Passos da média do avanço que swim_gain amplifica (a "memória" do
         /// ganho). O v3 perdia 5% da velocidade por passo: ~20 passos.
         pub swim_memory: f32,
-        pub _pad_g3: u32,
+        /// FUGA PELA ABSORÇÃO: a manutenção de um agente é multiplicada por
+        /// leak_base + mouth_leak × (absorção aberta do corpo, em bocas
+        /// padrão). O que deixa entrar também deixa sair: uma boca aberta
+        /// soma mouth_leak; um corpo sem boca paga só leak_base.
+        pub mouth_leak: f32,
+        pub leak_base: f32,
+        /// Absorção dos resíduos SEM boca (× a catálise do aminoácido; uma
+        /// boca vale 20 a 80×). 0 = só as bocas comem.
+        pub skin_uptake: f32,
+        /// Quanto a mortalidade base segue o ritmo de vida do agente
+        /// (metabolismo × fuga): 1 = quem gasta devagar envelhece devagar
+        /// (cistos, esporos); 0 = a mortalidade não depende do ritmo.
+        pub death_metab: f32,
+        pub _pad_h0: u32,
     }
 }
 
@@ -516,7 +529,11 @@ impl Default for SimParams {
             joint_load: 1.0,
             swim_grip: 30.0,
             swim_memory: 1.0,
-            _pad_g3: 0,
+            mouth_leak: 0.3,
+            leak_base: 0.1,
+            skin_uptake: 1.0,
+            death_metab: 1.0,
+            _pad_h0: 0,
         }
     }
 }

@@ -596,6 +596,12 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.checkbox(&mut hunger, "regulação pela carga energética (cheio não come)");
     p.hunger_regulation = hunger as u32;
     ui.add(egui::Slider::new(&mut p.maintenance_cost, 0.0..=0.01).text("manutenção por resíduo"));
+    ui.add(egui::Slider::new(&mut p.leak_base, 0.0..=1.0).text("fuga base (corpo sem boca) ×"))
+        .on_hover_text("a manutenção é multiplicada por isto + a fuga das bocas. 0,1 = um corpo sem boca paga um décimo; 1 com a fuga por boca a 0 = como era antes");
+    ui.add(egui::Slider::new(&mut p.mouth_leak, 0.0..=2.0).text("fuga por boca aberta ×"))
+        .on_hover_text("o que deixa entrar também deixa sair: cada boca padrão aberta soma isto ao multiplicador da manutenção (bocas mais fortes somam mais; uma boca fechada não soma). Com 0,3, um corpo de três bocas paga o mesmo que antes");
+    ui.add(egui::Slider::new(&mut p.skin_uptake, 0.0..=5.0).text("absorção sem boca ×"))
+        .on_hover_text("quanto os resíduos sem boca absorvem (× a catálise do aminoácido; uma boca vale 20 a 80×). 1 = um corpo de 30 resíduos sem boca come cerca de metade de uma boca fraca; 0 = só as bocas comem");
     ui.add(egui::Slider::new(&mut p.metabolic_q10, 1.0..=4.0).text("metabolismo: Q10"))
         .on_hover_text("quanto a química da vida acelera por cada 'escala' de temperatura (1 = não depende da temperatura). Multiplica manutenção, comer, quimiossíntese e emparelhamento; a luz não");
     ui.add(egui::Slider::new(&mut p.metabolic_span, 0.5..=12.0).text("metabolismo: escala (unidades de T por Q10)"));
@@ -612,6 +618,8 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.separator();
     ui.strong("Morte");
     ui.add(egui::Slider::new(&mut p.death_probability, 0.0..=0.2).text("mortalidade base"));
+    ui.add(egui::Slider::new(&mut p.death_metab, 0.0..=1.0).text("mortalidade segue o ritmo de vida"))
+        .on_hover_text("1 = a mortalidade base é multiplicada pelo ritmo do agente (metabolismo × fuga): dormência, bocas fechadas, corpos sem boca e água fria fazem viver mais (cistos, esporos). 0 = a mortalidade não depende do ritmo");
     ui.add(egui::Slider::new(&mut p.death_energy_cap, 0.0..=200.0).text("teto da proteção pela energia"))
         .on_hover_text("a mortalidade base é ÷ energia só até este valor (uma reserva protege, acumular mais não); 0 = sem teto (v3)");
     ui.add(egui::Slider::new(&mut p.denature_temp, 0.0..=12.0).text("temperatura de desnaturação"))

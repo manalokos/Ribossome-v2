@@ -67,7 +67,7 @@ fn main() {
         w.read_agents_blocking(&gpu).iter().filter(|a| a.alive != 0).map(|a| (a.id, (a.pos_x, a.pos_y))).collect()
     };
     // Velocidade média por passo, medida passo a passo.
-    let mut speed = |w: &mut World, steps: u32| -> Vec<f32> {
+    let speed = |w: &mut World, steps: u32| -> Vec<f32> {
         let mut out = Vec::new();
         let mut p0 = pos(w);
         for _ in 0..steps {

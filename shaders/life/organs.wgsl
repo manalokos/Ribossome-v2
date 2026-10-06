@@ -98,12 +98,33 @@ fn organ_upkeep(slot: u32, n: u32) -> f32 {
     return u;
 }
 
-// Multiplicador da catálise de um resíduo: SÓ a boca come (pedido do
-// Filipe: a energia dos monómeros ativados entra só por bocas); a força da
-// boca é a da variante × ganho (× a propensão catalítica do aminoácido).
+// Multiplicador da catálise de um resíduo (quanto absorve). Uma BOCA
+// multiplica a do seu aminoácido pela força da variante × ganho, e algumas
+// variantes FECHAM com um sinal interno positivo (γ ou δ): fechada não come
+// nem deixa fugir energia. Os resíduos sem boca absorvem devagar pela
+// "pele" (params.skin_uptake × a sua catálise): um corpo sem boca é uma
+// alga lenta e barata.
 fn organ_catalysis_mult(slot: u32, k: u32) -> f32 {
     let o = organ_get(slot, k);
-    return select(0.0, max(organ_var(o).p0, 0.0) * organ_gain(o), organ_type(o) == ORGAN_MOUTH);
+    var m = max(params.skin_uptake, 0.0);
+    if (organ_type(o) == ORGAN_MOUTH) {
+        let v = organ_var(o);
+        var open = 1.0;
+        if (v.p2 >= 0.0) { open = 1.0 - clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p2, 0.0, 3.0))], 0.0, 1.0); }
+        m = max(v.p0, 0.0) * organ_gain(o) * open;
+    }
+    return m;
+}
+
+// ABSORÇÃO ABERTA do corpo, em bocas padrão (cisteína × força 20 = 102):
+// a soma da catálise de cada resíduo × o seu multiplicador.
+const ABSORB_MOUTH_REF: f32 = 102.0;
+fn body_absorption(slot: u32, n: u32) -> f32 {
+    var sum = 0.0;
+    for (var k = 0u; k < n; k++) {
+        sum += aa_props[body_get(slot, k)].catalytic * organ_catalysis_mult(slot, k);
+    }
+    return sum / ABSORB_MOUTH_REF;
 }
 
 // Desvio da junta k pelos sinais (rad). TODAS as juntas respondem, cada
