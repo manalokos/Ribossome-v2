@@ -105,6 +105,20 @@ fn main() {
         let a0 = snap(&w);
         run(&mut w, steps);
         let a1 = snap(&w);
+        // Sinal γ das ventosas (a variante 2 emite γ enquanto agarra): maior
+        // valor ao longo do corpo, média por desenho.
+        let sig: Vec<f32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.signals_buf)).to_vec();
+        let words: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.genomes_buf)).to_vec();
+        let mut gamma = [(0.0f32, 0u32); 2];
+        for (slot, a) in w.read_agents_blocking(&gpu).iter().enumerate().filter(|(_, a)| a.alive != 0) {
+            let g: Vec<u8> = (0..a.gene_len as usize).map(|i| ((words[slot * 16 + i / 16] >> ((i % 16) * 2)) & 3) as u8).collect();
+            if let Some(&i) = by_genome.get(&g) {
+                let m = (0..a.body_len as usize).map(|k| sig[(slot * 64 + k) * 4 + 2]).fold(0.0f32, f32::max);
+                gamma[i].0 += m;
+                gamma[i].1 += 1;
+            }
+        }
+        println!("  sinal γ máximo no corpo (média): sem ventosa {:.3}, com ventosa {:.3}", gamma[0].0 / gamma[0].1.max(1) as f32, gamma[1].0 / gamma[1].1.max(1) as f32);
         let wpc = cfg.world_units_per_cell as f32;
         print!("{world_name}:");
         for (i, (name, _)) in designs.iter().enumerate() {

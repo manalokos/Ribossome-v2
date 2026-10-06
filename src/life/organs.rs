@@ -182,6 +182,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     &[
         pd("forca", "arrasto extra deste resíduo quando toca em entulho ou rocha (× intensidade): prende-o ao sítio"),
         pd("larga", "−1 = agarra sempre; 2 = larga com sinal γ positivo; 3 = larga com sinal δ positivo"),
+        pd("emite", "canal do sinal que emite enquanto está agarrada (2 = γ, 3 = δ; −1 = nenhum)"),
     ],
 ];
 
@@ -291,12 +292,17 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             }
         ),
         18 => format!(
-            "ventosa [disco com cruz]: prende este resíduo ao entulho ou à rocha em que toca (arrasto +{:.0}), {}",
+            "ventosa [disco com cruz]: prende este resíduo ao entulho ou à rocha em que toca (arrasto +{:.0}), {}, {}",
             v("forca") * g,
             match v("larga") {
                 c if c < 0.0 => "agarra sempre",
                 c if c < 2.5 => "larga com sinal γ positivo",
                 _ => "larga com sinal δ positivo",
+            },
+            match v("emite") {
+                c if c < 0.0 => "não emite sinal",
+                c if c < 2.5 => "emite γ enquanto agarra",
+                _ => "emite δ enquanto agarra",
             }
         ),
         7 => "armazenamento [disco com anéis]: DESATIVADO (já não se forma; a capacidade de energia vem do volume dos aminoácidos do corpo)".to_string(),

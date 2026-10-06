@@ -20,6 +20,8 @@ const CONTACT_EMIT_RADIUS: f32 = 10.0;
 const CONTACT_EMIT: f32 = 1.0;
 // Sinal (canal δ) de uma protease que está a atacar.
 const PROTEASE_SIGNAL: f32 = 1.0;
+// Sinal de uma ventosa agarrada ao terreno (× quanto agarra, 0..1).
+const HOLDFAST_SIGNAL: f32 = 1.0;
 // Dinâmica do v3 (modo 0 dos sinais).
 const V3_SIGNAL_DECAY: f32 = 0.997;
 const V3_SIGNAL_UPDATE: f32 = 0.75;
@@ -475,6 +477,21 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 // no passo anterior): emite no canal δ. O corpo "sabe" que
                 // está a atacar e pode reagir (com um relé: parar, rodar...).
                 if (biting) { emit[k].w += PROTEASE_SIGNAL; }
+            }
+            case ORGAN_HOLDFAST: {
+                // VENTOSA AGARRADA: emite no canal da variante (p2: γ ou δ)
+                // em proporção de quanto está a agarrar (terreno ao alcance
+                // × não largada). O corpo "sente" que tocou no chão e pode
+                // reagir (com um relé: parar de nadar, fechar a boca...).
+                if (ov.p2 >= 0.0) {
+                    let rl = body_pos[base + k];
+                    let cr = cos(a.rot);
+                    let sr = sin(a.rot);
+                    let rw = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * rl.x - sr * rl.y, sr * rl.x + cr * rl.y);
+                    var grip = 1.0;
+                    if (ov.p1 >= 0.0) { grip = 1.0 - clamp(s[u32(clamp(ov.p1, 0.0, 3.0))], 0.0, 1.0); }
+                    emit[k][u32(clamp(ov.p2, 0.0, 3.0))] += HOLDFAST_SIGNAL * organ_gain(o) * grip * clamp(grains_at(rw), 0.0, 1.0);
+                }
             }
             case ORGAN_AGE_BIAS: {
                 // BIAS DE IDADE: p0 canal, p1 valor, p2 meia-vida (passos).
