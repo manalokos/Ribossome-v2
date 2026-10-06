@@ -61,8 +61,8 @@ fn channel_color(ch: u32) -> vec3<f32> {
 // MONÓMEROS COMO PONTOS (de perto). A simulação só sabe quantos monómeros
 // há em cada célula; para o desenho, cada um ganha uma posição própria
 // dentro da célula (um hash da célula, do canal, do estado e do seu índice:
-// fica no mesmo sítio enquanto lá estiver) e desenha-se como um disco suave
-// de raio view.coc_radius (o círculo de confusão). A soma dos discos é uma
+// fica no mesmo sítio enquanto lá estiver) e desenha-se como uma mancha gaussiana
+// de raio view.coc_radius (o círculo de confusão). A soma das manchas é uma
 // DENSIDADE em monómeros por célula, que entra na mesma paleta das contagens:
 // com o raio grande dá a névoa de sempre, sem quadrados; com o raio pequeno
 // veem-se as moléculas.
@@ -71,8 +71,10 @@ fn channel_color(ch: u32) -> vec3<f32> {
 const DOTS_PER_KIND: u32 = 10u;
 // Tamanho de um píxel (em células) abaixo do qual se desenham pontos; entre
 // os dois valores faz-se a transição para a cor por célula.
-// Densidade (monómeros por célula) no centro de um disco isolado.
-const DOT_PEAK: f32 = 3.0;
+// Densidade (monómeros por célula) no centro de um ponto isolado.
+const DOT_PEAK: f32 = 2.0;
+// O raio do círculo de confusão em desvios-padrão da gaussiana.
+const DOT_SIGMAS: f32 = 2.5;
 const DOTS_PIXEL_FULL: f32 = 0.25;
 const DOTS_PIXEL_NONE: f32 = 0.6;
 
@@ -100,10 +102,15 @@ fn soup_at(pc: vec2<f32>, radius: f32) -> Soup {
     s.act = vec4<f32>(0.0);
     s.spent = vec4<f32>(0.0);
     let r = clamp(radius, 0.05, 1.0);
-    // Núcleo (1 − d²/r²)² com integral 1: 3/(π r²). Com o raio pequeno isso
-    // daria um pico enorme e o disco saturava (ficava um confete de borda
-    // dura): limita-se o pico a DOT_PEAK, e o disco esbate-se até à borda.
-    let norm = min(3.0 / (3.14159265 * r * r), DOT_PEAK);
+    // Núcleo GAUSSIANO, σ = r / DOT_SIGMAS, cortado em r e descido para
+    // acabar em zero aí (sem degrau na borda). O integral sobre o disco é
+    // 0,8611·r², por isso 1,1613/r² dá integral 1 (um monómero). Com o raio
+    // pequeno isso daria um pico enorme e o ponto saturava (um confete de
+    // borda dura): limita-se o pico a DOT_PEAK, abaixo da saturação da
+    // paleta, para se ver o perfil da gaussiana.
+    let norm = min(1.1613 / (r * r), DOT_PEAK);
+    let inv_2s2 = 0.5 * DOT_SIGMAS * DOT_SIGMAS / (r * r);
+    let floor_g = exp(-0.5 * DOT_SIGMAS * DOT_SIGMAS);
     let lo = vec2<i32>(floor(pc - vec2<f32>(r)));
     let hi = vec2<i32>(floor(pc + vec2<f32>(r)));
     for (var cy = lo.y; cy <= hi.y; cy++) {
@@ -119,10 +126,9 @@ fn soup_at(pc: vec2<f32>, radius: f32) -> Soup {
                         var sum = 0.0;
                         for (var k = 0u; k < shown; k++) {
                             let d = pc - (origin + dot_pos(cell, ch * 2u + st, k));
-                            let q = 1.0 - dot(d, d) / (r * r);
-                            sum += max(q, 0.0) * max(q, 0.0);
+                            sum += max(exp(-dot(d, d) * inv_2s2) - floor_g, 0.0);
                         }
-                        let dens = sum * norm * f32(count) / f32(max(shown, 1u));
+                        let dens = sum / (1.0 - floor_g) * norm * f32(count) / f32(max(shown, 1u));
                         if (st == 0u) { s.act[ch] += dens; } else { s.spent[ch] += dens; }
                     }
                 }
