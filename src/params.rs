@@ -357,7 +357,11 @@ gpu_struct! {
         /// (metabolismo × fuga): 1 = quem gasta devagar envelhece devagar
         /// (cistos, esporos); 0 = a mortalidade não depende do ritmo.
         pub death_metab: f32,
-        pub _pad_h0: u32,
+        /// RECARGA (> 0 = ligada): a energia que TRANSBORDA de um produtor
+        /// (fotossistema, quimiossíntese) carrega primeiro um monómero gasto
+        /// para a sua própria cópia do genoma, em vez de reativar um ao
+        /// acaso no meio. 0 = o transbordo vai todo para o meio.
+        pub salvage: f32,
     }
 }
 
@@ -533,7 +537,7 @@ impl Default for SimParams {
             leak_base: 0.1,
             skin_uptake: 0.2,
             death_metab: 0.25,
-            _pad_h0: 0,
+            salvage: 0.0,
         }
     }
 }

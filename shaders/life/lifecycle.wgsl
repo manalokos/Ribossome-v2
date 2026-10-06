@@ -303,6 +303,21 @@ fn die_release(slot: u32, a_in: Agent, budget_in: u32) {
 // Não há órgão de armazenamento: viver de reservas pede um corpo maior. O
 // RNA nu guarda 1.
 const CAP_VOLUME_REF: f32 = 141.26;
+// RECARGA: um produtor (luz, fumarolas) com energia a transbordar usa-a
+// primeiro para a SUA cópia: carrega um monómero GASTO da célula, o que o
+// genoma pede a seguir, e prende-o como complemento (uma ativação custa
+// food_power, e é isso que o transbordo paga). É construir com
+// matéria-prima: sem isto o excesso só reativava monómeros ao acaso no meio
+// e o produtor morria antes de os voltar a apanhar. Só gasta o que sobra:
+// nunca mexe na reserva. Devolve true se usou o transbordo na cópia.
+fn recharge_copy(slot: u32, cell: u32, pair_count: u32, gene_len: u32) -> bool {
+    var done = false;
+    if (params.salvage > 0.0 && pair_count < gene_len) {
+        done = chem_take_state_one(cell * 4u + (genome_get(slot, pair_count) ^ 1u), true);
+    }
+    return done;
+}
+
 fn energy_capacity(slot: u32, a: Agent) -> f32 {
     var vol = 0.0;
     for (var k = 0u; k < a.body_len; k++) { vol += aa_props[body_get(slot, k)].volume; }
@@ -529,9 +544,13 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if (to_food > 0.0) {
                     let q = rng_f4(a.id, params.epoch, S_CHEMO + k);
                     if (q.x < clamp(to_food / max(params.food_power, 1e-3), 0.0, 1.0)) {
-                        let ch0 = min(u32(q.y * 4.0), 3u);
-                        for (var t = 0u; t < 4u; t++) {
-                            if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
+                        if (recharge_copy(slot, cell, a.pair_count, a.gene_len)) {
+                            a.pair_count += 1u;
+                        } else {
+                            let ch0 = min(u32(q.y * 4.0), 3u);
+                            for (var t = 0u; t < 4u; t++) {
+                                if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
+                            }
                         }
                     }
                 }
@@ -575,9 +594,13 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                 // luz que daria essa energia no modo produtor (senão
                 // reciclar + comer criava energia do nada).
                 if (q.x < clamp(to_food / max(params.food_power, 1e-3), 0.0, 1.0)) {
-                    let ch0 = min(u32(q.y * 4.0), 3u);
-                    for (var t = 0u; t < 4u; t++) {
-                        if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
+                    if (recharge_copy(slot, cell, a.pair_count, a.gene_len)) {
+                        a.pair_count += 1u;
+                    } else {
+                        let ch0 = min(u32(q.y * 4.0), 3u);
+                        for (var t = 0u; t < 4u; t++) {
+                            if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
+                        }
                     }
                 }
             }
