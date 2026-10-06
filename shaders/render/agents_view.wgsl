@@ -334,7 +334,8 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
         vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
         vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
     let c = corners[vi];
-    let r_tube = max(1.2, 1.0 / view.zoom);
+    // Nunca menos de 1,5 píxeis: vê-se a qualquer zoom.
+    let r_tube = max(2.0, 1.5 / view.zoom);
     let seg = p1 - p0;
     let l = length(seg);
     let e = select(vec2<f32>(1.0, 0.0), seg / l, l > 1e-4);
@@ -355,11 +356,24 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
 
 // PARENTESCO (vista 4): bola por cima do agente, do mesmo tamanho no ecrã
 // para todos. Verde = genoma próximo do selecionado, amarelo, vermelho = distante.
+const MARK_BONDED: u32 = 255u;
 fn kin_vertex(vi: u32, slot: u32, a: Agent) -> AgentVsOut {
     var o: AgentVsOut;
     o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
     // MARCAR ÓRGÃO: bola ciano por cima de quem tem o tipo escolhido (a mesma
     // bola do parentesco; tem prioridade sobre ele).
+    if (view.mark_organ == MARK_BONDED) {
+        // MARCAR LIGADOS: bola dourada em quem tem uma ligação viva.
+        if (a.alive == 0u) { return o; }
+        var tied = false;
+        for (var i = 0u; i < BONDS_V; i++) {
+            let b = bonds_view[slot * BOND_STRIDE_V + i];
+            if (b.x != 0xFFFFFFFFu && agents_view[b.x].alive != 0u && agents_view[b.x].id == b.y) { tied = true; }
+        }
+        if (!tied) { return o; }
+        let cb = vec2<f32>(a.pos_x, a.pos_y);
+        return capsule_vertex(vi, cb, cb, KIN_DOT_PX / view.zoom, vec3<f32>(1.0, 0.82, 0.2));
+    }
     if (view.mark_organ != 0u) {
         if (a.alive == 0u) { return o; }
         var has = false;

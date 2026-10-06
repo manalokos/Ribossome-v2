@@ -32,7 +32,8 @@ fn main() {
     let mut linked = 0u32;
     for (slot, a) in agents.iter().enumerate().filter(|(_, a)| a.alive != 0) {
         let mut d = 0;
-        for i in 0..BOND_STRIDE as usize {
+        // Só as 4 ligações: a 5.ª entrada do slot é a proposta do passo.
+        for i in 0..4 {
             let o = (slot * BOND_STRIDE as usize + i) * 4;
             let b = [raw[o], raw[o + 1], raw[o + 2], raw[o + 3]];
             if b[0] == u32::MAX || agents[b[0] as usize].alive == 0 || agents[b[0] as usize].id != b[1] {

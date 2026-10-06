@@ -14,7 +14,13 @@ use crate::render::capture::Capture;
 use crate::world::World;
 
 /// Bytes lidos por agente: Agent (64) + genoma (64) + corpo (64) + órgãos (128).
-const READ_BYTES: u64 = 320;
+/// agente 64 + genoma 64 + corpo 64 + órgãos 128 + posições 512 + ligações 64.
+const READ_BYTES: u64 = 896;
+/// Candidatos (os de centro mais próximo) a que o clique mede a distância
+/// resíduo a resíduo.
+const PICK_CANDIDATES: usize = 48;
+/// Folga à volta do corpo na imagem (órgãos e espessura), em unidades do mundo.
+const PREVIEW_MARGIN: f32 = 16.0;
 const PREVIEW_SIZE: u32 = 256;
 
 #[derive(Clone, Copy)]
@@ -29,6 +35,28 @@ pub struct InspectData {
     pub body: Vec<u8>,
     /// Código de órgão por resíduo (0 = nenhum; (tipo + 1) | (parâmetro << 5) | (intensidade << 8)).
     pub organs: Vec<u16>,
+    /// Posição de cada resíduo no referencial do corpo.
+    pub body_pos: Vec<[f32; 2]>,
+    /// Ids dos agentes a que está ligado por âncoras (e se é de nascimento).
+    pub bonds: Vec<(u32, bool)>,
+}
+
+impl InspectData {
+    /// Caixa do corpo no mundo: (centro, maior lado).
+    fn bounds(&self) -> ([f32; 2], f32) {
+        let a = &self.agent;
+        let (s, c) = a.rot.sin_cos();
+        let (mut lo, mut hi) = ([a.pos_x, a.pos_y], [a.pos_x, a.pos_y]);
+        for (i, p) in self.body_pos.iter().enumerate() {
+            let w = [a.pos_x + c * p[0] - s * p[1], a.pos_y + s * p[0] + c * p[1]];
+            if i == 0 {
+                (lo, hi) = (w, w);
+            }
+            lo = [lo[0].min(w[0]), lo[1].min(w[1])];
+            hi = [hi[0].max(w[0]), hi[1].max(w[1])];
+        }
+        ([(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5], (hi[0] - lo[0]).max(hi[1] - lo[1]))
+    }
 }
 
 enum Readback {
@@ -80,15 +108,39 @@ impl Inspector {
     }
 
     /// Escolhe SEMPRE o organismo vivo mais próximo do ponto, a qualquer
-    /// distância (leitura síncrona: só ao clicar). A distância é à borda do
-    /// corpo (centro − raio), para um corpo grande ganhar a um pequeno ao lado.
+    /// distância (leitura síncrona: só ao clicar). A distância é ao RESÍDUO
+    /// mais próximo (clicar na cauda de um corpo comprido apanha-o a ele e
+    /// não a um pequeno ao lado), medida nos PICK_CANDIDATES de centro mais
+    /// próximo.
     pub fn pick(&mut self, gpu: &Gpu, world: &World, p: [f32; 2]) {
         let agents = world.read_agents_blocking(gpu);
-        let best = agents
+        let mut near: Vec<(usize, f32)> = agents
             .iter()
             .enumerate()
             .filter(|(_, a)| a.alive != 0)
-            .map(|(s, a)| (s, (((a.pos_x - p[0]).powi(2) + (a.pos_y - p[1]).powi(2)).sqrt() - a.radius).max(0.0), a))
+            .map(|(s, a)| (s, (a.pos_x - p[0]).powi(2) + (a.pos_y - p[1]).powi(2)))
+            .collect();
+        let n = near.len().min(PICK_CANDIDATES);
+        if n > 0 && n < near.len() {
+            near.select_nth_unstable_by(n - 1, |x, y| x.1.total_cmp(&y.1));
+        }
+        near.truncate(n);
+        let ranges: Vec<(u64, u64)> = near.iter().map(|&(s, _)| (s as u64 * 512, 512)).collect();
+        let raw = gpu.read_ranges_blocking(&world.body_pos_buf, &ranges);
+        let pos: &[[f32; 2]] = bytemuck::cast_slice(&raw);
+        let best = near
+            .iter()
+            .enumerate()
+            .map(|(i, &(s, d2))| {
+                let a = &agents[s];
+                let (sn, cs) = a.rot.sin_cos();
+                // Ponto do clique no referencial do corpo.
+                let (dx, dy) = (p[0] - a.pos_x, p[1] - a.pos_y);
+                let q = [cs * dx + sn * dy, -sn * dx + cs * dy];
+                let body = &pos[i * 64..i * 64 + (a.body_len as usize).min(64)];
+                let d = body.iter().map(|r| (r[0] - q[0]).powi(2) + (r[1] - q[1]).powi(2)).fold(d2, f32::min);
+                (s, d, a)
+            })
             .min_by(|x, y| x.1.total_cmp(&y.1));
         self.selected = best.map(|(s, _, a)| Selected { slot: s as u32, id: a.id });
         self.data = None;
@@ -113,15 +165,19 @@ impl Inspector {
         enc.copy_buffer_to_buffer(&world.genomes_buf, s * 64, &self.staging, 64, 64);
         enc.copy_buffer_to_buffer(&world.bodies_buf, s * 64, &self.staging, 128, 64);
         enc.copy_buffer_to_buffer(&world.organs_buf, s * 128, &self.staging, 192, 128);
+        enc.copy_buffer_to_buffer(&world.body_pos_buf, s * 512, &self.staging, 320, 512);
+        // As 4 ligações (a 5.ª entrada do slot é a proposta do passo).
+        enc.copy_buffer_to_buffer(&world.bonds_buf, s * crate::world::BOND_STRIDE * 16, &self.staging, 832, 64);
         self.state = Readback::Encoded;
     }
 
     /// Imagem ampliada do selecionado, sozinho (câmara no centro de massa).
     pub fn encode_preview(&self, queue: &wgpu::Queue, enc: &mut wgpu::CommandEncoder) {
         let (Some(sel), Some(d)) = (self.selected, &self.data) else { return };
-        let a = &d.agent;
-        let r = a.radius.max(12.0);
-        let cam = Camera { center: [a.pos_x, a.pos_y], zoom: PREVIEW_SIZE as f32 / (r * 3.2) };
+        // Enquadra o corpo TODO como está agora (o raio do agente é o de
+        // giração ao nascer: cortava as pontas dos corpos compridos).
+        let (center, side) = d.bounds();
+        let cam = Camera { center, zoom: PREVIEW_SIZE as f32 / (side + 2.0 * PREVIEW_MARGIN).max(40.0) };
         self.preview.view.focus.set(sel.slot);
         self.preview.encode(queue, enc, &cam, 0, 0.2);
     }
@@ -161,7 +217,11 @@ impl Inspector {
         let body = (0..agent.body_len as usize).map(|i| ((bw[i / 4] >> ((i % 4) * 8)) & 0xFF) as u8).collect();
         let ow: &[u32] = bytemuck::cast_slice(&bytes[192..320]);
         let organs = (0..agent.body_len as usize).map(|i| ((ow[i / 2] >> ((i % 2) * 16)) & 0xFFFF) as u16).collect();
-        self.data = Some(InspectData { agent, genome, body, organs });
+        let pw: &[[f32; 2]] = bytemuck::cast_slice(&bytes[320..832]);
+        let body_pos = pw[..(agent.body_len as usize).min(64)].to_vec();
+        let lw: &[[u32; 4]] = bytemuck::cast_slice(&bytes[832..896]);
+        let bonds = lw.iter().filter(|b| b[0] != u32::MAX).map(|b| (b[1], b[2] >> 16 != 0)).collect();
+        self.data = Some(InspectData { agent, genome, body, organs, body_pos, bonds });
     }
 }
 
@@ -230,6 +290,10 @@ pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life
                 format!("{}  (pai {})", a.id, if a.parent == u32::MAX { "—".into() } else { a.parent.to_string() }),
             );
             row("geração", a.generation.to_string());
+            if !d.bonds.is_empty() {
+                let list: Vec<String> = d.bonds.iter().map(|(id, birth)| format!("{id}{}", if *birth { " (nascimento)" } else { " (contacto)" })).collect();
+                row("ligado a", list.join(", "));
+            }
             row("idade", format!("{} passos", a.age));
             // Capacidade: o volume dos aminoácidos do corpo (em média 1 por resíduo).
             let cap = (d.body.iter().map(|&aa| amino.get(aa as usize).map_or(0.0, |r| r.volume)).sum::<f32>() / CAP_VOLUME_REF).max(1.0);

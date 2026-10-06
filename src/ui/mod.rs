@@ -78,6 +78,9 @@ pub enum SceneAction {
     NewWorld,
 }
 
+/// Valor de `mark_organ` que marca os agentes ligados (MARK_BONDED no shader).
+const MARK_BONDED: u32 = 255;
+
 /// Separadores do painel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -397,14 +400,21 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
         ui.label("clica num organismo: bola verde = genoma próximo, amarela = meio, vermelha = distante (8-meros partilhados; o filho conta como parente)");
     }
     let names = crate::life::organs::ORGAN_NAMES;
-    let current = if st.mark_organ == 0 { "nenhum" } else { names[(st.mark_organ as usize - 1).min(names.len() - 1)] };
+    let current = match st.mark_organ {
+        0 => "nenhum",
+        MARK_BONDED => "ligados por âncora",
+        m => names[(m as usize - 1).min(names.len() - 1)],
+    };
     egui::ComboBox::from_label("marcar quem tem o órgão").selected_text(current).show_ui(ui, |ui| {
         ui.selectable_value(&mut st.mark_organ, 0, "nenhum");
+        ui.selectable_value(&mut st.mark_organ, MARK_BONDED, "ligados por âncora");
         for (i, n) in names.iter().enumerate() {
             ui.selectable_value(&mut st.mark_organ, i as u32 + 1, *n);
         }
     });
-    if st.mark_organ != 0 {
+    if st.mark_organ == MARK_BONDED {
+        ui.small("bola dourada = agente com uma ligação viva a outro. De perto, a ligação é um fio: azul-claro = de nascimento (pai e filho), dourado = feita ao tocar");
+    } else if st.mark_organ != 0 {
         ui.small("bola ciano = agente com este órgão (do mesmo tamanho no ecrã a qualquer zoom)");
     }
     ui.separator();

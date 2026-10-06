@@ -52,6 +52,33 @@ impl Gpu {
     }
 
     /// Lê um buffer inteiro de forma síncrona (só para testes e depuração).
+    /// Lê vários troços (offset, tamanho) de um buffer, seguidos, de forma
+    /// síncrona (só para ações pontuais, como um clique).
+    pub fn read_ranges_blocking(&self, src: &wgpu::Buffer, ranges: &[(u64, u64)]) -> Vec<u8> {
+        let size: u64 = ranges.iter().map(|r| r.1).sum();
+        if size == 0 {
+            return Vec::new();
+        }
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback ranges"),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        let mut at = 0;
+        for &(off, len) in ranges {
+            enc.copy_buffer_to_buffer(src, off, &staging, at, len);
+            at += len;
+        }
+        self.queue.submit([enc.finish()]);
+        staging.map_async(wgpu::MapMode::Read, .., |r| r.expect("map_async falhou"));
+        self.wait_idle();
+        let data = staging.get_mapped_range(..).expect("get_mapped_range").to_vec();
+        staging.unmap();
+        data
+    }
+
     pub fn read_buffer_blocking(&self, src: &wgpu::Buffer) -> Vec<u8> {
         let size = src.size();
         let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
