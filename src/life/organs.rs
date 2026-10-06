@@ -35,7 +35,7 @@
 
 use super::amino::{STOP, codon};
 
-pub const ORGAN_TYPES: usize = 18;
+pub const ORGAN_TYPES: usize = 19;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -57,6 +57,7 @@ pub enum Organ {
     Proofreading = 15,
     Dormancy = 16,
     AgeBias = 17,
+    Holdfast = 18,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -80,10 +81,11 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "revisão (menos mutações)",
     "dormência (metabolismo lento)",
     "bias de idade",
+    "ventosa (fixa-se ao terreno)",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -176,6 +178,10 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("canal", "0 = α, 1 = β"),
         pd("valor", "sinal emitido ao nascer (× intensidade)"),
         pd("meia_vida", "passos de vida até o sinal cair para metade"),
+    ],
+    &[
+        pd("forca", "arrasto extra deste resíduo quando toca em entulho ou rocha (× intensidade): prende-o ao sítio"),
+        pd("larga", "−1 = agarra sempre; 2 = larga com sinal γ positivo; 3 = larga com sinal δ positivo"),
     ],
 ];
 
@@ -282,6 +288,15 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
                 c if c < 0.0 => "sempre ativa".to_string(),
                 c if c < 2.5 => "só com sinal γ positivo".to_string(),
                 _ => "só com sinal δ positivo".to_string(),
+            }
+        ),
+        18 => format!(
+            "ventosa [disco com cruz]: prende este resíduo ao entulho ou à rocha em que toca (arrasto +{:.0}), {}",
+            v("forca") * g,
+            match v("larga") {
+                c if c < 0.0 => "agarra sempre",
+                c if c < 2.5 => "larga com sinal γ positivo",
+                _ => "larga com sinal δ positivo",
             }
         ),
         7 => "armazenamento [disco com anéis]: DESATIVADO (já não se forma; a capacidade de energia vem do volume dos aminoácidos do corpo)".to_string(),
@@ -412,6 +427,7 @@ pub fn wgsl() -> String {
         "PROOFREAD",
         "DORMANCY",
         "AGE_BIAS",
+        "HOLDFAST",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");

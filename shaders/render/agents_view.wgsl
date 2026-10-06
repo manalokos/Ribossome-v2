@@ -116,6 +116,7 @@ fn organ_extent(t: u32) -> f32 {
         case ORGAN_STORAGE: { return 1.9; }
         case ORGAN_PHOTOSYSTEM: { return 1.8; }
         case ORGAN_AGE_BIAS: { return 1.2; }
+        case ORGAN_HOLDFAST: { return 1.6; }
         case ORGAN_PROTEASE: { return 1.7; }
         case ORGAN_ANCHOR: { return 1.5; }
         case ORGAN_BIAS: { return 1.0; }
@@ -192,6 +193,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                     r_world *= BITE_ORGAN_GROW;
                 }
             }
+            if (organ == ORGAN_HOLDFAST) { col = vec3<f32>(0.85, 0.6, 0.3); }
             if (organ == ORGAN_AGE_BIAS) {
                 let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
                 let beta = organ_variants_view[ORGAN_AGE_BIAS * ORGAN_VARIANTS + p].p0 >= 0.5;
@@ -564,6 +566,12 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             let tooth = core + (0.95 - core) * max(0.0, 1.0 - abs(fract(ang / 1.0471976) - 0.5) * 4.0);
             if (d > tooth) { discard; }
             return vec4<f32>(select(in.color, mix(in.color, vec3<f32>(1.0), 0.8), d > core), 1.0);
+        }
+        case ORGAN_HOLDFAST: {
+            // Disco castanho com uma cruz escura (um pé assente no chão).
+            if (d > core) { discard; }
+            let cross = min(abs(u), abs(v)) < core * 0.2;
+            return vec4<f32>(select(in.color, in.color * 0.25, cross), 1.0);
         }
         case ORGAN_AGE_BIAS: {
             // Meio disco cheio (laranja = α, verde = β), meio só contorno:

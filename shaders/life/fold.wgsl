@@ -105,7 +105,7 @@ fn cur_at(c: RftCtx, k: u32) -> vec2<f32> {
 fn env_at(c: RftCtx, old: ptr<function, array<vec2<f32>, 64>>, k: u32) -> vec3<f32> {
     let r = 0.5 * (cur_at(c, k) + (*old)[k]);
     let rw = c.pos + vec2<f32>(c.cr * r.x - c.sr * r.y, c.sr * r.x + c.cr * r.y);
-    let drag = anchor_drag(rw);
+    let drag = anchor_drag(rw) + holdfast_drag(c.base / MAX_BODY, k, rw);
     var uf = vec2<f32>(0.0);
     if (params.fluid_enabled != 0u) {
         let w = water_at(rw, c.soft != 0u);
@@ -157,6 +157,25 @@ fn grains_at(pw: vec2<f32>) -> f32 {
         v[q] = f32(min(gamma_count(u32(c.y) * GRID_SIZE + u32(c.x)), 4u));
     }
     return mix(mix(v[0], v[1], f.x), mix(v[2], v[3], f.x), f.y);
+}
+
+// VENTOSA (adesina, pé de fixação): o resíduo com este órgão agarra-se ao
+// entulho ou à rocha em que toca. É arrasto contra o TERRENO (parado), como
+// o dos grãos, mas muito maior e só nesse resíduo: o corpo fica preso por
+// aí, pode ondular à volta e a corrente não o leva. Em água livre, longe do
+// terreno, não faz nada. Algumas variantes largam com um sinal interno.
+fn holdfast_drag(slot: u32, k: u32, world_pos: vec2<f32>) -> f32 {
+    let o = organ_get(slot, k);
+    var d = 0.0;
+    if (organ_type(o) == ORGAN_HOLDFAST) {
+        let v = organ_var(o);
+        var grip = 1.0;
+        if (v.p1 >= 0.0) { grip = 1.0 - clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p1, 0.0, 3.0))], 0.0, 1.0); }
+        // grains_at interpola as 4 células à volta: > 0 a menos de uma
+        // célula de um grão (dá para se agarrar à face de uma rocha).
+        d = max(v.p0, 0.0) * organ_gain(o) * grip * clamp(grains_at(world_pos), 0.0, 1.0);
+    }
+    return d;
 }
 
 fn anchor_drag(world_pos: vec2<f32>) -> f32 {

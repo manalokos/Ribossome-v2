@@ -465,11 +465,14 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let cr_e = cos(a.rot);
     let sr_e = sin(a.rot);
     var in_water = 0u;
+    // Maior força com que uma ventosa do corpo está agarrada ao terreno.
+    var held = 0.0;
     for (var k = 0u; k < a.body_len; k++) {
         let lp = body_pos[slot * MAX_BODY + k];
         let rw = p + vec2<f32>(cr_e * lp.x - sr_e * lp.y, sr_e * lp.x + cr_e * lp.y);
         let cell = world_to_cell(rw);
         if (gamma_count(cell) == 0u) { in_water += 1u; }
+        held = max(held, holdfast_drag(slot, k, rw));
         var avail = vec4<u32>(0u);
         for (var ch = 0u; ch < 4u; ch++) { avail[ch] = chem_act_count(cell, ch); }
         let tot = avail.x + avail.y + avail.z + avail.w;
@@ -615,7 +618,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         let free_frac = select(1.0, f32(in_water) / f32(max(a.body_len, 1u)), a.body_len > 0u);
         let nb = f32(max(a.body_len, 1u));
         let dens = body_mass(slot, a.body_len) / (nb * MASS_RESIDUE_REF);
-        let fall = params.sedimentation * sqrt(nb) * dens * free_frac;
+        // Uma ventosa agarrada segura o corpo contra a queda.
+        let fall = params.sedimentation * sqrt(nb) * dens * free_frac / (1.0 + HOLDFAST_VS_FALL * held);
         let ns = vec2<f32>(p.x, max(p.y - fall, 0.0));
         if (gamma_count(world_to_cell(ns)) < GAMMA_SOLID_THRESHOLD) {
             p = ns;
@@ -717,6 +721,8 @@ fn fluid_index_at_world(p: vec2<f32>) -> u32 {
 // O metabolismo nunca desce abaixo disto por dormência (um agente nunca
 // fica totalmente parado: continua a pagar e a poder acordar).
 const DORMANCY_FLOOR: f32 = 0.1;
+// Quanto a força de uma ventosa agarrada trava a queda do corpo.
+const HOLDFAST_VS_FALL: f32 = 0.05;
 
 // NASCIMENTO: quando o emparelhamento está completo, os complementos
 // capturados formam o filho = complemento reverso do genoma (v3). Mutações
