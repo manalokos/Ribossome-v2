@@ -57,6 +57,8 @@ pub struct WorldView {
     pub mark_organ: std::cell::Cell<u32>,
     /// Raio do círculo de confusão dos monómeros (células; 0 = quadrados).
     pub coc_radius: std::cell::Cell<f32>,
+    /// Canto do viewport no alvo (píxeis); 0,0 quando ocupa o alvo todo.
+    pub origin: std::cell::Cell<[f32; 2]>,
 }
 
 impl WorldView {
@@ -282,6 +284,7 @@ impl WorldView {
             uv_depth: std::cell::Cell::new(11.0),
             daylight: std::cell::Cell::new(1.0),
             mark_organ: std::cell::Cell::new(0),
+            origin: std::cell::Cell::new([0.0; 2]),
             coc_radius: std::cell::Cell::new(0.35),
         }
     }
@@ -309,8 +312,8 @@ impl WorldView {
             daylight: self.daylight.get(),
             mark_organ: self.mark_organ.get(),
             coc_radius: self.coc_radius.get(),
-            _pad_v0: 0,
-            _pad_v1: 0,
+            origin_x: self.origin.get()[0],
+            origin_y: self.origin.get()[1],
             _pad_v2: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));

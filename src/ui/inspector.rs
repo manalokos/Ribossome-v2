@@ -261,12 +261,17 @@ fn colored_seq(ui: &mut egui::Ui, items: impl Iterator<Item = (char, egui::Color
 /// Volume médio dos 20 aminoácidos (igual a CAP_VOLUME_REF no shader).
 const CAP_VOLUME_REF: f32 = 141.26;
 
-pub fn draw(ctx: &egui::Context, ins: &mut Inspector, organ_table: &[crate::life::table::OrganRow], amino: &[crate::life::table::AminoRow]) {
-    if !ins.open {
-        return;
-    }
-    let mut open = ins.open;
-    egui::Window::new("Inspetor").open(&mut open).default_pos([980.0, 12.0]).default_width(360.0).show(ctx, |ui| {
+/// O inspetor, na barra fixa da direita (só existe com um organismo escolhido).
+pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life::table::OrganRow], amino: &[crate::life::table::AminoRow]) {
+    let mut open = true;
+    ui.horizontal(|ui| {
+        ui.heading("Inspetor");
+        if ins.data.is_some() && ui.button("largar").on_hover_text("deixa de seguir este organismo").clicked() {
+            open = false;
+        }
+    });
+    ui.separator();
+    egui::ScrollArea::vertical().show(ui, |ui| {
         if ins.dead {
             ui.colored_label(egui::Color32::LIGHT_RED, "o organismo selecionado morreu");
         }

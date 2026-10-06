@@ -26,7 +26,13 @@ struct Running {
     egui_renderer: egui_wgpu::Renderer,
     profiler: Profiler,
     ui: UiState,
+    /// Posição do rato em píxeis, RELATIVA ao canto do viewport da simulação.
     cursor: [f32; 2],
+    /// Onde a simulação é desenhada na janela: x, y, lado (píxeis). É o
+    /// maior quadrado que cabe entre as barras da interface.
+    viewport: [f32; 3],
+    /// Os gráficos tapam a simulação (não se desenha).
+    covered: bool,
     dragging: bool,
     /// Botão esquerdo premido com o pincel ligado.
     painting: bool,
@@ -275,6 +281,8 @@ impl Running {
             profiler: Profiler::from_env(),
             ui: UiState::new(baseline),
             cursor: [0.0; 2],
+            viewport: [0.0; 3],
+            covered: false,
             dragging: false,
             painting: false,
             press_pos: [0.0; 2],
@@ -719,8 +727,10 @@ impl Running {
         self.finish_save(true);
     }
 
+    /// Tamanho, em píxeis, da área onde a simulação é desenhada (o viewport
+    /// quadrado): é o "ecrã" para a câmara.
     fn screen(&self) -> [f32; 2] {
-        [self.surface_cfg.width as f32, self.surface_cfg.height as f32]
+        [self.viewport[2].max(1.0), self.viewport[2].max(1.0)]
     }
 
     fn reconfigure(&mut self) {
@@ -905,15 +915,33 @@ impl Running {
             }
         };
         let target = tex.texture.create_view(&Default::default());
-        let screen = self.screen();
 
         // UI primeiro (pode mudar params e vista neste frame).
         let raw = self.egui_state.take_egui_input(&self.window);
         let ctx = self.egui_state.egui_ctx().clone();
+        let mut free = None;
         let mut out = ctx.run_ui(raw, |root| {
-            ui::draw(root.ctx(), &mut self.ui, &mut self.world, &mut self.profiler);
-            ui::inspector::draw(root.ctx(), &mut self.inspector, &self.world.organ_table, &self.world.amino);
+            free = ui::draw(root, &mut self.ui, &mut self.world, &mut self.profiler, &mut self.inspector);
         });
+        // Viewport da simulação: o maior quadrado centrado no espaço livre.
+        self.covered = free.is_none();
+        if let Some(r) = free {
+            let ppp = out.pixels_per_point;
+            let side = (r.width().min(r.height()) * ppp).floor().max(64.0);
+            let old = self.viewport;
+            self.viewport = [((r.center().x * ppp) - side * 0.5).round().max(0.0), ((r.center().y * ppp) - side * 0.5).round().max(0.0), side];
+            // O rato é guardado relativo ao viewport: acompanha-o se mudar.
+            self.cursor[0] += old[0] - self.viewport[0];
+            self.cursor[1] += old[1] - self.viewport[1];
+            if old[2] <= 0.0 {
+                // Primeiro frame: o mundo inteiro no quadrado.
+                self.cam = Camera::fit(&self.world.cfg, [side, side]);
+            } else if old[2] != side {
+                // O mesmo pedaço de mundo continua à vista quando a área muda.
+                self.cam.zoom *= side / old[2];
+            }
+        }
+        let screen = self.screen();
         self.egui_state.handle_platform_output(&self.window, out.platform_output);
         let jobs = ctx.tessellate(out.shapes, out.pixels_per_point);
         let sd = egui_wgpu::ScreenDescriptor {
@@ -929,6 +957,7 @@ impl Running {
         self.view.daylight.set(self.world.params.daylight(self.world.params.epoch));
         self.view.mark_organ.set(self.ui.mark_organ);
         self.view.coc_radius.set(self.ui.coc_radius);
+        self.view.origin.set([self.viewport[0], self.viewport[1]]);
         self.view.update(
             &self.gpu.queue,
             &self.cam,
@@ -960,6 +989,7 @@ impl Running {
         let want_stats = epoch_now >= self.ui.history.next_epoch;
 
         let n_steps = self.adaptive_steps();
+        let (vp, covered) = (self.viewport, self.covered);
         let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, .. } = self;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {
@@ -1007,7 +1037,14 @@ impl Running {
                     multiview_mask: None,
                 })
                 .forget_lifetime();
-            view.draw(&mut pass);
+            // A simulação só no seu quadrado (o egui repõe o viewport inteiro).
+            let (sw, sh) = (sd.size_in_pixels[0] as f32, sd.size_in_pixels[1] as f32);
+            let side = vp[2].min(sw - vp[0]).min(sh - vp[1]);
+            if !covered && side >= 1.0 {
+                pass.set_viewport(vp[0], vp[1], side, side, 0.0, 1.0);
+                pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, side as u32, side as u32);
+                view.draw(&mut pass);
+            }
             egui_renderer.render(&mut pass, &jobs, &sd);
         });
         frame.finish();
@@ -1044,7 +1081,7 @@ impl Running {
             }
             WindowEvent::RedrawRequested => self.redraw(),
             WindowEvent::CursorMoved { position, .. } => {
-                let p = [position.x as f32, position.y as f32];
+                let p = [position.x as f32 - self.viewport[0], position.y as f32 - self.viewport[1]];
                 if self.dragging {
                     self.cam.pan_pixels([p[0] - self.cursor[0], p[1] - self.cursor[1]]);
                     let (dx, dy) = (p[0] - self.press_pos[0], p[1] - self.press_pos[1]);

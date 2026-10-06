@@ -826,8 +826,11 @@ gpu_struct! {
         /// monómero desenha-se como um disco suave deste raio numa posição
         /// própria dentro da célula. 0 = quadrados (uma cor por célula).
         pub coc_radius: f32,
-        pub _pad_v0: u32,
-        pub _pad_v1: u32,
+        /// Canto do viewport no alvo, em píxeis (a vista do mundo é desenhada
+        /// por píxel do alvo; com a simulação num quadrado da janela, o
+        /// quadrado não começa em 0,0).
+        pub origin_x: f32,
+        pub origin_y: f32,
         pub _pad_v2: u32,
     }
 }

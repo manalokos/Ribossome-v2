@@ -57,6 +57,8 @@ pub struct UiState {
     pub stats: Stats,
     /// Estatísticas ao longo do tempo (gráficos e logs/estatisticas.csv).
     pub history: crate::stats::History,
+    /// O que os dois gráficos mostram.
+    pub charts: crate::stats::ChartSel,
     /// Cenas: ação pedida, autosave e mensagem da última operação.
     pub scene_action: Option<SceneAction>,
     pub autosave_on: bool,
@@ -187,6 +189,7 @@ impl UiState {
             mark_organ: 0,
             stats: Stats::default(),
             history: crate::stats::History::default(),
+            charts: Default::default(),
             terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "assets/terreno.png".into()),
             terrain_action: None,
             paint_on: false,
@@ -226,12 +229,24 @@ pub const VIEW_NAMES: [&str; 11] = [
 ];
 const CH: [&str; 4] = ["A", "U", "G", "C"];
 
-pub fn draw(ctx: &egui::Context, st: &mut UiState, world: &mut World, prof: &mut Profiler) {
-    // Altura máxima e barra de deslocamento: o painel é comprido.
-    let max_h = ctx.content_rect().height() - 40.0;
-    egui::Window::new("Ribossome v4").default_pos([12.0, 12.0]).max_height(max_h).show(ctx, |ui| {
+/// Desenha a interface em BARRAS FIXAS: controlos à esquerda, inspetor à
+/// direita (quando há um organismo escolhido) e, no separador "Gráficos", os
+/// gráficos no meio. Devolve o retângulo livre para a simulação (em pontos
+/// do egui), ou None quando os gráficos o tapam.
+pub fn draw(root: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut Profiler, ins: &mut inspector::Inspector) -> Option<egui::Rect> {
+    egui::Panel::left("controlos").default_size(400.0).size_range(300.0..=800.0).resizable(true).show(root, |ui| {
         main_panel(ui, st, world, prof);
     });
+    // Sempre presente: a simulação não muda de tamanho ao escolher um organismo.
+    egui::Panel::right("inspetor").default_size(300.0).size_range(280.0..=600.0).resizable(true).show(root, |ui| {
+        inspector::panel(ui, ins, &world.organ_table, &world.amino);
+    });
+    let free = root.available_rect_before_wrap();
+    if st.tab == Tab::Graficos {
+        egui::CentralPanel::default_margins().show(root, |ui| crate::stats::draw(ui, &mut st.history, &mut st.charts));
+        return None;
+    }
+    Some(free)
 }
 
 fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut Profiler) {
@@ -296,7 +311,7 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
         Tab::Vida => tab_life(ui, st, world),
         Tab::Movimento => tab_motion(ui, world),
         Tab::Cena => tab_scene(ui, st, world),
-        Tab::Graficos => crate::stats::draw(ui, &mut st.history),
+        Tab::Graficos => crate::stats::controls(ui, &mut st.history),
         Tab::Info => tab_info(ui, st, prof),
     });
 }

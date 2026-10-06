@@ -257,8 +257,22 @@ fn groups() -> Vec<(&'static str, Vec<usize>)> {
     ]
 }
 
-/// Os gráficos (separador "Gráficos").
-pub fn draw(ui: &mut egui::Ui, h: &mut History) {
+/// O que os dois gráficos mostram e as séries escondidas (clique na legenda).
+pub struct ChartSel {
+    pub group: [usize; 2],
+    pub hidden: std::collections::HashSet<usize>,
+}
+
+impl Default for ChartSel {
+    fn default() -> Self {
+        // População em cima, órgãos em baixo.
+        Self { group: [0, 2], hidden: Default::default() }
+    }
+}
+
+/// Controlos da amostragem (separador "Gráficos" da barra da esquerda).
+pub fn controls(ui: &mut egui::Ui, h: &mut History) {
+    ui.label("os gráficos estão no painel do meio (por cima da simulação, que continua a correr). Muda de separador para a voltar a ver.");
     ui.horizontal(|ui| {
         ui.label("amostra de");
         ui.add(egui::DragValue::new(&mut h.every).range(100..=1_000_000).speed(100));
@@ -269,11 +283,21 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History) {
         h.len(),
         h.stride
     ));
+}
+
+/// Cor da série n.º `k` de um gráfico (tons bem separados, pelo ângulo de ouro).
+fn series_color(k: usize) -> egui::Color32 {
+    egui::ecolor::Hsva::new((k as f32 * 0.618_034).fract(), 0.75, 1.0, 1.0).into()
+}
+
+/// Os gráficos (painel central): dois, um por cima do outro, cada um com a
+/// sua escolha. A legenda fica FORA do gráfico, por cima dele, com o valor
+/// da última amostra; um clique num nome esconde ou mostra a série.
+pub fn draw(ui: &mut egui::Ui, h: &mut History, sel: &mut ChartSel) {
     if h.len() < 2 {
         ui.label("à espera de amostras…");
         return;
     }
-    // Na legenda, cada série leva o valor da última amostra.
     let last: Vec<f32> = h.last_rows(1).first().map(|(_, v)| v.to_vec()).unwrap_or_default();
     let names: Vec<String> = h
         .names
@@ -286,22 +310,44 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History) {
         })
         .collect();
     let series = h.plot_series();
-    for (title, idx) in groups() {
-        ui.separator();
-        ui.strong(title);
-        // O gráfico dos órgãos tem uma linha por tipo: mais alto, para a
-        // legenda caber.
-        egui_plot::Plot::new(title)
-            .height(if idx.len() > 8 { 40.0 + 16.0 * idx.len() as f32 } else { 160.0 })
-            .legend(egui_plot::Legend::default().position(egui_plot::Corner::LeftTop))
-            .allow_scroll(false)
-            .show(ui, |p| {
-                for &i in &idx {
-                    // Identidade estável (o nome muda com o valor): esconder
-                    // uma série na legenda mantém-se de amostra para amostra.
-                    p.line(egui_plot::Line::new(names[i].clone(), egui_plot::PlotPoints::from(series[i].clone())).id(egui::Id::new(("serie", i))));
+    let groups = groups();
+    let block = (ui.available_height() - 8.0) / 2.0;
+    for slot in 0..2 {
+        let top = ui.cursor().top();
+        sel.group[slot] = sel.group[slot].min(groups.len() - 1);
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt(("grafico", slot)).width(280.0).selected_text(groups[sel.group[slot]].0).show_ui(ui, |ui| {
+                for (g, (title, _)) in groups.iter().enumerate() {
+                    ui.selectable_value(&mut sel.group[slot], g, *title);
                 }
             });
+            ui.small("clica num nome para esconder ou mostrar a linha");
+        });
+        let idx = &groups[sel.group[slot]].1;
+        ui.horizontal_wrapped(|ui| {
+            for (k, &i) in idx.iter().enumerate() {
+                let off = sel.hidden.contains(&i);
+                let mut text = egui::RichText::new(format!("■ {}", names[i])).color(if off { egui::Color32::DARK_GRAY } else { series_color(k) });
+                if off {
+                    text = text.strikethrough();
+                }
+                if ui.add(egui::Label::new(text).sense(egui::Sense::click())).clicked() && !sel.hidden.remove(&i) {
+                    sel.hidden.insert(i);
+                }
+            }
+        });
+        let height = (block - (ui.cursor().top() - top) - 6.0).max(80.0);
+        egui_plot::Plot::new(("grafico", slot, sel.group[slot])).height(height).allow_scroll(false).show(ui, |p| {
+            for (k, &i) in idx.iter().enumerate() {
+                if !sel.hidden.contains(&i) {
+                    p.line(
+                        egui_plot::Line::new(names[i].clone(), egui_plot::PlotPoints::from(series[i].clone()))
+                            .id(egui::Id::new(("serie", i)))
+                            .color(series_color(k)),
+                    );
+                }
+            }
+        });
     }
 }
 

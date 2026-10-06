@@ -141,7 +141,7 @@ fn soup_at(pc: vec2<f32>, radius: f32) -> Soup {
 @fragment
 fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     // Píxel -> mundo (y invertido: o ecrã cresce para baixo, o mundo para cima).
-    let px = in.pos.xy - 0.5 * vec2<f32>(view.screen_w, view.screen_h);
+    let px = in.pos.xy - vec2<f32>(view.origin_x, view.origin_y) - 0.5 * vec2<f32>(view.screen_w, view.screen_h);
     let world = vec2<f32>(view.center_x + px.x / view.zoom, view.center_y - px.y / view.zoom);
     // Mundo -> célula, explicitamente.
     let cell_f = floor(world / f32(WORLD_UNITS_PER_CELL));
