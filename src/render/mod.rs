@@ -59,7 +59,16 @@ pub struct WorldView {
     pub coc_radius: std::cell::Cell<f32>,
     /// Canto do viewport no alvo (píxeis); 0,0 quando ocupa o alvo todo.
     pub origin: std::cell::Cell<[f32; 2]>,
+    /// A última atualização escolheu a vista afastada (ver `update`).
+    lod: std::cell::Cell<bool>,
 }
+
+/// Instâncias por agente no desenho completo (AGENT_INSTANCES em agents_view.wgsl).
+const AGENT_INSTANCES: u32 = 197;
+/// Comprimento de referência de um resíduo (SEGMENT_LEN em body.wgsl).
+const RESIDUE_UNITS: f32 = 11.0;
+/// Abaixo deste tamanho de um resíduo no ecrã (píxeis) usa-se a vista afastada.
+const LOD_RESIDUE_PX: f32 = 0.75;
 
 impl WorldView {
     pub fn new(device: &wgpu::Device, world: &World, format: wgpu::TextureFormat) -> Self {
@@ -285,6 +294,7 @@ impl WorldView {
             daylight: std::cell::Cell::new(1.0),
             mark_organ: std::cell::Cell::new(0),
             origin: std::cell::Cell::new([0.0; 2]),
+            lod: std::cell::Cell::new(false),
             coc_radius: std::cell::Cell::new(0.35),
         }
     }
@@ -298,6 +308,12 @@ impl WorldView {
         brightness: f32,
         signal_view: u32,
     ) {
+        // VISTA AFASTADA: quando um resíduo ocupa menos de LOD_RESIDUE_PX
+        // píxeis, não se distinguem resíduos nem órgãos; desenha-se cada
+        // agente com 17 instâncias em vez de 197 (o desenho de 145 mil
+        // agentes custava 14 ms por frame, quase todo em vértices).
+        let lod = cam.zoom * RESIDUE_UNITS < LOD_RESIDUE_PX && self.focus.get() == u32::MAX;
+        self.lod.set(lod);
         let p = ViewParams {
             center_x: cam.center[0],
             center_y: cam.center[1],
@@ -314,7 +330,7 @@ impl WorldView {
             coc_radius: self.coc_radius.get(),
             origin_x: self.origin.get()[0],
             origin_y: self.origin.get()[1],
-            _pad_v2: 0,
+            lod: lod as u32,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }
@@ -326,6 +342,13 @@ impl WorldView {
         pass.set_pipeline(&self.agents_pipeline);
         pass.set_bind_group(0, &self.agents_bg, &[]);
         // Só os vivos: a lista e o nº de instâncias vêm da GPU (build_draw_list).
-        pass.draw_indirect(&self.draw_args, 0);
+        if self.focus.get() != u32::MAX {
+            // Um só agente (imagem do inspetor): as instâncias dele e mais
+            // nada. Percorrer os vivos todos custava tanto como a vista
+            // principal (14 ms por frame com 145 mil agentes).
+            pass.draw(0..6, 0..AGENT_INSTANCES);
+        } else {
+            pass.draw_indirect(&self.draw_args, if self.lod.get() { 16 } else { 0 });
+        }
     }
 }

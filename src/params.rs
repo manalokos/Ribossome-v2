@@ -831,7 +831,9 @@ gpu_struct! {
         /// quadrado não começa em 0,0).
         pub origin_x: f32,
         pub origin_y: f32,
-        pub _pad_v2: u32,
+        /// 1 = vista afastada: cada agente desenha-se com poucas instâncias
+        /// (troços de vários resíduos), sem fios de RNA nem ligações.
+        pub lod: u32,
     }
 }
 

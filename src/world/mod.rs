@@ -499,7 +499,8 @@ impl World {
         let tail_buf = storage_buffer(device, "rna tails", max_agents * 32);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
-            size: 16,
+            // Dois draws indiretos: o completo (0) e o da vista afastada (16).
+            size: 32,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });

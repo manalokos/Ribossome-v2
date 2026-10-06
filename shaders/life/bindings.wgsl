@@ -16,7 +16,7 @@
 // Lista de slots vivos para o desenho e argumentos do draw indireto
 // [vertex_count, instance_count, first_vertex, first_instance].
 @group(3) @binding(7) var<storage, read_write> draw_list: array<u32>;
-@group(3) @binding(8) var<storage, read_write> draw_args: array<atomic<u32>, 4>;
+@group(3) @binding(8) var<storage, read_write> draw_args: array<atomic<u32>, 8>;
 // Grelha de contacto: cabeça da lista por célula do ambiente, ligação por
 // resíduo (slot·64 + k) e deslocamento calculado por agente (dx, dy, dθ, _).
 @group(3) @binding(9) var<storage, read_write> contact_head: array<atomic<u32>>;

@@ -1,5 +1,6 @@
 //! Tempo de GPU de cada kernel, por passo, com o terreno do projeto e N
 //! nadadores construídos estáveis (sem morte nem fome). N, PUSH, FLUIDRES.
+//! Ou SCENE=cena.ribo para medir uma cena gravada.
 use ribossome::gpu::Gpu;
 use ribossome::params::{SpawnRequest, WorldConfig};
 use ribossome::world::World;
@@ -30,9 +31,16 @@ fn main() {
     let s = cfg.sim_size();
     let mut rng = ribossome::life::SplitMix(5);
     let n: u32 = env("N", 20000);
-    let reqs: Vec<SpawnRequest> =
-        (0..n).map(|_| SpawnRequest::with_genome(s * (0.05 + 0.9 * rng.f32()), s * (0.3 + 0.65 * rng.f32()), &g)).collect();
-    world.request_seeds(&reqs);
+    // SCENE=cena.ribo: mede uma cena gravada tal como está (parâmetros,
+    // terreno e agentes dela) em vez dos nadadores construídos.
+    if let Ok(path) = std::env::var("SCENE") {
+        let scene = ribossome::world::Scene::read(std::path::Path::new(&path)).unwrap();
+        world.load_scene(&gpu, &scene).unwrap();
+    } else {
+        let reqs: Vec<SpawnRequest> =
+            (0..n).map(|_| SpawnRequest::with_genome(s * (0.05 + 0.9 * rng.f32()), s * (0.3 + 0.65 * rng.f32()), &g)).collect();
+        world.request_seeds(&reqs);
+    }
     let step = |w: &mut World, k: u32| {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         w.encode_steps(&gpu.queue, &mut enc, k);

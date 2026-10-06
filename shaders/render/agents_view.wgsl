@@ -65,6 +65,11 @@ const BOND_STRIDE_V: u32 = 5u;
 // Instâncias por agente: tubos, órgãos, bases de RNA, ligações e a bola do
 // parentesco.
 const AGENT_INSTANCES: u32 = 3u * MAX_BODY_V + BONDS_V + 1u;
+// VISTA AFASTADA (view.lod): por agente, LOD_TUBES troços de LOD_STRIDE
+// resíduos e a bola de marcação. (17 = o valor em drawlist.wgsl.)
+const LOD_STRIDE: u32 = 4u;
+const LOD_TUBES: u32 = MAX_BODY_V / LOD_STRIDE;
+const LOD_INSTANCES: u32 = LOD_TUBES + 1u;
 // Raio da bola do parentesco, em píxeis do ecrã (igual para todos).
 const KIN_DOT_PX: f32 = 5.0;
 const NO_ORGAN: u32 = 0xFFu;
@@ -131,9 +136,33 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     var o: AgentVsOut;
     // Instâncias por agente: 0..63 tubos, 64..127 órgãos (por cima),
     // 128..191 bases de RNA não traduzidas nas pontas.
-    let slot = draw_list_view[inst / AGENT_INSTANCES];
-    let local_i = inst % AGENT_INSTANCES;
+    let far = view.lod != 0u;
+    let per = select(AGENT_INSTANCES, LOD_INSTANCES, far);
+    // Com um agente em foco (imagem do inspetor) desenha-se SÓ esse, com
+    // as suas instâncias (o draw não percorre a lista dos vivos).
+    var slot = view.focus_slot;
+    if (slot == 0xFFFFFFFFu) { slot = draw_list_view[inst / per]; }
+    var local_i = inst % per;
     let a = agents_view[slot];
+    // Vista afastada: o troço vai do resíduo lod_k0 ao lod_k1 e leva a cor
+    // do primeiro órgão que tiver (senão a do primeiro resíduo), para o
+    // mapa manter as cores dos órgãos.
+    var lod_k0 = 0u;
+    var lod_k1 = 0u;
+    if (far) {
+        if (local_i == LOD_TUBES) { return kin_vertex(vi, slot, a); }
+        lod_k0 = local_i * LOD_STRIDE;
+        lod_k1 = min(lod_k0 + LOD_STRIDE, max(a.body_len, 1u) - 1u);
+        var rep = lod_k0;
+        for (var q = lod_k0; q < min(lod_k0 + LOD_STRIDE, a.body_len); q++) {
+            let oq = (organs_view[slot * 32u + q / 2u] >> ((q % 2u) * 16u)) & 0xFFFFu;
+            if (oq != 0u) {
+                rep = q;
+                break;
+            }
+        }
+        local_i = rep;
+    }
     if (local_i == 3u * MAX_BODY_V + BONDS_V) {
         return kin_vertex(vi, slot, a);
     }
@@ -231,6 +260,12 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     let dim = mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
     o.color = select(col, col * dim, view.signal_view == 0u || view.signal_view == 4u);
     if (flash.x >= 0.0 && view.signal_view == 0u) { o.color = flash; }
+    if (far && !naked) {
+        // Troço da vista afastada: nunca abaixo de 1 píxel (1,5 com órgão).
+        var r_far = max(r_world, 1.0 / view.zoom);
+        if (organ != NO_ORGAN) { r_far = max(r_world / ORGAN_SCALE, 1.5 / view.zoom); }
+        return capsule_vertex(vi, residue_world_v(slot, a, lod_k0), residue_world_v(slot, a, max(lod_k1, lod_k0)), r_far, o.color);
+    }
     if (!glyph && !naked) {
         // TUBO: cápsula do resíduo k até ao k+1 (o último só tem a ponta).
         // A espessura é a do resíduo k sem o aumento dos órgãos.
@@ -323,7 +358,8 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
     var o: AgentVsOut;
     o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
     let b = bonds_view[slot * BOND_STRIDE_V + i];
-    if (a.alive == 0u || b.x == 0xFFFFFFFFu || b.x <= slot) { return o; }
+    // (Em foco só este agente é desenhado: desenha as suas ligações todas.)
+    if (a.alive == 0u || b.x == 0xFFFFFFFFu || (b.x <= slot && view.focus_slot == 0xFFFFFFFFu)) { return o; }
     let other = agents_view[b.x];
     if (other.alive == 0u || other.id != b.y) { return o; }
     let hidden = view.focus_slot != 0xFFFFFFFFu && slot != view.focus_slot && b.x != view.focus_slot;
