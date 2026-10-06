@@ -17,6 +17,8 @@ pub const MAX_STEPS_PER_FRAME: u32 = 64;
 /// Alinhamento dos offsets dinâmicos de uniform (múltiplo de 256, o mínimo
 /// garantido; os SimParams já passam de 256 bytes).
 const PARAMS_STRIDE: u64 = 512;
+// Os parâmetros de um passo têm de caber no seu troço do buffer.
+const _: () = assert!(size_of::<SimParams>() as u64 <= PARAMS_STRIDE);
 pub const MAX_FUMAROLES: usize = 64;
 const LEDGER_WORDS: u64 = 12;
 /// Máximo de pedidos de sementes por frame.
@@ -281,6 +283,9 @@ pub struct World {
     /// Contacto por agente (vec4): depois do passo, .x = energia perdida em
     /// mordidas e .z = ganha a morder (a vista usa-os para o flash).
     pub contact_disp_buf: wgpu::Buffer,
+    /// Partilha de matéria pelas ligações (um u32 por agente; ver
+    /// MATTER_* em bonds.wgsl). Depois de um passo: quem recebeu e quem deu.
+    pub matter_claim_buf: wgpu::Buffer,
     stats_buf: wgpu::Buffer,
     stats_staging: wgpu::Buffer,
     stats_readback: Readback,
@@ -445,6 +450,7 @@ impl World {
         let sensor_mem = storage_buffer(device, "sensor memory", max_agents * 64 * 4);
         let sensor_avg = storage_buffer(device, "sensor average", max_agents * 64 * 4);
         let bitten = storage_buffer(device, "bitten energy", max_agents * 4);
+        let matter_claim = storage_buffer(device, "matter claim", max_agents * 4);
         let bonds_buf = storage_buffer(device, "bonds", max_agents * BOND_STRIDE * 16);
         let bond_accept = storage_buffer(device, "bond accept", max_agents * 4);
         let bond_disp = storage_buffer(device, "bond disp", max_agents * 16);
@@ -532,7 +538,7 @@ impl World {
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
         let life_entries: Vec<_> =
-            (0..33).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
+            (0..34).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -689,6 +695,7 @@ impl World {
                 &stats_buf,
                 &body_grid,
                 &sensor_avg,
+                &matter_claim,
             ],
         );
 
@@ -845,6 +852,7 @@ impl World {
             kin_target,
             kin_buf,
             contact_disp_buf: contact_disp,
+            matter_claim_buf: matter_claim,
             stats_buf,
             stats_staging,
             stats_readback: Readback::Idle,

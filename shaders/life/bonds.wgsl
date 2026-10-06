@@ -28,6 +28,13 @@ const MAX_BONDS: u32 = 4u;
 // Por slot: MAX_BONDS ligações + a proposta deste passo.
 const BOND_STRIDE: u32 = MAX_BONDS + 1u;
 const BOND_NONE: u32 = 0xFFFFFFFFu;
+// PARTILHA DE MATÉRIA (matter_claim, um valor por agente e por passo):
+// BOND_NONE = livre; MATTER_LOCK = este agente tentou receber (não pode ser
+// dador neste passo); MATTER_RECEIVED = recebeu um complemento; qualquer
+// outro valor = o slot de quem o escolheu como DADOR.
+const MATTER_LOCK: u32 = 0xFFFFFFFEu;
+const MATTER_RECEIVED: u32 = 0xFFFFFFFDu;
+const S_MATTER: u32 = 14u;
 // Distância máxima entre as duas âncoras para se ligarem (mundo).
 const BOND_RANGE: f32 = 16.0;
 // Comprimento de repouso da mola.
@@ -114,6 +121,16 @@ fn bond_maintain(@builtin(global_invocation_id) gid: vec3<u32>) {
     var drot = 0.0;
     var de = 0.0;
     var free = 0u;
+    // PARTILHA DE MATÉRIA (uma folha alimenta a raiz): este agente pode
+    // RECEBER, por passo, um complemento já capturado por um parceiro que
+    // tenha a cópia mais adiantada, se o último que ele capturou for a base
+    // de que este precisa a seguir. Para a matéria ser exata, cada agente dá
+    // ou recebe no máximo um por passo: quem quer receber tranca-se primeiro
+    // (deixa de poder ser dador) e depois reserva o dador, com trocas
+    // atómicas; contact_apply aplica as duas metades.
+    var want_matter = params.bond_matter_share > 0.0 && a.pair_count < a.gene_len
+        && rng_f4(a.id, params.epoch, S_MATTER).x < params.bond_matter_share;
+    var locked = false;
     for (var i = 0u; i < MAX_BONDS; i++) {
         let b = bond_at(slot, i);
         if (b.x == BOND_NONE) {
@@ -151,6 +168,23 @@ fn bond_maintain(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let cap_o = energy_capacity(b.x, o);
                 let cap_red = cap_a * cap_o / max(cap_a + cap_o, 1e-6);
                 de += clamp(params.bond_energy_share, 0.0, 0.5) * cap_red * (o.energy / max(cap_o, 1e-6) - a.energy / max(cap_a, 1e-6));
+                // Matéria: o parceiro tem a cópia mais adiantada (em fração
+                // do genoma, e continua a tê-la depois de dar: nivela sem
+                // andar para trás e para a frente) e o seu último
+                // complemento é o que falta aqui?
+                if (want_matter && o.pair_count > 0u && o.pair_count <= o.gene_len
+                    && f32(o.pair_count - 1u) * f32(a.gene_len) >= f32(a.pair_count + 1u) * f32(o.gene_len)
+                    && genome_get(b.x, o.pair_count - 1u) == genome_get(slot, a.pair_count)) {
+                    if (!locked) {
+                        locked = atomicCompareExchangeWeak(&matter_claim[slot], BOND_NONE, MATTER_LOCK).exchanged;
+                        // Já foi escolhido como dador por outro: não recebe.
+                        if (!locked) { want_matter = false; }
+                    }
+                    if (locked && atomicCompareExchangeWeak(&matter_claim[b.x], BOND_NONE, slot).exchanged) {
+                        atomicStore(&matter_claim[slot], MATTER_RECEIVED);
+                        want_matter = false;
+                    }
+                }
             }
         }
         if (!keep) {

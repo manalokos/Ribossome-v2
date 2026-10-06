@@ -34,7 +34,20 @@ fn main() {
         })
         .collect();
     world.request_seeds(&reqs);
+    // SHARE: partilha de matéria pela ligação. Nas duas últimas voltas a
+    // captura do meio é desligada (FREEZE=1), para as cópias só poderem
+    // mudar por passagem entre parceiros.
+    let share: f32 = std::env::var("SHARE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let freeze = std::env::var("FREEZE").is_ok();
+    world.params.bond_matter_share = share;
+    let pair = world.params.pairing_rate;
+    let mut before: Vec<(u32, u32)> = Vec::new();
     for round in 0..4 {
+        if freeze && round >= 2 {
+            world.params.pairing_rate = 0.0;
+        } else {
+            world.params.pairing_rate = pair;
+        }
         let mut done = 0;
         while done < 500 {
             let mut enc = gpu.device.create_command_encoder(&Default::default());
@@ -72,6 +85,18 @@ fn main() {
             with += has as u32;
         }
         let alive = agents.iter().filter(|a| a.alive != 0).count();
+        // Cópias: total de complementos capturados e quantos agentes (o
+        // mesmo id no mesmo slot) mudaram desde a volta anterior.
+        let now: Vec<(u32, u32)> = agents.iter().map(|a| (if a.alive != 0 { a.id } else { 0 }, a.pair_count)).collect();
+        let changed = now.iter().zip(&before).filter(|(n, b)| n.0 != 0 && n.0 == b.0 && n.1 != b.1).count();
+        let copied: u64 = now.iter().filter(|n| n.0 != 0).map(|n| n.1 as u64).sum();
+        before = now;
+        let l = world.ledger_blocking(&gpu);
+        println!(
+            "    matéria por canal {:?} (em cópias {:?}); complementos {copied}, agentes com a cópia mudada {changed}",
+            (0..4).map(|c| l.channel(c)).collect::<Vec<_>>(),
+            l.held
+        );
         println!(
             "{} passos: {alive} agentes, {with} com ligações, {total} pontas de ligação ({birth} de nascimento), {asym} sem par",
             (round + 1) * 500

@@ -38,6 +38,7 @@ fn contact_insert(@builtin(global_invocation_id) gid: vec3<u32>) {
     // resíduos-alvo de cada família e de prolina), calculado uma vez por
     // passo e empacotado em contact_disp.w (4 × 6 bits, exato num f32).
     contact_disp[slot] = vec4<f32>(0.0, 0.0, 0.0, pack_defence(slot, agents[slot].body_len));
+    atomicStore(&matter_claim[slot], BOND_NONE);
 }
 
 // PROTEASE (predação química): um órgão. Cada variante tem uma FAMÍLIA, que
@@ -189,6 +190,19 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
         a.pos_y = np.y;
     }
     a.rot += bd.z;
+    // PARTILHA DE MATÉRIA (decidida em bond_maintain): quem recebeu fica
+    // com mais um complemento; quem foi escolhido como dador fica sem o
+    // último. A base é a mesma nos dois, por isso a matéria conserva-se
+    // canal a canal.
+    let mc = atomicLoad(&matter_claim[slot]);
+    if (mc == MATTER_RECEIVED) {
+        a.pair_count += 1u;
+    } else if (mc != BOND_NONE && mc != MATTER_LOCK && a.pair_count > 0u) {
+        a.pair_count -= 1u;
+    }
+    // Fica limpo já aqui: um slot que morra e renasça a meio de um passo
+    // não pode herdar a reserva do morto.
+    atomicStore(&matter_claim[slot], BOND_NONE);
     // O que este agente tirou a outros: a parte direta entra-lhe na energia.
     let direct = clamp(params.protease_direct, 0.0, 1.0);
     a.energy = min(max(a.energy + contact_disp[slot].z * direct + bd.w, 0.0), energy_capacity(slot, a));

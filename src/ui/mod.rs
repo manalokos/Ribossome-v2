@@ -657,6 +657,8 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         .on_hover_text("probabilidade por passo de um agente com uma âncora livre a tentar ligar a uma âncora oposta de um vizinho; a duração vem da variante da âncora (editor)");
     ui.add(egui::Slider::new(&mut p.bond_energy_share, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("difusão da energia pela ligação"))
         .on_hover_text("a energia corre pela ligação do agente mais cheio (energia ÷ capacidade) para o mais vazio, até ficarem com o mesmo enchimento. É a fração da diferença que passa por passo: 0,1 = a diferença cai para metade em ~7 passos; 0,01 = em ~70 (o valor antigo)");
+    ui.add(egui::Slider::new(&mut p.bond_matter_share, 0.0..=1.0).text("partilha de matéria pela ligação"))
+        .on_hover_text("probabilidade por passo de um agente ligado receber do parceiro um complemento que este já capturou, do que tem a cópia do genoma mais adiantada para o que a tem mais atrasada (uma folha a alimentar a raiz). Só passa quando a base serve ao que recebe, uma vez em quatro em média. 0 = não partilham matéria");
     ui.add(egui::Slider::new(&mut p.bond_signal, 0.0..=1.0).text("sinais pela ligação"));
 }
 

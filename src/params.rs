@@ -362,6 +362,14 @@ gpu_struct! {
         /// para a sua própria cópia do genoma, em vez de reativar um ao
         /// acaso no meio. 0 = o transbordo vai todo para o meio.
         pub salvage: f32,
+        /// PARTILHA DE MATÉRIA pela ligação: probabilidade por passo de um
+        /// agente ligado receber do parceiro um complemento já capturado
+        /// (do que tem a cópia mais adiantada para o que a tem mais
+        /// atrasada, quando a base serve). 0 = não partilham matéria.
+        pub bond_matter_share: f32,
+        pub _pad_i0: u32,
+        pub _pad_i1: u32,
+        pub _pad_i2: u32,
     }
 }
 
@@ -538,6 +546,10 @@ impl Default for SimParams {
             skin_uptake: 0.2,
             death_metab: 0.25,
             salvage: 0.0,
+            bond_matter_share: 0.1,
+            _pad_i0: 0,
+            _pad_i1: 0,
+            _pad_i2: 0,
         }
     }
 }

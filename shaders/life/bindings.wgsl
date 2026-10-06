@@ -72,6 +72,9 @@
 // carrega-o e ele descarrega a um ritmo que depende da variante. Ao nascer
 // vale SENSOR_UNSET e o primeiro passo carrega-o com o que há à volta.
 @group(3) @binding(32) var<storage, read_write> sensor_avg: array<f32>;
+// PARTILHA DE MATÉRIA pelas ligações: reserva por agente, para que cada um
+// dê ou receba no máximo UM complemento por passo (ver bonds.wgsl).
+@group(3) @binding(33) var<storage, read_write> matter_claim: array<atomic<u32>>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;
