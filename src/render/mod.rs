@@ -68,12 +68,33 @@ pub struct WorldView {
 
 /// Instâncias por agente no desenho completo (AGENT_INSTANCES em agents_view.wgsl).
 const AGENT_INSTANCES: u32 = 197;
+/// SUAVIZAÇÃO: amostras por píxel do alvo onde o mundo é desenhado. O fundo
+/// corre uma vez por píxel; os agentes, uma vez por amostra (a forma dos
+/// órgãos é recortada no shader de fragmentos, por isso só amostrando lá
+/// dentro é que um órgão de 1 ou 2 píxeis fica com a forma e a cor certas
+/// em vez de aparecer e desaparecer).
+pub const MSAA: u32 = 4;
+
+/// Textura de cor com MSAA amostras, para desenhar e resolver para o alvo.
+pub fn msaa_texture(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("msaa"),
+        size: wgpu::Extent3d { width: width.max(1), height: height.max(1), depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: MSAA,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    })
+}
+
 /// Comprimento de referência de um resíduo (SEGMENT_LEN em body.wgsl).
 const RESIDUE_UNITS: f32 = 11.0;
 /// Tamanho de um resíduo no ecrã (píxeis) abaixo do qual se passa a um troço
 /// liso por resíduo, e abaixo do qual se passa a um troço por cada 4.
-const LOD_MID_PX: f32 = 3.0;
-const LOD_FAR_PX: f32 = 0.75;
+const LOD_MID_PX: f32 = 1.0;
+const LOD_FAR_PX: f32 = 0.5;
 
 impl WorldView {
     pub fn new(device: &wgpu::Device, world: &World, format: wgpu::TextureFormat) -> Self {
@@ -190,7 +211,7 @@ impl WorldView {
             },
             primitive: Default::default(),
             depth_stencil: None,
-            multisample: Default::default(),
+            multisample: wgpu::MultisampleState { count: MSAA, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some(shaders::entry(def, "fs_world")),
@@ -277,7 +298,7 @@ impl WorldView {
             },
             primitive: Default::default(),
             depth_stencil: None,
-            multisample: Default::default(),
+            multisample: wgpu::MultisampleState { count: MSAA, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &amodule,
                 entry_point: Some(shaders::entry(adef, "fs_agent")),
@@ -315,9 +336,9 @@ impl WorldView {
         signal_view: u32,
     ) {
         // NÍVEL DE DETALHE pelo tamanho de um resíduo no ecrã (ver
-        // agents_view.wgsl): abaixo de LOD_MID_PX deixa de se distinguir a
-        // forma dos órgãos e passa a um troço liso por resíduo; abaixo de
-        // LOD_FAR_PX, a um troço por cada 4. Além de manter a cor estável,
+        // agents_view.wgsl). Com 4 amostras por píxel o desenho detalhado
+        // aguenta até um resíduo por píxel; abaixo de LOD_MID_PX passa a um
+        // troço liso por resíduo e, abaixo de LOD_FAR_PX, a um por cada 4. Além de manter a cor estável,
         // poupa vértices (65 ou 17 instâncias por agente em vez de 197).
         let px = cam.zoom * RESIDUE_UNITS;
         let lod = if self.focus.get() != u32::MAX || px >= LOD_MID_PX {

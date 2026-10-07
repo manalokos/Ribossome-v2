@@ -91,8 +91,10 @@ struct AgentVsOut {
     @builtin(position) pos: vec4<f32>,
     // 0 = tubo (segmento do resíduo k até ao k+1), 1 = órgão por cima.
     @location(5) @interpolate(flat) mode: u32,
-    // Coordenadas no quadrado (−1..1), eixos do mundo.
-    @location(0) local: vec2<f32>,
+    // Coordenadas no quadrado (−1..1), eixos do mundo. Interpoladas POR
+    // AMOSTRA: o shader de fragmentos corre uma vez por amostra (4 por
+    // píxel) e a forma de um órgão pequeno fica bem recortada.
+    @location(0) @interpolate(perspective, sample) local: vec2<f32>,
     @location(1) color: vec3<f32>,
     // Tipo do órgão (NO_ORGAN se não houver).
     @location(2) @interpolate(flat) organ: u32,
@@ -115,6 +117,17 @@ fn class_color(aa: u32) -> vec3<f32> {
         case 5u: { return vec3<f32>(0.95, 0.95, 0.95); }                  // G
         default: { return vec3<f32>(1.00, 0.60, 0.20); }                  // P
     }
+}
+
+// ENGROSSAR POR IGUAL: quando um tubo típico (DETAIL_REF_R de raio) ficaria
+// com menos de DETAIL_MIN_PX no ecrã, o corpo INTEIRO (tubos e órgãos)
+// engrossa pelo mesmo fator. Antes cada coisa tinha o seu mínimo de píxeis
+// (os órgãos mais do que os tubos) e as proporções, e com elas a cor do
+// agente, mudavam com o zoom.
+const DETAIL_REF_R: f32 = 3.0;
+const DETAIL_MIN_PX: f32 = 0.45;
+fn detail_fat() -> f32 {
+    return max(1.0, DETAIL_MIN_PX / (DETAIL_REF_R * view.zoom));
 }
 
 // Cor de um órgão visto de longe: a cor dominante do seu desenho de perto.
@@ -355,7 +368,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         // A espessura é a do resíduo k sem o aumento dos órgãos.
         var r_tube = r_world;
         if (organ != NO_ORGAN) { r_tube /= ORGAN_SCALE; }
-        r_tube = max(r_tube, 1.0 / view.zoom);
+        r_tube *= detail_fat();
         var b = centre;
         if (k + 1u < a.body_len) {
             let lp1 = body_pos_view[slot * MAX_BODY_V + k + 1u];
@@ -389,8 +402,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         return o;
     }
     let ext = organ_extent(organ);
-    // Nunca menos de 1,5 píxeis, para se ver com o zoom afastado.
-    let r = max(r_world * ext, 1.5 / view.zoom);
+    let r = r_world * ext * detail_fat();
     let w = centre + c * r;
     let px = (w - cam_center()) * view.zoom;
     o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);

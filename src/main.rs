@@ -21,6 +21,9 @@ struct Running {
     gpu: Gpu,
     world: World,
     view: WorldView,
+    /// Alvo com várias amostras onde o mundo é desenhado (do tamanho da
+    /// janela; refeito quando ela muda). Resolve para a imagem da janela.
+    msaa: Option<wgpu::Texture>,
     cam: Camera,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -288,6 +291,7 @@ impl Running {
             view,
             cam,
             egui_state,
+            msaa: None,
             egui_renderer,
             profiler: Profiler::from_env(),
             ui: UiState::new(baseline),
@@ -1108,7 +1112,8 @@ impl Running {
         let (hw, hh) = (0.5 * screen[0] / self.cam.zoom, 0.5 * screen[1] / self.cam.zoom);
         let c = self.cam.center;
         self.world.set_draw_rect(&self.gpu.queue, Some(([c[0] - hw, c[1] - hh], [c[0] + hw, c[1] + hh])));
-        let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, .. } = self;
+        let format = self.surface_cfg.format;
+        let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, msaa, .. } = self;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {
             let n = n_steps;
@@ -1136,18 +1141,47 @@ impl Running {
         extra.push(egui_enc.finish());
         frame.submit_now(extra);
 
+        // O MUNDO vai para um alvo com 4 amostras por píxel, que se resolve
+        // para a imagem da janela; a INTERFACE é desenhada por cima depois.
+        let (sw, sh) = (sd.size_in_pixels[0], sd.size_in_pixels[1]);
+        if msaa.as_ref().is_none_or(|t| t.width() != sw || t.height() != sh) {
+            *msaa = Some(ribossome::render::msaa_texture(&gpu.device, format, sw, sh));
+        }
+        let many = msaa.as_ref().unwrap().create_view(&Default::default());
         frame.segment("render", |enc| {
+            {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("mundo"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &many,
+                        depth_slice: None,
+                        resolve_target: Some(&target),
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Discard,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                // A simulação só no espaço livre entre as barras.
+                let (w, h) = (vp[2].min(sw as f32 - vp[0]), vp[3].min(sh as f32 - vp[1]));
+                if !covered && w >= 1.0 && h >= 1.0 {
+                    pass.set_viewport(vp[0], vp[1], w, h, 0.0, 1.0);
+                    pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, w as u32, h as u32);
+                    view.draw(&mut pass);
+                }
+            }
             let mut pass = enc
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("main"),
+                    label: Some("interface"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &target,
                         depth_slice: None,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
                     })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
@@ -1155,14 +1189,6 @@ impl Running {
                     multiview_mask: None,
                 })
                 .forget_lifetime();
-            // A simulação só no espaço livre (o egui repõe o viewport inteiro).
-            let (sw, sh) = (sd.size_in_pixels[0] as f32, sd.size_in_pixels[1] as f32);
-            let (w, h) = (vp[2].min(sw - vp[0]), vp[3].min(sh - vp[1]));
-            if !covered && w >= 1.0 && h >= 1.0 {
-                pass.set_viewport(vp[0], vp[1], w, h, 0.0, 1.0);
-                pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, w as u32, h as u32);
-                view.draw(&mut pass);
-            }
             egui_renderer.render(&mut pass, &jobs, &sd);
         });
         frame.finish();
