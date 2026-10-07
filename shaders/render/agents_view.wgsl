@@ -32,9 +32,8 @@
 // que ganhou a morder (shaders/life/contact.wgsl).
 @group(0) @binding(13) var<storage, read> bite_view: array<vec4<f32>>;
 
-// FLASH DAS PROTEASES: quem está a atacar fica com as proteases maiores e
-// amarelo-claras; a vítima fica com o corpo vermelho vivo.
-const BITE_ORGAN_GROW: f32 = 2.2;
+// FLASH DAS PROTEASES: quem está a atacar fica com as proteases ligadas
+// amarelo-claras (só a cor, a forma é a do momento); a vítima fica vermelha.
 const BITE_ATTACK_COLOR: vec3<f32> = vec3<f32>(1.0, 0.95, 0.45);
 const BITE_VICTIM_COLOR: vec3<f32> = vec3<f32>(1.0, 0.12, 0.08);
 
@@ -283,7 +282,6 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 if (bite.x > 0.0) { colr = mix(colr, BITE_VICTIM_COLOR, 0.8); }
                 if (bite.z > 0.0 && armed) {
                     colr = BITE_ATTACK_COLOR;
-                    r_lod *= 1.3;
                 }
             }
             return capsule_vertex(vi, residue_world_v(slot, a, k0), residue_world_v(slot, a, k1), r_lod, colr);
@@ -353,18 +351,15 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 let pv = organ_variants_view[ORGAN_PROTEASE * ORGAN_VARIANTS + min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u)];
                 var drive = 1.0;
                 if (pv.p2 >= 0.0) { drive = clamp(signals_view[base + k][u32(clamp(pv.p2, 0.0, 3.0))], 0.0, 1.0); }
+                // O mesmo limiar da simulacao (PROTEASE_MIN_DRIVE em contact.wgsl).
+                drive = select(0.0, drive, drive >= 0.25);
                 spike = max(pv.p0, 0.0) * drive;
                 // Para o desenho: numero de espigoes pela FORCA (variante x
                 // intensidade) na parte inteira, abertura na fracionaria.
                 let force = max(pv.p1, 0.0) * exp2((f32(oc >> 8u) - 32.0) / 8.0);
                 phase = clamp(round(4.0 + 3.5 * force), 6.0, 24.0) + drive * 0.99;
-                // So pisca a protease que esta ligada (a que morde).
-                if (bite.z > 0.0 && glyph && drive > 0.0) {
-                    flash = BITE_ATTACK_COLOR;
-                    // Ao longe (quando o corpo já está a ser engrossado) a
-                    // protease cresce menos: a cor amarela chega.
-                    r_world *= 1.12;
-                }
+                // Flash: so a cor, com a forma que a protease tem no momento.
+                if (bite.z > 0.0 && glyph && drive > 0.0) { flash = BITE_ATTACK_COLOR; }
             }
             if (organ == ORGAN_HOLDFAST) { col = vec3<f32>(0.85, 0.6, 0.3); }
             if (organ == ORGAN_CHIRAL) { col = vec3<f32>(0.95, 0.35, 0.85); }

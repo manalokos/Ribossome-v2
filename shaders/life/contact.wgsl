@@ -90,10 +90,15 @@ fn family_weights(f: u32) -> vec3<f32> {
 
 // Quanto a protease do resíduo k está LIGADA (0..1): sempre, ou pelo sinal
 // interno do canal da variante (p2).
+// LIMIAR: abaixo de PROTEASE_MIN_DRIVE de sinal a protease esta fechada (nao
+// morde nem gasta); acima, a forca e proporcional ao sinal. (Como um
+// zimogenio: a enzima so e ativada a partir de um certo estimulo.) O desenho
+// usa o mesmo limiar (agents_view.wgsl).
+const PROTEASE_MIN_DRIVE: f32 = 0.25;
 fn protease_drive(slot: u32, k: u32, v: OrganVariant) -> f32 {
     var drive = 1.0;
     if (v.p2 >= 0.0) { drive = clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p2, 0.0, 3.0))], 0.0, 1.0); }
-    return drive;
+    return select(0.0, drive, drive >= PROTEASE_MIN_DRIVE);
 }
 
 // ALCANCE: a variante (p0) diz a que distância ALÉM do contacto a protease
