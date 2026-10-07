@@ -63,10 +63,6 @@ fn protein_html(body: &[Residue]) -> String {
     s
 }
 
-fn organs_of(body: &[Residue]) -> String {
-    body.iter().filter_map(|r| r.organ.map(|(t, _, _)| ORGAN_SYMBOLS[t as usize])).collect()
-}
-
 /// Família que o bolso de um vizinho reconhece (pocket_family no shader):
 /// 0 = nenhuma em especial.
 fn pocket_family(aa: u8) -> usize {
@@ -263,88 +259,6 @@ fn inferred_tree(species: &[&Species], total: usize) -> String {
     )
 }
 
-/// Árvore das linhagens registadas, com o tempo na horizontal.
-fn recorded_tree(l: &Lineages, w: &World) -> String {
-    if l.censuses < 2 || l.branches.is_empty() {
-        return format!(
-            "<p>Ainda não há linhagens registadas nesta cena ({} censo(s)). O registo faz-se durante a corrida, de {} em {} epochs, e fica guardado com a cena.</p>",
-            l.censuses, l.every, l.every
-        );
-    }
-    let code = crate::life::table::code_to_gpu(&w.organ_code);
-    let rs = w.params.require_start != 0;
-    // Filhos de cada ramo, por ordem de nascimento; desenha-se em profundidade.
-    let mut kids: HashMap<Option<u32>, Vec<usize>> = HashMap::new();
-    for (i, b) in l.branches.iter().enumerate() {
-        kids.entry(b.parent).or_default().push(i);
-    }
-    let mut order: Vec<usize> = Vec::new();
-    let mut stack: Vec<usize> = kids.get(&None).cloned().unwrap_or_default();
-    stack.reverse();
-    while let Some(i) = stack.pop() {
-        order.push(i);
-        if let Some(k) = kids.get(&Some(l.branches[i].id)) {
-            for &c in k.iter().rev() {
-                stack.push(c);
-            }
-        }
-    }
-    let row = 18.0;
-    let (left, width) = (10.0, 620.0);
-    let span = (l.last_epoch - l.first_epoch).max(1) as f32;
-    let x_of = |e: u32| left + width * (e.saturating_sub(l.first_epoch)) as f32 / span;
-    let y_of: HashMap<u32, f32> = order.iter().enumerate().map(|(r, &i)| (l.branches[i].id, 30.0 + r as f32 * row)).collect();
-    let mut svg = String::new();
-    // Eixo do tempo.
-    for t in 0..=4 {
-        let e = l.first_epoch + ((l.last_epoch - l.first_epoch) as f32 * t as f32 / 4.0) as u32;
-        let x = x_of(e);
-        write!(svg, "<line class=\"axis\" x1=\"{x:.1}\" y1=\"16\" x2=\"{x:.1}\" y2=\"{:.0}\"/><text class=\"axis\" x=\"{x:.1}\" y=\"12\">{}</text>", 30.0 + order.len() as f32 * row, if span < 2e6 { format!("{:.0}k", e as f32 / 1e3) } else { format!("{:.1}M", e as f32 / 1e6) }).unwrap();
-    }
-    for &i in &order {
-        let b = &l.branches[i];
-        let y = y_of[&b.id];
-        let alive = l.alive(b);
-        if let Some(p) = b.parent.and_then(|p| y_of.get(&p)) {
-            write!(svg, "<line class=\"link\" x1=\"{:.1}\" y1=\"{p:.1}\" x2=\"{:.1}\" y2=\"{y:.1}\"/>", x_of(b.born), x_of(b.born)).unwrap();
-        }
-        let thick = 1.0 + (b.peak as f32).log10().max(0.0) * 1.2;
-        write!(
-            svg,
-            "<line class=\"{}\" stroke-width=\"{thick:.1}\" x1=\"{:.1}\" y1=\"{y:.1}\" x2=\"{:.1}\" y2=\"{y:.1}\"/>",
-            if alive { "alive" } else { "dead" },
-            x_of(b.born),
-            x_of(b.last).max(x_of(b.born) + 2.0)
-        )
-        .unwrap();
-        let a = organs_of(&translate_organs(&b.leader, rs, &code));
-        let c = organs_of(&translate_organs(&reverse_complement(&b.leader), rs, &code));
-        write!(
-            svg,
-            "<text x=\"{:.0}\" y=\"{:.0}\" class=\"{}\">R{} [{}|{}] {} bases, pico {}</text>",
-            left + width + 10.0,
-            y + 4.0,
-            if alive { "alive" } else { "dead" },
-            b.id,
-            esc(&a),
-            esc(&c),
-            b.leader.len(),
-            b.peak
-        )
-        .unwrap();
-    }
-    let alive = l.branches.iter().filter(|b| l.alive(b)).count();
-    format!(
-        "<p>{} ramos registados em {} censos (de {} em {} epochs), {} vivos. Tempo da esquerda para a direita; cada ramo novo sai do ramo mais parecido que existia.</p><svg class=\"tree\" width=\"1100\" height=\"{:.0}\">{svg}</svg><p class=\"note\">Verde = vivo no último censo; cinzento = extinto. Espessura = pico de agentes (logarítmica). Entre parênteses: os órgãos das duas fitas. Um ramo sem ligação a outro é uma raiz: apareceu sem parente reconhecível (no primeiro censo são todos).</p>",
-        l.branches.len(),
-        l.censuses,
-        l.every,
-        l.every,
-        alive,
-        40.0 + order.len() as f32 * row
-    )
-}
-
 /// Barras de quantos vivem em cada faixa de altura (de cima para baixo).
 fn bands_svg(b: &[u32; BANDS]) -> String {
     let max = b.iter().copied().max().unwrap_or(1).max(1) as f32;
@@ -431,7 +345,8 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     let mut h = String::new();
     write!(
         h,
-        "<!doctype html><html lang=\"pt\"><meta charset=\"utf-8\"><title>{t}</title><style>{CSS}</style><h1>{t}</h1>",
+        "<!doctype html><html lang=\"pt\"><meta charset=\"utf-8\"><title>{t}</title><style>{CSS}{}</style><h1>{t}</h1>",
+        crate::tree_view::CSS,
         t = esc(title)
     )
     .unwrap();
@@ -456,7 +371,7 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     // Árvores.
     h += "<h2>Linhagens registadas (árvore da vida)</h2>";
     h += &match lineages {
-        Some(l) => recorded_tree(l, w),
+        Some(l) => crate::tree_view::viewer(l, w),
         None => "<p>Sem registo de linhagens (cena aberta fora da aplicação).</p>".to_string(),
     };
     h += "<h2>Parentesco entre as espécies vivas (árvore inferida)</h2>";

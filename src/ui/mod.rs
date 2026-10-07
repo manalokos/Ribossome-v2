@@ -58,6 +58,8 @@ pub struct UiState {
     /// Estatísticas ao longo do tempo (gráficos e logs/estatisticas.csv).
     /// Pedido de relatório (página HTML das espécies e linhagens).
     pub report_now: bool,
+    /// Pedido da página só com a árvore das linhagens.
+    pub tree_now: bool,
     /// Epochs entre censos das linhagens e o estado do registo (texto).
     pub lineage_every: u32,
     pub lineage_info: String,
@@ -194,6 +196,7 @@ impl UiState {
             mark_organ: 0,
             stats: Stats::default(),
             report_now: false,
+            tree_now: false,
             lineage_every: 50_000,
             lineage_info: String::new(),
             history: crate::stats::History::default(),
@@ -398,6 +401,13 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         .clicked()
     {
         st.report_now = true;
+    }
+    if ui
+        .button("abrir a árvore das linhagens")
+        .on_hover_text("a árvore da vida desta corrida numa página interativa (zoom, arrastar, clicar num ramo): o desenho das duas formas de cada ramo, os órgãos e a população ao longo do tempo. É imediata: usa só o registo dos censos")
+        .clicked()
+    {
+        st.tree_now = true;
     }
     ui.separator();
     if ui

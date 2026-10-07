@@ -917,19 +917,24 @@ impl Running {
         let t = std::time::Instant::now();
         let epoch = self.world.params.epoch;
         let html = ribossome::report::generate(&self.gpu, &self.world, Some(&self.lineages), &format!("Ribossome: relatório ao epoch {epoch}"));
+        self.write_page(&format!("relatorio_{epoch}.html"), html, &format!("relatório ({:.1} s)", t.elapsed().as_secs_f32()));
+    }
+
+    /// Grava uma página em saves/relatorios/ e abre-a no browser.
+    fn write_page(&mut self, name: &str, html: String, what: &str) {
         let dir = std::path::Path::new(SAVES_DIR).join("relatorios");
-        let path = dir.join(format!("relatorio_{epoch}.html"));
+        let path = dir.join(name);
         let r = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, html));
         match r {
             Ok(()) => {
-                self.ui.scene_msg = format!("relatório em {} ({:.1} s)", path.display(), t.elapsed().as_secs_f32());
+                self.ui.scene_msg = format!("{what} em {}", path.display());
                 let full = path.canonicalize().unwrap_or(path.clone());
                 #[cfg(windows)]
                 let _ = std::process::Command::new("cmd").args(["/C", "start", "", &full.display().to_string()]).spawn();
                 #[cfg(not(windows))]
                 let _ = std::process::Command::new("xdg-open").arg(&full).spawn();
             }
-            Err(e) => self.ui.scene_msg = format!("relatório: {e}"),
+            Err(e) => self.ui.scene_msg = format!("{what}: {e}"),
         }
         log::info!("{}", self.ui.scene_msg);
     }
@@ -1104,6 +1109,11 @@ impl Running {
         self.lineage_tick();
         if std::mem::take(&mut self.ui.report_now) {
             self.write_report();
+        }
+        if std::mem::take(&mut self.ui.tree_now) {
+            let epoch = self.world.params.epoch;
+            let html = ribossome::tree_view::page(&self.lineages, &self.world, &format!("Ribossome: árvore das linhagens ao epoch {epoch}"));
+            self.write_page(&format!("arvore_{epoch}.html"), html, "árvore");
         }
         let n_steps = self.adaptive_steps();
         let (vp, covered) = (self.viewport, self.covered);
