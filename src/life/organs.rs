@@ -319,7 +319,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             v("eficiencia") * g
         ),
         12 => format!(
-            "âncora {} [anel {}]: liga-se a uma âncora {} de outro agente que toque ou de um filho; {}",
+            "âncora {} [anel {}]: agarra-se a uma âncora {}, a uma ventosa ou a um relé (livres) de outro agente que toque, ou a um filho; {}",
             if v("polaridade") >= 0.0 { "+" } else { "−" },
             if v("polaridade") >= 0.0 { "vermelho" } else { "azul" },
             if v("polaridade") >= 0.0 { "−" } else { "+" },

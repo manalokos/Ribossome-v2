@@ -77,7 +77,7 @@ fn anchor_polarity(slot: u32, k: u32) -> f32 {
 // Probabilidade de quebra por passo da âncora no resíduo k.
 fn anchor_break(slot: u32, k: u32) -> f32 {
     let o = organ_get(slot, k);
-    // Um resíduo comum (agarrado pela âncora de outro) não manda na duração.
+    // Um órgão que não é âncora (ventosa, relé agarrado pela âncora de outro) não manda na duração.
     if (organ_type(o) != ORGAN_ANCHOR) { return 0.0; }
     return max(organ_var(o).p1, 0.0);
 }
@@ -248,17 +248,21 @@ fn bond_propose(@builtin(global_invocation_id) gid: vec3<u32>) {
                     let b = agents[e];
                     let far = length(vec2<f32>(b.pos_x, b.pos_y) - ra) > b.radius + BOND_RANGE + 20.0;
                     if (!far && b.body_len > 0u && !bonded_to(slot, e)) {
-                        // ADESÃO: a âncora agarra-se ao resíduo mais próximo
-                        // do outro corpo que lhe toque, seja ele qual for
-                        // (como uma adesina: basta um dos dois ter âncora).
-                        // Se esse resíduo for outra âncora, só se for de
-                        // polaridade oposta e estiver livre: duas iguais
-                        // não se ligam uma à outra.
+                        // ADESÃO ESPECÍFICA: a âncora só se agarra a certos
+                        // órgãos do outro corpo (os seus "recetores"), o
+                        // mais próximo que lhe toque e esteja livre:
+                        //   - outra âncora de polaridade oposta;
+                        //   - uma ventosa (o pé de um agarra o outro);
+                        //   - um relé (a ligação passa sinais: fica uma
+                        //     sinapse, com o relé a decidir o que entra).
+                        // A um resíduo comum não se agarra: senão qualquer
+                        // toque colava e as colónias eram ao acaso.
                         var best_j = BOND_NONE;
                         var best_d = BOND_RANGE;
                         for (var j = 0u; j < b.body_len; j++) {
                             let pj = anchor_polarity(e, j);
-                            let ok = pj == 0.0 || (pj == -pol && !anchor_busy(e, j));
+                            let tj = organ_type(organ_get(e, j));
+                            let ok = (pj == -pol || tj == ORGAN_HOLDFAST || tj == ORGAN_RELAY) && !anchor_busy(e, j);
                             let dj = length(residue_world(e, b, j) - ra);
                             if (ok && dj <= best_d) {
                                 best_d = dj;

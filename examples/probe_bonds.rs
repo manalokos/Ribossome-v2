@@ -20,9 +20,14 @@ fn main() {
     // Genoma = X + complementar invertido de X: o filho (lido da cadeia
     // complementar) tem o mesmo corpo que o pai.
     // Y (UAU) + S (UCU) = âncora variante 0 (+, permanente); Y + P (CCU) = variante 1 (−).
-    // SOLO=1: só a âncora + (nenhuma −): antes de as âncoras se agarrarem a
-    // qualquer resíduo, estes corpos nunca se ligavam ao tocar.
-    let text = if std::env::var("SOLO").is_ok() {
+    // SOLO=1: só a âncora + (nenhuma −, nenhum órgão a que se agarrar): estes
+    // corpos não se ligam ao tocar.
+    // SOLO=2: a âncora + e uma ventosa (W + C) na outra ponta, que é um dos
+    // órgãos a que as âncoras se agarram.
+    let solo = std::env::var("SOLO").unwrap_or_default();
+    let text = if solo == "2" {
+        format!("AUG UAU UCU {} UGG UGU GAA UAA", "GGU ".repeat(6))
+    } else if solo == "1" {
         format!("AUG UAU UCU {} UAA", "GGU ".repeat(8))
     } else {
         format!("AUG UAU UCU {} UAU CCU UAA", "GGU ".repeat(6))
