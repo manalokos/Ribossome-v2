@@ -210,7 +210,7 @@ fn organ_extent(t: u32) -> f32 {
         case ORGAN_AGE_BIAS: { return 1.2; }
         case ORGAN_HOLDFAST: { return 1.6; }
         case ORGAN_CHIRAL: { return 1.3; }
-        case ORGAN_PROTEASE: { return 1.7; }
+        case ORGAN_PROTEASE: { return 2.1; }
         case ORGAN_ANCHOR: { return 1.5; }
         case ORGAN_BIAS: { return 1.0; }
         case NO_ORGAN: { return 1.0; }
@@ -744,11 +744,18 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             return vec4<f32>(0.72, 0.82, 1.0, 1.0);
         }
         case ORGAN_PROTEASE: {
-            // Disco com dentes (6 triângulos à volta).
+            // (v3) Asterisco: 8 agulhas finas que afilam até à ponta, à
+            // volta de um núcleo pequeno. Com alcance, as agulhas têm o
+            // comprimento do alcance (o quadrado cresce no vértice).
             let ang = atan2(v, u);
-            let tooth = core + (0.95 - core) * max(0.0, 1.0 - abs(fract(ang / 1.0471976) - 0.5) * 4.0);
-            if (d > tooth) { discard; }
-            return vec4<f32>(select(in.color, mix(in.color, vec3<f32>(1.0), 0.8), d > core), 1.0);
+            let off = abs(fract(ang / 0.7853982 + 0.5) - 0.5) * 0.7853982;
+            let across = d * sin(off);
+            let tip = 0.97;
+            let needle = core * 0.14 * (1.0 - 0.8 * d / tip);
+            let hub = core * 0.42;
+            if (d > hub && (d > tip || across > needle)) { discard; }
+            let pale = mix(in.color, vec3<f32>(1.0, 0.8, 0.65), 0.3 + 0.5 * d / tip);
+            return vec4<f32>(select(pale, in.color, d <= hub), 1.0);
         }
         case ORGAN_CHIRAL: {
             // Disco magenta partido ao meio: uma metade cheia, a outra
