@@ -596,6 +596,17 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             default: {}
         }
     }
+    // RESÍDUO NOS OUTROS CANAIS: a emissão de um órgão (menos os relés, que
+    // existem para separar canais) escapa um pouco para os outros três.
+    let leak = clamp(params.signal_crosstalk, 0.0, 0.5);
+    if (leak > 0.0) {
+        for (var k = 0u; k < n; k++) {
+            let t = organ_type(organ_get(slot, k));
+            let e = emit[k];
+            let all = e.x + e.y + e.z + e.w;
+            emit[k] = e + leak * (vec4<f32>(all) - e) * select(0.0, 1.0, t != 0xFFu && t != ORGAN_RELAY);
+        }
+    }
     // Ligações a outros agentes: o resíduo ligado conta como mais um vizinho.
     if (params.bond_signal > 0.0) {
         for (var i = 0u; i < MAX_BONDS; i++) {

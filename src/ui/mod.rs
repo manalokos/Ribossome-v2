@@ -731,6 +731,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
     ui.strong("Sinais internos");
     ui.add(egui::Slider::new(&mut p.signal_mode, 0.0..=4.0).step_by(1.0).text("modo dos sinais"))
         .on_hover_text("como os sinais α/β andam pela cadeia e dobram as juntas. 0: condução e sensibilidade de cada aminoácido (v3). 1: difusão igual para os dois lados e todas as juntas respondem igual (α dobra para um lado, β para o outro). 2: o sinal só anda do lado N para o C, mesma resposta. 3: anda do N para o C e cada junta responde conforme o seu aminoácido (o corpo decide para que lado vira). 4: transporte da tabela (condução de cada aminoácido e órgão, como no 0) mas todas as juntas respondem igual");
+    ui.add(egui::Slider::new(&mut p.signal_crosstalk, 0.0..=0.5).text("resíduo nos outros canais"))
+        .on_hover_text("um órgão que emite num canal deixa escapar esta fração da emissão para cada um dos outros três (especificidade imperfeita): um sensor de α também põe um pouco em β, γ e δ. Os relés não têm resíduo (servem para separar canais). 0 = emissão limpa");
     ui.add(egui::Slider::new(&mut p.clock_mute, 0.0..=1.0).text("silenciar relógios"))
         .on_hover_text("experiência: tira amplitude a todos os relógios (1 = mudos). O órgão continua no corpo e continua a pagar o custo; serve para ver se os agentes se mexem sem ele (sensores, emissão por contacto)");
     ui.small(match p.signal_mode.round() as i32 {

@@ -24,8 +24,9 @@ fn main() {
     // variantes: 1 = β conduz como α (N->C); 2 = sem isolantes nem
     // inversores; 3 = as duas; 4 = sem exceções de sinal na resposta;
     // 5 = só F isola, só P inverte e só D responde ao contrário; 6 = nenhuma
-    // exceção (condução e resposta com os valores de cada um, mas coerentes).
-    let cases: [(&str, f32, f32, u32); 11] = [
+    // exceção (condução e resposta com os valores de cada um, mas coerentes);
+    // 10 = sem resíduo nos outros canais.
+    let cases: [(&str, f32, f32, u32); 12] = [
         ("modo 2 (tudo uniforme)", 2.0, 1.0, 0),
         ("modo 0 (tabela)", 0.0, 1.0, 0),
         ("modo 4 (condução da tabela)", 4.0, 1.0, 0),
@@ -37,6 +38,7 @@ fn main() {
         ("modo 0, resposta × SENS", 0.0, sens, 0),
         ("modo 0, 1 isol. 1 inv. 1 exc.", 0.0, 1.0, 5),
         ("modo 0, sem exceções nenhumas", 0.0, 1.0, 6),
+        ("modo 0, sem resíduo", 0.0, 1.0, 10),
     ];
     println!("{n} sementes, {steps} passos; deslocamento em células");
     let only: Option<Vec<usize>> = std::env::var("CASES").ok().map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
@@ -59,7 +61,10 @@ fn main() {
         w.params.sedimentation = 0.0;
         w.params.spawn_energy = 50.0;
         w.params.signal_mode = mode;
-        if k != 1.0 || variant != 0 {
+        if variant == 10 {
+            w.params.signal_crosstalk = 0.0;
+        }
+        if k != 1.0 || (variant != 0 && variant < 10) {
             let mut rows = w.amino.clone();
             for r in rows.iter_mut() {
                 r.sens_alfa *= k;

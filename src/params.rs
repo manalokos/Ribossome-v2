@@ -377,7 +377,11 @@ gpu_struct! {
         /// kernel mais caro do passo). 1 = em todos os passos. Os agentes
         /// comem em todos os passos de qualquer maneira.
         pub transport_every: u32,
-        pub _pad_i2: u32,
+        /// RESÍDUO NOS OUTROS CANAIS: um órgão que emite num canal deixa
+        /// escapar esta fração da emissão para cada um dos outros três
+        /// (especificidade imperfeita). Os relés não (são eles que separam
+        /// canais). 0 = emissão limpa.
+        pub signal_crosstalk: f32,
     }
 }
 
@@ -557,7 +561,7 @@ impl Default for SimParams {
             bond_matter_share: 0.1,
             brownian_rot: 1.0,
             transport_every: 1,
-            _pad_i2: 0,
+            signal_crosstalk: 0.1,
         }
     }
 }
