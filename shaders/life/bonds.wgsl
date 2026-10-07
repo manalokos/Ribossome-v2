@@ -76,7 +76,10 @@ fn anchor_polarity(slot: u32, k: u32) -> f32 {
 
 // Probabilidade de quebra por passo da âncora no resíduo k.
 fn anchor_break(slot: u32, k: u32) -> f32 {
-    return max(organ_var(organ_get(slot, k)).p1, 0.0);
+    let o = organ_get(slot, k);
+    // Um resíduo comum (agarrado pela âncora de outro) não manda na duração.
+    if (organ_type(o) != ORGAN_ANCHOR) { return 0.0; }
+    return max(organ_var(o).p1, 0.0);
 }
 
 // A ligação ainda é válida (o outro vive e é o mesmo agente)?
@@ -245,10 +248,25 @@ fn bond_propose(@builtin(global_invocation_id) gid: vec3<u32>) {
                     let b = agents[e];
                     let far = length(vec2<f32>(b.pos_x, b.pos_y) - ra) > b.radius + BOND_RANGE + 20.0;
                     if (!far && b.body_len > 0u && !bonded_to(slot, e)) {
+                        // ADESÃO: a âncora agarra-se ao resíduo mais próximo
+                        // do outro corpo que lhe toque, seja ele qual for
+                        // (como uma adesina: basta um dos dois ter âncora).
+                        // Se esse resíduo for outra âncora, só se for de
+                        // polaridade oposta e estiver livre: duas iguais
+                        // não se ligam uma à outra.
+                        var best_j = BOND_NONE;
+                        var best_d = BOND_RANGE;
                         for (var j = 0u; j < b.body_len; j++) {
-                            if (anchor_polarity(e, j) != -pol || anchor_busy(e, j)) { continue; }
-                            if (length(residue_world(e, b, j) - ra) > BOND_RANGE) { continue; }
-                            bonds[prop_i] = vec4<u32>(e, b.id, k | (j << 8u), free);
+                            let pj = anchor_polarity(e, j);
+                            let ok = pj == 0.0 || (pj == -pol && !anchor_busy(e, j));
+                            let dj = length(residue_world(e, b, j) - ra);
+                            if (ok && dj <= best_d) {
+                                best_d = dj;
+                                best_j = j;
+                            }
+                        }
+                        if (best_j != BOND_NONE) {
+                            bonds[prop_i] = vec4<u32>(e, b.id, k | (best_j << 8u), free);
                             atomicMin(&bond_accept[e], slot);
                             return;
                         }
