@@ -93,8 +93,8 @@ pub fn msaa_texture(device: &wgpu::Device, format: wgpu::TextureFormat, width: u
 const RESIDUE_UNITS: f32 = 11.0;
 /// Tamanho de um resíduo no ecrã (píxeis) abaixo do qual se passa a um troço
 /// liso por resíduo, e abaixo do qual se passa a um troço por cada 4.
-const LOD_MID_PX: f32 = 1.0;
-const LOD_FAR_PX: f32 = 0.5;
+const LOD_MID_PX: f32 = 0.35;
+const LOD_FAR_PX: f32 = 0.2;
 
 impl WorldView {
     pub fn new(device: &wgpu::Device, world: &World, format: wgpu::TextureFormat) -> Self {
@@ -337,8 +337,9 @@ impl WorldView {
     ) {
         // NÍVEL DE DETALHE pelo tamanho de um resíduo no ecrã (ver
         // agents_view.wgsl). Com 4 amostras por píxel o desenho detalhado
-        // aguenta até um resíduo por píxel; abaixo de LOD_MID_PX passa a um
-        // troço liso por resíduo e, abaixo de LOD_FAR_PX, a um por cada 4. Além de manter a cor estável,
+        // vai até os órgãos terem ~1 píxel (LOD_MID_PX por resíduo; o mesmo
+        // valor que LOD_SWITCH_PX no shader); abaixo disso passa a um troço
+        // liso por resíduo e, abaixo de LOD_FAR_PX, a um por cada 4. Além de manter a cor estável,
         // poupa vértices (65 ou 17 instâncias por agente em vez de 197).
         let px = cam.zoom * RESIDUE_UNITS;
         let lod = if self.focus.get() != u32::MAX || px >= LOD_MID_PX {

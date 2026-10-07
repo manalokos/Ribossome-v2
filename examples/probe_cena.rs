@@ -35,6 +35,14 @@ fn main() {
             }
         }
     }
+    // STEPS passos antes das imagens (sem correr nenhum não há mordidas a decorrer).
+    let steps = envf("STEPS", 0.0) as u32;
+    if steps > 0 {
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        w.encode_steps(&gpu.queue, &mut enc, steps);
+        gpu.queue.submit([enc.finish()]);
+        gpu.wait_idle();
+    }
     if let Ok(out) = std::env::var("OUT") {
         let size = 1024;
         let cap = Capture::new(&gpu, &w, size);

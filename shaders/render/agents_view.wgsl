@@ -125,7 +125,11 @@ fn class_color(aa: u32) -> vec3<f32> {
 // (os órgãos mais do que os tubos) e as proporções, e com elas a cor do
 // agente, mudavam com o zoom.
 const DETAIL_REF_R: f32 = 3.0;
-const DETAIL_MIN_PX: f32 = 0.45;
+const DETAIL_MIN_PX: f32 = 0.3;
+// Tamanho de um resíduo no ecrã (píxeis) abaixo do qual o desenho passa aos
+// troços lisos (LOD_MID_PX em render/mod.rs) e comprimento de um resíduo.
+const LOD_SWITCH_PX: f32 = 0.35;
+const RESIDUE_UNITS: f32 = 11.0;
 fn detail_fat() -> f32 {
     return max(1.0, DETAIL_MIN_PX / (DETAIL_REF_R * view.zoom));
 }
@@ -244,11 +248,14 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             var thick = 0.0;
             var cnt = 0.0;
             var organ_w = 0.0;
+            var armed = false;
             for (var q = k0; q < min(k0 + stride, a.body_len); q++) {
                 let c = lod_residue_color(slot, q);
                 sum += vec4<f32>(c.rgb * c.a, c.a);
                 let aq = (bodies_view[slot * 16u + q / 4u] >> ((q % 4u) * 8u)) & 0xFFu;
-                let has_organ = ((organs_view[slot * 32u + q / 2u] >> ((q % 2u) * 16u)) & 0xFFFFu) != 0u;
+                let oq = (organs_view[slot * 32u + q / 2u] >> ((q % 2u) * 16u)) & 0xFFFFu;
+                let has_organ = oq != 0u;
+                if (has_organ && (oq & 0x1Fu) - 1u == ORGAN_PROTEASE) { armed = true; }
                 thick += (0.9 + 3.0 * pow(aa_props_view[aq].volume / 130.0, 1.4)) * select(1.0, LOD_ORGAN_THICK, has_organ);
                 organ_w += select(0.0, c.a, has_organ);
                 cnt += 1.0;
@@ -259,9 +266,28 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             if (view.signal_view == 0u || view.signal_view == 4u) {
                 colr *= mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
             }
-            if (bite_view[slot].x > 0.0 && view.signal_view == 0u) { colr = BITE_VICTIM_COLOR; }
-            // Mínimo de 1 píxel de raio; até 1,5 conforme o peso dos órgãos no troço.
-            let r_lod = max(thick / max(cnt, 1.0), (1.0 + 0.5 * organ_w / max(sum.a, 1e-6)) / view.zoom);
+            // O mínimo de espessura cresce aos poucos a partir do limiar
+            // (onde o desenho detalhado acaba com tubos finos) até 1 píxel
+            // de raio (1,5 com órgãos) a metade desse zoom: sem salto de
+            // espessura na passagem e sem desaparecer ao longe.
+            let px = view.zoom * RESIDUE_UNITS;
+            let grow = clamp((LOD_SWITCH_PX - px) / (0.5 * LOD_SWITCH_PX), 0.0, 1.0);
+            let floor_px = grow * (1.0 + 0.5 * organ_w / max(sum.a, 1e-6));
+            var r_lod = max(thick / max(cnt, 1.0) * detail_fat(), floor_px / view.zoom);
+            // MORDIDAS (como de perto): a vítima a vermelho; o troço com a
+            // protease que ataca a amarelo. Mais grossos, para o clarão se
+            // ver ao longe.
+            let bite = bite_view[slot];
+            if (view.signal_view == 0u) {
+                if (bite.x > 0.0) {
+                    colr = BITE_VICTIM_COLOR;
+                    r_lod = max(r_lod * 1.6, 1.5 / view.zoom);
+                }
+                if (bite.z > 0.0 && armed) {
+                    colr = BITE_ATTACK_COLOR;
+                    r_lod = max(r_lod * BITE_ORGAN_GROW, 2.0 / view.zoom);
+                }
+            }
             return capsule_vertex(vi, residue_world_v(slot, a, k0), residue_world_v(slot, a, k1), r_lod, colr);
         }
         // RNA nu: o ponto do costume (só a instância 0 desenha).
