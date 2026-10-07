@@ -358,7 +358,8 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 // intensidade) na parte inteira, abertura na fracionaria.
                 let force = max(pv.p1, 0.0) * exp2((f32(oc >> 8u) - 32.0) / 8.0);
                 phase = clamp(round(4.0 + 3.5 * force), 6.0, 24.0) + drive * 0.99;
-                if (bite.z > 0.0 && glyph) {
+                // So pisca a protease que esta ligada (a que morde).
+                if (bite.z > 0.0 && glyph && drive > 0.0) {
                     flash = BITE_ATTACK_COLOR;
                     // Ao longe (quando o corpo já está a ser engrossado) a
                     // protease cresce menos: a cor amarela chega.
@@ -755,7 +756,8 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             // comprido tem o alcance (o quadrado cresce no vertice).
             let count = floor(in.core_phase.y);
             let open = clamp((in.core_phase.y - count) / 0.99, 0.0, 1.0);
-            let half = mix(0.22, 3.0, open);
+            // Raiz: um sinal fraco ja abre bastante (a protease ja morde).
+            let half = mix(0.22, 3.0, sqrt(open));
             let gap = 2.0 * half / count;
             let ang = atan2(u, v);
             let hub = core * 0.42;
