@@ -4,9 +4,11 @@
 pub mod editor;
 pub mod gpu;
 pub mod life;
+pub mod lineage;
 pub mod mcp;
 pub mod params;
 pub mod render;
+pub mod report;
 pub mod runlog;
 pub mod species;
 pub mod shaders;

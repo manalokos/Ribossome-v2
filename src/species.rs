@@ -61,6 +61,12 @@ fn edit_within(a: &[u8], b: &[u8], max: usize) -> Option<usize> {
 /// Agrupa os genomas em espécies (ver o topo do módulo). Devolve-as por
 /// ordem decrescente de agentes.
 pub fn cluster(genomes: &[Vec<u8>], threshold: f32) -> Vec<Species> {
+    cluster_members(genomes, threshold).0
+}
+
+/// Como `cluster`, mais a espécie de cada genoma dado (índice na lista
+/// devolvida) e se está na fita do líder.
+pub fn cluster_members(genomes: &[Vec<u8>], threshold: f32) -> (Vec<Species>, Vec<(u32, bool)>) {
     let mut counts: HashMap<&[u8], u32> = HashMap::new();
     for g in genomes {
         *counts.entry(g.as_slice()).or_default() += 1;
@@ -68,6 +74,7 @@ pub fn cluster(genomes: &[Vec<u8>], threshold: f32) -> Vec<Species> {
     let mut distinct: Vec<(&[u8], u32)> = counts.into_iter().collect();
     distinct.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
     let mut out: Vec<Species> = Vec::new();
+    let mut of: HashMap<&[u8], (usize, bool)> = HashMap::new();
     for (g, n) in distinct {
         let rc = reverse_complement(g);
         let mut found = None;
@@ -82,17 +89,41 @@ pub fn cluster(genomes: &[Vec<u8>], threshold: f32) -> Vec<Species> {
                 break;
             }
         }
-        match found {
+        let place = match found {
             Some((si, same)) => {
                 out[si].count += n;
                 out[si].distinct += 1;
                 out[si].same_strand += if same { n } else { 0 };
+                (si, same)
             }
-            None => out.push(Species { leader: g.to_vec(), count: n, distinct: 1, same_strand: n }),
-        }
+            None => {
+                out.push(Species { leader: g.to_vec(), count: n, distinct: 1, same_strand: n });
+                (out.len() - 1, true)
+            }
+        };
+        of.insert(g, place);
     }
-    out.sort_by(|a, b| b.count.cmp(&a.count));
-    out
+    // Ordem final: por agentes (estável, como sempre foi).
+    let mut order: Vec<usize> = (0..out.len()).collect();
+    order.sort_by(|&a, &b| out[b].count.cmp(&out[a].count));
+    let mut rank = vec![0u32; out.len()];
+    for (r, &i) in order.iter().enumerate() {
+        rank[i] = r as u32;
+    }
+    let members = genomes.iter().map(|g| of[g.as_slice()]).map(|(si, same)| (rank[si], same)).collect();
+    let mut slots: Vec<Option<Species>> = out.into_iter().map(Some).collect();
+    let sorted = order.iter().map(|&i| slots[i].take().unwrap()).collect();
+    (sorted, members)
+}
+
+/// Distância entre dois genomas (0 = iguais, 1 = nada em comum): a menor das
+/// distâncias de edição entre um e o outro ou o seu complemento reverso, a
+/// dividir pelo comprimento do maior.
+pub fn distance(a: &[u8], b: &[u8]) -> f32 {
+    let n = a.len().max(b.len()).max(1);
+    let d1 = edit_within(a, b, n).unwrap_or(n);
+    let d2 = edit_within(&reverse_complement(a), b, n).unwrap_or(n);
+    d1.min(d2) as f32 / n as f32
 }
 
 /// Genomas dos agentes vivos (bases 0..3), pela ordem dos slots.

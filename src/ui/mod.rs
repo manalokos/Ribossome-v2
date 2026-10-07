@@ -56,6 +56,11 @@ pub struct UiState {
     /// Velocidade e população (atualizadas ~2×/s em `update_stats`).
     pub stats: Stats,
     /// Estatísticas ao longo do tempo (gráficos e logs/estatisticas.csv).
+    /// Pedido de relatório (página HTML das espécies e linhagens).
+    pub report_now: bool,
+    /// Epochs entre censos das linhagens e o estado do registo (texto).
+    pub lineage_every: u32,
+    pub lineage_info: String,
     pub history: crate::stats::History,
     /// O que os dois gráficos mostram.
     pub charts: crate::stats::ChartSel,
@@ -188,6 +193,9 @@ impl UiState {
             signal_view: 0,
             mark_organ: 0,
             stats: Stats::default(),
+            report_now: false,
+            lineage_every: 50_000,
+            lineage_info: String::new(),
             history: crate::stats::History::default(),
             charts: Default::default(),
             terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "assets/terreno.png".into()),
@@ -371,6 +379,25 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         None => {
             ui.label("autosave desligado neste arranque (cenário de teste)");
         }
+    }
+    ui.separator();
+    ui.strong("Espécies e linhagens");
+    ui.horizontal(|ui| {
+        ui.label("censo das linhagens de");
+        ui.add(egui::DragValue::new(&mut st.lineage_every).range(5_000..=5_000_000).speed(1000));
+        ui.label("em epochs");
+    })
+    .response
+    .on_hover_text("de tempos a tempos agrupam-se os genomas vivos em espécies e liga-se cada uma àquela de que descende: é o registo da árvore da vida desta corrida. Fica guardado com a cena e recomeça com um mundo novo. Cada censo lê os agentes todos da placa (uma pausa de centésimos de segundo)");
+    if !st.lineage_info.is_empty() {
+        ui.small(&st.lineage_info);
+    }
+    if ui
+        .button("gerar relatório (página HTML)")
+        .on_hover_text("uma página com as espécies e as suas duas formas (retratos, órgãos, onde vivem), quem pode atacar quem, ataques e ligações a decorrer, e as árvores: a das linhagens registadas e a do parentesco entre as espécies vivas. Fica em saves/relatorios/ e abre no browser. Demora uns segundos")
+        .clicked()
+    {
+        st.report_now = true;
     }
     ui.separator();
     if ui

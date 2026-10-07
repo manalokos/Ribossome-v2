@@ -44,6 +44,11 @@ impl Capture {
         Self { view, size, texture, readback, signal_view: std::cell::Cell::new(0) }
     }
 
+    /// Lado da imagem, em píxeis.
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
     /// Vista da textura (para mostrar no egui, p. ex. no inspetor).
     pub fn texture_view(&self) -> wgpu::TextureView {
         self.texture.create_view(&Default::default())

@@ -56,6 +56,8 @@ struct Running {
     kin_frames: u32,
     /// Refresco fluido: instante do frame anterior e passos por frame que a
     /// placa está a aguentar (ver `adaptive_steps`).
+    /// Registo das linhagens (árvore da vida da corrida); guardado com a cena.
+    lineages: ribossome::lineage::Lineages,
     last_frame: std::time::Instant,
     steps_eff: f32,
     /// Estimativa de frame = o + n·s (ver adaptive_steps): médias de n, f,
@@ -216,13 +218,16 @@ impl Running {
         let mut scene_msg = String::new();
         let mut resumed = None;
         let mut resumed_stats: Option<Vec<u8>> = None;
+        let mut resumed_lineages: Option<ribossome::lineage::Lineages> = None;
         if let Some(path) = autosave_path.as_deref().filter(|p| resume && std::path::Path::new(p).exists()) {
             let t = std::time::Instant::now();
             let scene = ribossome::world::Scene::read(std::path::Path::new(path));
             let stats_bytes = scene.as_ref().ok().and_then(|s| s.extra_block("estatisticas").map(|b| b.to_vec()));
+            let lineage_bytes = scene.as_ref().ok().and_then(|s| s.extra_block("linhagens").map(|b| b.to_vec()));
             match scene.and_then(|s| world.load_scene(&gpu, &s)) {
                 Ok((extra, notes)) => {
                     resumed_stats = stats_bytes;
+                    resumed_lineages = lineage_bytes.and_then(|b| ribossome::lineage::Lineages::from_bytes(&b));
                     scene_msg = format!("retomado de {path} (epoch {})", world.params.epoch);
                     log::info!("{scene_msg} em {:.1} s", t.elapsed().as_secs_f32());
                     for n in notes {
@@ -303,6 +308,7 @@ impl Running {
             last_autosave,
             kin_id: None,
             kin_frames: 0,
+            lineages: resumed_lineages.unwrap_or_default(),
             last_frame: std::time::Instant::now(),
             steps_eff: 1.0,
             fit: [0.0; 5],
@@ -385,7 +391,7 @@ impl Running {
         self.finish_save(true);
         let t = std::time::Instant::now();
         let extra = self.interface_json();
-        let blocks = vec![("estatisticas", self.ui.history.to_bytes())];
+        let blocks = vec![("estatisticas", self.ui.history.to_bytes()), ("linhagens", self.lineages.to_bytes())];
         self.save_job = Some(self.world.save_scene(&self.gpu, path, extra, blocks, keep_previous));
         log::info!("cena: estado lido da GPU em {:.2} s (epoch {})", t.elapsed().as_secs_f32(), self.world.params.epoch);
         self.ui.scene_msg = "a gravar…".into();
@@ -440,9 +446,12 @@ impl Running {
                     self.finish_save(true);
                     let scene = ribossome::world::Scene::read(&path);
                     let stats_bytes = scene.as_ref().ok().and_then(|s| s.extra_block("estatisticas").map(|b| b.to_vec()));
+                    let lineage_bytes = scene.as_ref().ok().and_then(|s| s.extra_block("linhagens").map(|b| b.to_vec()));
                     match scene.and_then(|s| self.world.load_scene(&self.gpu, &s)) {
                         Ok((extra, notes)) => {
                             self.apply_interface(&extra);
+                            // O registo das linhagens é o da cena (ou vazio, se ela não o tiver).
+                            self.lineages = lineage_bytes.and_then(|b| ribossome::lineage::Lineages::from_bytes(&b)).unwrap_or_default();
                             self.ui.history = ribossome::stats::History::from_saved(
                                 &extra["estatisticas"],
                                 stats_bytes.as_deref().unwrap_or_default(),
@@ -474,6 +483,7 @@ impl Running {
             Some(SceneAction::NewWorld) => {
                 self.world.reset_settings();
                 self.ui.history = ribossome::stats::History::default();
+            self.lineages = ribossome::lineage::Lineages::default();
                 startup_terrain(&mut self.world);
                 if lab_mode() {
                     self.world.configure_lab();
@@ -873,6 +883,53 @@ impl Running {
         n
     }
 
+    /// Censo das linhagens, quando chega a altura (ver `lineage.rs`).
+    fn lineage_tick(&mut self) {
+        let epoch = self.world.params.epoch;
+        self.lineages.every = self.ui.lineage_every.max(5_000);
+        let l = &self.lineages;
+        if l.censuses > 0 && epoch < l.last_epoch {
+            // O epoch voltou atrás sem aviso: é outra corrida.
+            self.lineages = ribossome::lineage::Lineages { every: l.every, ..Default::default() };
+        }
+        if self.ui.paused || epoch < self.lineages.next_epoch {
+            return;
+        }
+        let genomes = ribossome::species::living_genomes(&self.gpu, &self.world);
+        let species = ribossome::species::cluster(&genomes, 0.15);
+        self.lineages.census(epoch, &species, genomes.len());
+        let l = &self.lineages;
+        self.ui.lineage_info = format!(
+            "{} censos, {} ramos registados ({} vivos); último censo ao epoch {}",
+            l.censuses,
+            l.branches.len(),
+            l.branches.iter().filter(|b| l.alive(b)).count(),
+            l.last_epoch
+        );
+    }
+
+    /// Gera a página do relatório em saves/relatorios/ e abre-a no browser.
+    fn write_report(&mut self) {
+        let t = std::time::Instant::now();
+        let epoch = self.world.params.epoch;
+        let html = ribossome::report::generate(&self.gpu, &self.world, Some(&self.lineages), &format!("Ribossome: relatório ao epoch {epoch}"));
+        let dir = std::path::Path::new(SAVES_DIR).join("relatorios");
+        let path = dir.join(format!("relatorio_{epoch}.html"));
+        let r = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, html));
+        match r {
+            Ok(()) => {
+                self.ui.scene_msg = format!("relatório em {} ({:.1} s)", path.display(), t.elapsed().as_secs_f32());
+                let full = path.canonicalize().unwrap_or(path.clone());
+                #[cfg(windows)]
+                let _ = std::process::Command::new("cmd").args(["/C", "start", "", &full.display().to_string()]).spawn();
+                #[cfg(not(windows))]
+                let _ = std::process::Command::new("xdg-open").arg(&full).spawn();
+            }
+            Err(e) => self.ui.scene_msg = format!("relatório: {e}"),
+        }
+        log::info!("{}", self.ui.scene_msg);
+    }
+
     fn redraw(&mut self) {
         self.runlog.before_frame(&mut self.profiler);
         if let Some(ed) = &self.editor {
@@ -930,6 +987,7 @@ impl Running {
             };
             self.ui.ledger = None;
             self.ui.history = ribossome::stats::History::default();
+            self.lineages = ribossome::lineage::Lineages::default();
             self.last_autosave = 0;
             log::info!("recomeço: mesmo terreno e parâmetros, epoch 0");
         }
@@ -945,6 +1003,7 @@ impl Running {
             // Mundo semeado de novo: os gráficos recomeçam (o CSV fica, com
             // uma linha de cabeçalho nova a marcar o recomeço).
             self.ui.history = ribossome::stats::History::default();
+            self.lineages = ribossome::lineage::Lineages::default();
             self.ui.history.next_epoch = self.world.params.epoch;
         }
         let want_vsync = matches!(self.surface_cfg.present_mode, wgpu::PresentMode::AutoVsync);
@@ -1038,6 +1097,10 @@ impl Running {
         }
         let want_stats = epoch_now >= self.ui.history.next_epoch;
 
+        self.lineage_tick();
+        if std::mem::take(&mut self.ui.report_now) {
+            self.write_report();
+        }
         let n_steps = self.adaptive_steps();
         let (vp, covered) = (self.viewport, self.covered);
         // Só se desenham os agentes à vista (aqui, mesmo antes de a lista
