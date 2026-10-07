@@ -41,6 +41,13 @@ fn main() {
             (0..n).map(|_| SpawnRequest::with_genome(s * (0.05 + 0.9 * rng.f32()), s * (0.3 + 0.65 * rng.f32()), &g)).collect();
         world.request_seeds(&reqs);
     }
+    // PARAMS=nome=valor,... por cima de tudo (também da cena).
+    if let Ok(list) = std::env::var("PARAMS") {
+        for kv in list.split(',').filter(|s| !s.is_empty()) {
+            let (k, v) = kv.split_once('=').expect("PARAMS: nome=valor");
+            assert!(world.params.set_named(k.trim(), v.trim().parse().expect("valor")), "parâmetro desconhecido: {k}");
+        }
+    }
     let step = |w: &mut World, k: u32| {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         w.encode_steps(&gpu.queue, &mut enc, k);

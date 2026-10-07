@@ -268,3 +268,25 @@ fn restart_keeps_the_terrain() {
     assert_eq!(now.total(), seeded.total());
     assert_eq!(now.held_total(), 0);
 }
+
+/// O transporte de N em N passos também conserva a matéria e continua a
+/// mexer nela.
+#[test]
+fn sparse_transport_conserves_matter() {
+    let gpu = Gpu::new_headless().expect("este teste precisa de uma GPU");
+    let mut world = World::new(&gpu, WorldConfig::TEST, 5);
+    world.params.diffusion = 10.0;
+    world.params.settle = 1.0;
+    world.params.thermal_activation = 1.0;
+    world.params.aggregation = 0.02;
+    world.params.transport_every = 3;
+    let seeded = world.seed_matter(&gpu, 5);
+    let before = world.read_cells_blocking(&gpu);
+    run(&gpu, &mut world, 600);
+    let cells = world.read_cells_blocking(&gpu);
+    let after = Ledger::from_cells(&cells);
+    let moved = cells.iter().zip(&before).filter(|(a, b)| a != b).count();
+    assert!(moved > cells.len() / 10, "quase nada se moveu");
+    assert_eq!(after.total(), seeded.total(), "matéria total não conservada");
+    assert_eq!(channels(&after), channels(&seeded), "matéria não conservada por canal");
+}

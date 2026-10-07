@@ -1439,12 +1439,16 @@ impl World {
 
             // TRANSPORTE em duas fases (reprodutível): espalhar para chem_next
             // a partir do estado antes do passo, depois copiar de volta.
-            if self.params.aggregation > 0.0 {
-                run(&mut pass, "agg_count", &pl.agg_count, ab, [g, g]);
-                run(&mut pass, "agg_neighbours", &pl.agg_neighbours, ab, [g, g]);
+            // (De N em N passos, com N vezes o deslocamento: ver
+            // params.transport_every e transport_scale no shader.)
+            if epoch % self.params.transport_every.max(1) == 0 {
+                if self.params.aggregation > 0.0 {
+                    run(&mut pass, "agg_count", &pl.agg_count, ab, [g, g]);
+                    run(&mut pass, "agg_neighbours", &pl.agg_neighbours, ab, [g, g]);
+                }
+                run(&mut pass, "transport", &pl.transport, ab, [g, g]);
+                run(&mut pass, "commit", &pl.commit, ab, commit_groups);
             }
-            run(&mut pass, "transport", &pl.transport, ab, [g, g]);
-            run(&mut pass, "commit", &pl.commit, ab, commit_groups);
 
             // ORGANISMOS: depois do commit (os depósitos da morte vão para chem_grid).
             run(&mut pass, "agents_step", &pl.agents_step, ab, [ag, 1]);

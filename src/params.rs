@@ -372,7 +372,11 @@ gpu_struct! {
         /// e não seguia o slider do movimento browniano. 1 = a de sempre;
         /// 0 = os corpos só rodam por nadar, pela água ou por contacto.
         pub brownian_rot: f32,
-        pub _pad_i1: u32,
+        /// TRANSPORTE dos monómeros de N em N passos, com N vezes o
+        /// deslocamento e as probabilidades de cada vez (o transporte é o
+        /// kernel mais caro do passo). 1 = em todos os passos. Os agentes
+        /// comem em todos os passos de qualquer maneira.
+        pub transport_every: u32,
         pub _pad_i2: u32,
     }
 }
@@ -552,7 +556,7 @@ impl Default for SimParams {
             salvage: 0.0,
             bond_matter_share: 0.1,
             brownian_rot: 1.0,
-            _pad_i1: 0,
+            transport_every: 1,
             _pad_i2: 0,
         }
     }

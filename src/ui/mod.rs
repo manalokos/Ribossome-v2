@@ -478,6 +478,8 @@ fn tab_matter(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.separator();
     ui.strong("Transporte dos monómeros");
     ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("difusão ×"));
+    ui.add(egui::Slider::new(&mut p.transport_every, 1..=4).text("transporte de N em N passos"))
+        .on_hover_text("o transporte dos monómeros (corrente, difusão, agregação, reações) é a parte mais cara de cada passo. Com 2, corre passo sim, passo não, com o dobro do deslocamento de cada vez: a simulação fica ~15% mais rápida e os monómeros andam em saltos maiores e menos frequentes. Os agentes comem em todos os passos. A difusão máxima possível baixa na mesma proporção. 1 = como sempre");
     ui.add(egui::Slider::new(&mut p.monomer_pressure, 0.0..=20.0).text("pressão dos monómeros"))
         .on_hover_text("a difusão empurra das zonas cheias para as vazias");
     ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão dos ativados do mesmo tipo"))

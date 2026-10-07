@@ -161,19 +161,23 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         else if ((v.y > 0.0 && rock_d) || (v.y < 0.0 && rock_u)) { v.y *= 0.5; }
     }
     // Deslocamento por passo, em células do ambiente.
-    let disp = v * (f32(GRID_SIZE) / f32(FLUID_SIZE)) * max(params.dt, 0.0);
+    // TRANSPORTE DE N EM N PASSOS (params.transport_every): cada passagem
+    // vale por N passos: N vezes o deslocamento pela corrente e N vezes as
+    // probabilidades de salto e de reação.
+    let tn = f32(max(params.transport_every, 1u));
+    let disp = v * (f32(GRID_SIZE) / f32(FLUID_SIZE)) * max(params.dt, 0.0) * tn;
     let agitation = clamp(length(v) / DIFF_AGITATION_SPEED, 0.0, 1.0);
-    var p_diff = clamp(DIFF_HOP_P * mix(DIFF_HOP_FLOOR, 1.0, agitation) * max(params.diffusion, 0.0), 0.0, 0.5);
+    var p_diff = clamp(DIFF_HOP_P * mix(DIFF_HOP_FLOOR, 1.0, agitation) * max(params.diffusion, 0.0) * tn, 0.0, 0.5);
     if (g_src > 0u) {
         // Difusão no terreno: mais lenta (tortuosidade dos poros).
-        p_diff = DIFF_HOP_P * BURIED_DIFF_FACTOR / (1.0 + GAMMA_POROSITY_K * f32(g_src));
+        p_diff = min(DIFF_HOP_P * BURIED_DIFF_FACTOR / (1.0 + GAMMA_POROSITY_K * f32(g_src)) * tn, 0.5);
     }
     if (src_total > chem_capacity(idx)) {
-        p_diff = CHEM_SQUEEZE_P;
+        p_diff = min(CHEM_SQUEEZE_P * tn, 0.5);
     }
     var p_settle = 0.0;
     if (g_src == 0u) {
-        p_settle = MONOMER_SETTLE_P * max(params.settle, 0.0);
+        p_settle = min(MONOMER_SETTLE_P * max(params.settle, 0.0) * tn, 0.5);
     }
 
     // Janela de destinos 4×4 à volta de floor(disp): o ponto de partida
@@ -203,7 +207,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
     // A pressão também aumenta o FLUXO: saltos extra ∝ à maior queda de
     // enchimento para uma vizinha (uma célula cheia ao lado de uma vazia
     // despeja mais).
-    p_diff = clamp(p_diff + PRESSURE_HOP_P * params.monomer_pressure * max_drop, 0.0, 0.5);
+    p_diff = clamp(p_diff + PRESSURE_HOP_P * params.monomer_pressure * max_drop * tn, 0.0, 0.5);
     let light_t = uv_light_at_cell(x, y);
 
     // AGREGAÇÃO dos ativados: gás de rede com atração, dinâmica de KAWASAKI.
@@ -269,7 +273,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
             let sens = 1.0 + CHEM_SENSITIZE * f32(min(act_n, 8u));
             // + reativação uniforme (modo laboratório): cada gasto tem a mesma
             // probabilidade por passo, em qualquer lado.
-            let exp_act = f32(min(spent_n, 8u)) * (LIGHT_ACT_P * max(params.uv_strength, 0.0) * max(params.direct_photoactivation, 0.0) * light_t * sens
+            let exp_act = f32(min(spent_n, 8u)) * tn * (LIGHT_ACT_P * max(params.uv_strength, 0.0) * max(params.direct_photoactivation, 0.0) * light_t * sens
                 + max(params.reactivation_rate, 0.0));
             var na = u32(floor(exp_act));
             // (Sem probabilidade não se sorteia: o resultado seria o mesmo.)
@@ -282,7 +286,7 @@ fn transport_scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
         // DECAIMENTO com blindagem.
         if (act_n > 0u) {
             let shield = 1.0 / (1.0 + CHEM_SHIELD * f32(min(act_n, 8u) - 1u));
-            let exp_dec = f32(min(act_n, 8u)) * max(params.activation_decay, 0.0) * shield;
+            let exp_dec = f32(min(act_n, 8u)) * max(params.activation_decay, 0.0) * shield * tn;
             if (exp_dec > 0.0 && rng_f4(slot, params.epoch, S_DECAY).x < exp_dec) {
                 act_n -= 1u;
                 spent_n += 1u;
