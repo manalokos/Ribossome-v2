@@ -354,11 +354,13 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 var drive = 1.0;
                 if (pv.p2 >= 0.0) { drive = clamp(signals_view[base + k][u32(clamp(pv.p2, 0.0, 3.0))], 0.0, 1.0); }
                 spike = max(pv.p0, 0.0) * drive;
+                // O leque abre na medida em que a protease esta ligada.
+                phase = drive;
                 if (bite.z > 0.0 && glyph) {
                     flash = BITE_ATTACK_COLOR;
                     // Ao longe (quando o corpo já está a ser engrossado) a
                     // protease cresce menos: a cor amarela chega.
-                    r_world *= mix(BITE_ORGAN_GROW, 1.2, clamp((detail_fat() - 1.0) / 1.5, 0.0, 1.0));
+                    r_world *= 1.12;
                 }
             }
             if (organ == ORGAN_HOLDFAST) { col = vec3<f32>(0.85, 0.6, 0.3); }
@@ -744,16 +746,19 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             return vec4<f32>(0.72, 0.82, 1.0, 1.0);
         }
         case ORGAN_PROTEASE: {
-            // (v3) Asterisco: 8 agulhas finas que afilam até à ponta, à
-            // volta de um núcleo pequeno. Com alcance, as agulhas têm o
-            // comprimento do alcance (o quadrado cresce no vértice).
-            let ang = atan2(v, u);
-            let off = abs(fract(ang / 0.7853982 + 0.5) - 0.5) * 0.7853982;
-            let across = d * sin(off);
-            let tip = 0.97;
-            let needle = core * 0.14 * (1.0 - 0.8 * d / tip);
+            // LEQUE de 5 agulhas finas para um dos lados da cadeia, a do
+            // meio mais comprida. Desligada, o leque esta fechado (um
+            // feixe); ligada, abre. Com alcance, as agulhas tem o
+            // comprimento do alcance (o quadrado cresce no vertice).
+            let open = clamp(in.core_phase.y, 0.0, 1.0);
+            let step = mix(0.05, 0.5, open);
+            let ang = atan2(u, v);
+            let i = clamp(round(ang / step), -2.0, 2.0);
+            let off = min(abs(ang - i * step), 1.5);
+            let tip = 0.97 * (1.0 - 0.16 * abs(i));
+            let needle = core * 0.15 * (1.0 - 0.8 * d / tip);
             let hub = core * 0.42;
-            if (d > hub && (d > tip || across > needle)) { discard; }
+            if (d > hub && (d > tip || d * sin(off) > needle)) { discard; }
             let pale = mix(in.color, vec3<f32>(1.0, 0.8, 0.65), 0.3 + 0.5 * d / tip);
             return vec4<f32>(select(pale, in.color, d <= hub), 1.0);
         }
