@@ -320,6 +320,8 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     let bite = bite_view[slot];
     var flash = vec3<f32>(-1.0);
     if (bite.x > 0.0) { flash = BITE_VICTIM_COLOR; }
+    // Comprimento dos espigões de uma protease de alcance (unidades do mundo).
+    var spike = 0.0;
     if (!naked) {
         let base = slot * MAX_BODY_V;
         let aa = (bodies_view[slot * 16u + k / 4u] >> ((k % 4u) * 8u)) & 0xFFu;
@@ -345,6 +347,13 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             r_world *= ORGAN_SCALE;
             if (organ == ORGAN_PROTEASE) {
                 col = vec3<f32>(0.9, 0.2, 0.2);
+                // ESPIGÕES: do comprimento do alcance da variante, abertos
+                // na medida em que a protease está ligada (sempre, ou pelo
+                // sinal do seu canal); recolhidos ficam os dentes curtos.
+                let pv = organ_variants_view[ORGAN_PROTEASE * ORGAN_VARIANTS + min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u)];
+                var drive = 1.0;
+                if (pv.p2 >= 0.0) { drive = clamp(signals_view[base + k][u32(clamp(pv.p2, 0.0, 3.0))], 0.0, 1.0); }
+                spike = max(pv.p0, 0.0) * drive;
                 if (bite.z > 0.0 && glyph) {
                     flash = BITE_ATTACK_COLOR;
                     // Ao longe (quando o corpo já está a ser engrossado) a
@@ -427,7 +436,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         return o;
     }
-    let ext = organ_extent(organ);
+    let ext = organ_extent(organ) + spike / max(r_world, 1e-3);
     let r = r_world * ext * detail_fat();
     let w = centre + c * r;
     let px = (w - cam_center()) * view.zoom;

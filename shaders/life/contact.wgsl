@@ -69,19 +69,104 @@ const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 10000.0;
 const S_DIGEST: u32 = 13u;
 
-// Força das proteases ATIVAS do agente, por família.
-fn protease_sites(slot: u32, n: u32) -> vec3<f32> {
-    var s = vec3<f32>(0.0);
+// FAMÍLIA de uma protease = o que corta, decidido pelo aminoácido SEGUINTE
+// da cadeia (o bolso de especificidade; a mesma regra da antena do sensor
+// de corpos, ver pocket_family): 1 = lisina e arginina, 2 = aspartato e
+// asparagina, 3 = aromáticos e leucina. Sem um vizinho desses é generalista:
+// corta as três, com um terço da força em cada.
+fn protease_family(slot: u32, k: u32, n: u32) -> u32 {
+    var f = 0u;
+    if (k + 1u < n) { f = pocket_family(body_get(slot, k + 1u)); }
+    return f;
+}
+
+fn family_weights(f: u32) -> vec3<f32> {
+    var w = vec3<f32>(1.0 / 3.0);
+    if (f == 1u) { w = vec3<f32>(1.0, 0.0, 0.0); }
+    if (f == 2u) { w = vec3<f32>(0.0, 1.0, 0.0); }
+    if (f == 3u) { w = vec3<f32>(0.0, 0.0, 1.0); }
+    return w;
+}
+
+// Quanto a protease do resíduo k está LIGADA (0..1): sempre, ou pelo sinal
+// interno do canal da variante (p2).
+fn protease_drive(slot: u32, k: u32, v: OrganVariant) -> f32 {
+    var drive = 1.0;
+    if (v.p2 >= 0.0) { drive = clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p2, 0.0, 3.0))], 0.0, 1.0); }
+    return drive;
+}
+
+// ALCANCE: a variante (p0) diz a que distância ALÉM do contacto a protease
+// chega (0 = só a tocar; as de alcance são proteases segregadas para a água
+// à volta). Três escalões: contacto, médio e longo, com a força ativa de
+// cada família em cada um e o alcance do escalão.
+const PROTEASE_MID_FROM: f32 = 10.0;
+const PROTEASE_FAR_FROM: f32 = 70.0;
+struct ProteaseArms {
+    near: vec3<f32>,
+    mid: vec3<f32>,
+    far: vec3<f32>,
+    r_mid: f32,
+    r_far: f32,
+}
+
+fn protease_arms(slot: u32, n: u32) -> ProteaseArms {
+    var arms: ProteaseArms;
+    arms.near = vec3<f32>(0.0);
+    arms.mid = vec3<f32>(0.0);
+    arms.far = vec3<f32>(0.0);
+    arms.r_mid = 0.0;
+    arms.r_far = 0.0;
     for (var k = 0u; k < n; k++) {
         let o = organ_get(slot, k);
         if (organ_type(o) == ORGAN_PROTEASE) {
             let v = organ_var(o);
-            var drive = 1.0;
-            if (v.p2 >= 0.0) { drive = clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p2, 0.0, 3.0))], 0.0, 1.0); }
-            s[u32(clamp(v.p0, 1.0, 3.0)) - 1u] += max(v.p1, 0.0) * organ_gain(o) * drive;
+            let f = family_weights(protease_family(slot, k, n)) * max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v);
+            if (v.p0 >= PROTEASE_FAR_FROM) {
+                arms.far += f;
+                arms.r_far = max(arms.r_far, v.p0);
+            } else if (v.p0 >= PROTEASE_MID_FROM) {
+                arms.mid += f;
+                arms.r_mid = max(arms.r_mid, v.p0);
+            } else {
+                arms.near += f;
+            }
         }
     }
-    return s;
+    return arms;
+}
+
+// CUSTO DE ESTAR LIGADA, em resíduos de manutenção: força ativa × (1 +
+// alcance / PROTEASE_REACH_REF) × PROTEASE_ACTIVE_COST. Uma protease forte
+// de longo alcance sempre ligada arruína o dono; desligada não gasta isto.
+const PROTEASE_ACTIVE_COST: f32 = 2.0;
+const PROTEASE_REACH_REF: f32 = 40.0;
+fn protease_active(slot: u32, n: u32) -> f32 {
+    var c = 0.0;
+    for (var k = 0u; k < n; k++) {
+        let o = organ_get(slot, k);
+        if (organ_type(o) == ORGAN_PROTEASE) {
+            let v = organ_var(o);
+            c += max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v) * (1.0 + max(v.p0, 0.0) / PROTEASE_REACH_REF);
+        }
+    }
+    return c * PROTEASE_ACTIVE_COST;
+}
+
+// IMUNIDADE às próprias proteases: quem tem uma protease de uma família
+// tem também o seu inibidor (senão digeria-se a si próprio), e por isso
+// resiste às dessa família vindas de outros. É o que impede dois caçadores
+// iguais de se desfazerem um ao outro ao mesmo tempo. Devolve, por família,
+// quanto do alvo fica exposto (1 = tudo, 1 − PROTEASE_IMMUNITY = protegido).
+const PROTEASE_IMMUNITY: f32 = 0.9;
+fn protease_exposed(slot: u32, n: u32) -> vec3<f32> {
+    var own = vec3<f32>(0.0);
+    for (var k = 0u; k < n; k++) {
+        if (organ_type(organ_get(slot, k)) == ORGAN_PROTEASE) {
+            own = max(own, family_weights(protease_family(slot, k, n)));
+        }
+    }
+    return vec3<f32>(1.0) - PROTEASE_IMMUNITY * own;
 }
 
 // Fração dos resíduos do corpo que cada família corta.
@@ -99,7 +184,7 @@ fn protease_targets(slot: u32, n: u32) -> vec3<f32> {
 
 // (alvo fam. 1, alvo fam. 2, alvo fam. 3, prolina), cada um 0..1 em 6 bits.
 fn pack_defence(slot: u32, n: u32) -> f32 {
-    let t = protease_targets(slot, n);
+    let t = protease_targets(slot, n) * protease_exposed(slot, n);
     let q = vec4<u32>(round(clamp(vec4<f32>(t, proline_fraction(slot, n)), vec4<f32>(0.0), vec4<f32>(1.0)) * 63.0));
     return f32(q.x | (q.y << 6u) | (q.z << 12u) | (q.w << 18u));
 }
@@ -127,12 +212,16 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p = vec2<f32>(a.pos_x, a.pos_y);
     let c = contact_cell_xy(p);
     var push = vec2<f32>(0.0);
-    let sites = protease_sites(slot, a.body_len);
-    let armed = sites.x + sites.y + sites.z > 0.0;
+    let arms = protease_arms(slot, a.body_len);
+    let total = arms.near + arms.mid + arms.far;
+    let armed = total.x + total.y + total.z > 0.0;
+    // As células de contacto têm 120 unidades: com proteases de alcance é
+    // preciso olhar duas células em vez de uma (raios 60 + 60 + alcance).
+    let span = select(1, 2, arms.r_mid > 0.0 || arms.r_far > 0.0);
     // Energia que este agente tira a outros neste passo.
     var gained = 0.0;
-    for (var dy = -1; dy <= 1; dy++) {
-        for (var dx = -1; dx <= 1; dx++) {
+    for (var dy = -span; dy <= span; dy++) {
+        for (var dx = -span; dx <= span; dx++) {
             let x = c.x + dx;
             let y = c.y + dy;
             if (x < 0 || y < 0 || x >= i32(CONTACT_N) || y >= i32(CONTACT_N)) { continue; }
@@ -152,8 +241,13 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         if (dist > 1e-4) { dir = d / dist; }
                         push += dir * overlap;
                     }
-                    // Ataque: só em contacto.
-                    if (overlap > 0.0 && armed && b.energy > 0.0) {
+                    // Ataque: as proteases de contacto só a tocar; as de
+                    // alcance também a essa distância para lá do contacto.
+                    var sites = vec3<f32>(0.0);
+                    if (overlap > 0.0) { sites += arms.near; }
+                    if (-overlap < arms.r_mid) { sites += arms.mid; }
+                    if (-overlap < arms.r_far) { sites += arms.far; }
+                    if (armed && sites.x + sites.y + sites.z > 0.0 && b.energy > 0.0) {
                         let def = unpack_defence(contact_disp[e].w);
                         let power = dot(sites, def.xyz) * PRED_SITE_SCALE;
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * def.w;

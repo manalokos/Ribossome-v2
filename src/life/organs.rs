@@ -158,7 +158,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     LIGHT_SENSOR_PROPS,
     &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],
     &[
-        pd("familia", "o que corta na vítima: 1 = lisina e arginina, 2 = aspartato e asparagina, 3 = fenilalanina, tirosina, triptofano e leucina (coluna 'protease: alvo' dos aminoácidos)"),
+        pd("alcance", "a que distância ALÉM do contacto chega (unidades do mundo): 0 = só a tocar; ~40 = médio; ~100 = longo. Mais alcance = mais arrasto, mais massa e mais gasto enquanto está ligada"),
         pd("forca", "multiplica o risco de lise que causa (× intensidade)"),
         pd("canal", "−1 = sempre ativa; 2 = só com sinal γ positivo; 3 = só com sinal δ positivo (proporcional ao sinal, até 1)"),
     ],
@@ -281,42 +281,17 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             }
         ),
         11 => format!(
-            "protease [disco com dentes]: desfaz quem toca (corta {}), força ×{:.2}, {}; a prolina protege",
-            match v("familia") {
-                f if f < 1.5 => "lisina e arginina",
-                f if f < 2.5 => "aspartato e asparagina",
-                _ => "aromáticos e leucina",
+            "protease [disco com dentes; espigões se tiver alcance]: tira energia a {}, força ×{:.2}, {}. Corta conforme o aminoácido a seguir (D/E -> lisina e arginina; K/R -> aspartato e asparagina; F/L/W/Y/I/V -> aromáticos e leucina; outro -> as três a um terço). Gasta energia enquanto está ligada; quem tem protease de uma família resiste a essa família; a prolina protege",
+            match v("alcance") {
+                r if r < 10.0 => "quem toca".to_string(),
+                r => format!("quem está a menos de {r:.0} unidades"),
             },
             v("forca") * g,
             match v("canal") {
-                c if c < 0.0 => "sempre ativa".to_string(),
+                c if c < 0.0 => "sempre ligada".to_string(),
                 c if c < 2.5 => "só com sinal γ positivo".to_string(),
                 _ => "só com sinal δ positivo".to_string(),
             }
-        ),
-        18 => format!(
-            "ventosa [disco com cruz]: prende este resíduo ao entulho ou à rocha em que toca (arrasto +{:.0}), {}, {}",
-            v("forca") * g,
-            match v("larga") {
-                c if c < 0.0 => "agarra sempre",
-                c if c < 2.5 => "larga com sinal γ positivo",
-                _ => "larga com sinal δ positivo",
-            },
-            match v("emite") {
-                c if c < 0.0 => "não emite sinal",
-                c if c < 2.5 => "emite γ enquanto agarra",
-                _ => "emite δ enquanto agarra",
-            }
-        ),
-        19 => "quiral [disco partido ao meio]: daqui até à ponta C, todos os resíduos e órgãos dobram para o lado contrário (ângulo de repouso e resposta aos sinais) e os sensores direcionais trocam a esquerda com a direita. Dois na mesma cadeia anulam-se".to_string(),
-        7 => "armazenamento [disco com anéis]: DESATIVADO (já não se forma; a capacidade de energia vem do volume dos aminoácidos do corpo)".to_string(),
-        8 => format!("{} · sente {}", sensor("sensor de comida DIRECIONAL (esquerda − direita)", "2 antenas verdes"), alvo()),
-        9 => format!("{} · sente {}", sensor("sensor físico DIRECIONAL (esquerda − direita)", "2 antenas amarelas"), alvo_fisico()),
-        10 => format!(
-            "fotossistema [disco verde com raios]: {:.0}% da luz para reativar gastos, {:.0}% para energia, eficiência ×{:.2}",
-            v("reciclar") * 100.0,
-            (1.0 - v("reciclar")) * 100.0,
-            v("eficiencia") * g
         ),
         12 => format!(
             "âncora [anel {}]: agarra-se a outra âncora, a uma ventosa ou a um relé (livres) de outro agente que toque, ou a um filho; {}",

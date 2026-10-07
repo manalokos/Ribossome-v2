@@ -67,27 +67,55 @@ fn organs_of(body: &[Residue]) -> String {
     body.iter().filter_map(|r| r.organ.map(|(t, _, _)| ORGAN_SYMBOLS[t as usize])).collect()
 }
 
-/// Força das proteases por família (sempre ativas ou não: conta a força máxima).
+/// Família que o bolso de um vizinho reconhece (pocket_family no shader):
+/// 0 = nenhuma em especial.
+fn pocket_family(aa: u8) -> usize {
+    match aa {
+        2 | 3 => 1,
+        8 | 14 => 2,
+        4 | 9 | 18 | 19 | 7 | 17 => 3,
+        _ => 0,
+    }
+}
+
+/// Pesos por família de uma protease no resíduo k (o vizinho decide; sem
+/// vizinho próprio corta as três a um terço).
+fn family_weights(body: &[Residue], k: usize) -> [f32; 3] {
+    match body.get(k + 1).map_or(0, |r| pocket_family(r.aa)) {
+        0 => [1.0 / 3.0; 3],
+        f => {
+            let mut w = [0.0; 3];
+            w[f - 1] = 1.0;
+            w
+        }
+    }
+}
+
+/// Força das proteases por família, todas ligadas e a tocar (o melhor caso).
 fn protease_force(body: &[Residue], w: &World) -> [f32; 3] {
     let mut f = [0.0; 3];
-    for r in body {
+    for (k, r) in body.iter().enumerate() {
         if let Some((t, p, g)) = r.organ
             && t == PROTEASE
             && let Some(v) = w.organ_table.get(t as usize).and_then(|o| o.variantes.get(p as usize))
         {
-            let fam = (v.get("familia").copied().unwrap_or(1.0).clamp(1.0, 3.0) as usize) - 1;
-            f[fam] += v.get("forca").copied().unwrap_or(0.0).max(0.0) * organ_gain(g);
+            let force = v.get("forca").copied().unwrap_or(0.0).max(0.0) * organ_gain(g);
+            for (x, wt) in f.iter_mut().zip(family_weights(body, k)) {
+                *x += force * wt;
+            }
         }
     }
     f
 }
 
-/// (fração de resíduos-alvo de cada família, fração de prolina).
+/// (fração de resíduos-alvo de cada família já com a imunidade de quem tem
+/// protease dessa família, fração de prolina).
 fn defence(body: &[Residue], w: &World) -> ([f32; 3], f32) {
     let n = body.len().max(1) as f32;
     let mut t = [0.0; 3];
     let mut pro = 0.0;
-    for r in body {
+    let mut own = [0.0f32; 3];
+    for (k, r) in body.iter().enumerate() {
         let m = w.amino.get(r.aa as usize).map_or(0, |a| (a.protease_alvo.max(0.0) + 0.5) as u32);
         for (f, v) in t.iter_mut().enumerate() {
             if m & (1 << f) != 0 {
@@ -97,6 +125,14 @@ fn defence(body: &[Residue], w: &World) -> ([f32; 3], f32) {
         if r.aa == PROLINE {
             pro += 1.0 / n;
         }
+        if r.organ.is_some_and(|o| o.0 == PROTEASE) {
+            for (x, wt) in own.iter_mut().zip(family_weights(body, k)) {
+                *x = x.max(wt);
+            }
+        }
+    }
+    for (v, o) in t.iter_mut().zip(own) {
+        *v *= 1.0 - 0.9 * o;
     }
     (t, pro)
 }

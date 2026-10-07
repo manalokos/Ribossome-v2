@@ -166,6 +166,19 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     return lim * tanh(SIGNAL_GAIN * (s.x * sens.x * amp_a + s.y * sens.y * amp_b + s.z * sens.z + s.w * sens.w) / lim);
 }
 
+// BOLSO DE ESPECIFICIDADE: o aminoácido vizinho de um sensor de corpos ou
+// de uma protease decide, por complementaridade, que resíduos da presa ele
+// reconhece: ácido (D, E) -> lisina e arginina (família 1); básico (K, R)
+// -> aspartato e asparagina (família 2); hidrofóbico (F, L, W, Y, I, V) ->
+// aromáticos e leucina (família 3); outro -> 0 (sem preferência).
+fn pocket_family(nb: u32) -> u32 {
+    var f = 0u;
+    if (nb == 2u || nb == 3u) { f = 1u; }
+    if (nb == 8u || nb == 14u) { f = 2u; }
+    if (nb == 4u || nb == 9u || nb == 18u || nb == 19u || nb == 7u || nb == 17u) { f = 3u; }
+    return f;
+}
+
 // GRELHA DOS CORPOS: resíduos de agentes por célula (BODY_DIV × BODY_DIV
 // células do ambiente), para os sensores de corpos. Dois valores por célula:
 // [2i] = todos os resíduos; [2i + 1] = os que cada família de protease corta
@@ -468,12 +481,7 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                     // (F, L, W, Y, I, V) vê os aromáticos e a leucina
                     // (família 3). Outro vizinho, ou nenhum: todos os corpos.
                     var fam = 0u;
-                    if (k + 1u < n) {
-                        let nb = body_get(slot, k + 1u);
-                        if (nb == 2u || nb == 3u) { fam = 1u; }
-                        if (nb == 8u || nb == 14u) { fam = 2u; }
-                        if (nb == 4u || nb == 9u || nb == 18u || nb == 19u || nb == 7u || nb == 17u) { fam = 3u; }
-                    }
+                    if (k + 1u < n) { fam = pocket_family(body_get(slot, k + 1u)); }
                     let raw = sense_disc(here, perp, what, dir, fam) - own_body_in_disc(slot, a, here, perp, dir, fam);
                     sensed = raw / (abs(raw) + sense_k(3u));
                 } else {
