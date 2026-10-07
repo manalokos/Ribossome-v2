@@ -45,6 +45,12 @@ const CHEMO_TAKE: f32 = 0.02;
 // de soltar o produto (taxas globais, iguais para todos).
 const MOTOR_P_HYDROLYSIS: f32 = 0.2;
 const MOTOR_P_RELEASE: f32 = 0.1;
+// Uma BOCA são muitos sítios catalíticos: o seu ciclo (hidrolisar, soltar)
+// anda força/MOUTH_SITE_REF vezes mais depressa do que o de um resíduo
+// solto. Sem isto, qualquer boca, por mais forte, ficava presa ao ciclo de
+// um só sítio (~1 monómero em cada 15 passos) e a força só encurtava a
+// espera pelo substrato.
+const MOUTH_SITE_REF: f32 = 5.0;
 // Difusioforese (v3): limite de velocidade por passo, em unidades do mundo.
 const PHORETIC_MAX_STEP: f32 = 3.0;
 
@@ -499,7 +505,12 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // catalisa sempre que há substrato e a energia a mais perde-se como
         // calor. (A regulação pela fome do v3 fica como opção.)
         let hunger = select(1.0, clamp(1.0 - a.energy / cap, 0.0, 1.0), params.hunger_regulation != 0u);
-        let pe = clamp(params.uptake_rate * metab * prk.catalytic * organ_catalysis_mult(slot, k) * eff * hunger, 0.0, 1.0);
+        let cmult = organ_catalysis_mult(slot, k);
+        let pe = clamp(params.uptake_rate * metab * prk.catalytic * cmult * eff * hunger, 0.0, 1.0);
+        // Sítios em paralelo (só as bocas; nunca menos de 1, mesmo fechada,
+        // para acabar o ciclo que já ia a meio).
+        var sites = 1.0;
+        if (organ_type(om) == ORGAN_MOUTH) { sites = max(cmult / MOUTH_SITE_REF, 1.0); }
         let si = slot * MAX_BODY + k;
         let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
@@ -512,7 +523,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if (rl > 1e-4) { phoretic += rc / rl * pe; }
             }
         } else if (st == 1u) {
-            if (r.x < MOTOR_P_HYDROLYSIS) {
+            if (r.x < MOTOR_P_HYDROLYSIS * sites) {
                 // Canal escolhido pela afinidade × disponível.
                 var u = r.y * (w_avail.x + w_avail.y + w_avail.z + w_avail.w);
                 var b = 3u;
@@ -527,7 +538,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                     joint_state[si] = 0u;
                 }
             }
-        } else if (r.x < MOTOR_P_RELEASE) {
+        } else if (r.x < MOTOR_P_RELEASE * sites) {
             joint_state[si] = 0u;
         }
 
