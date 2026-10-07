@@ -407,7 +407,7 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     }
     if ui
         .button("abrir a árvore das linhagens")
-        .on_hover_text("a árvore da vida desta corrida numa página interativa (zoom, arrastar, clicar num ramo): o desenho das duas formas de cada ramo, os órgãos e a população ao longo do tempo. É imediata: usa só o registo dos censos")
+        .on_hover_text("a árvore da vida desta corrida numa página interativa (zoom, arrastar, clicar num ramo): o desenho das duas formas de cada ramo, os órgãos e a população ao longo do tempo. Demora uns segundos: os retratos são desenhados pela simulação num mundo à parte")
         .clicked()
     {
         st.tree_now = true;

@@ -142,7 +142,7 @@ fn drain(att: &[Residue], vic: &[Residue], w: &World) -> f32 {
 }
 
 /// Retrato de um agente sozinho, enquadrado pelo corpo.
-fn portrait(gpu: &Gpu, w: &World, cap: &Capture, slot: u32, a: &Agent) -> Vec<u8> {
+pub(crate) fn portrait(gpu: &Gpu, w: &World, cap: &Capture, slot: u32, a: &Agent, bright: f32) -> Vec<u8> {
     let raw = gpu.read_ranges_blocking(&w.body_pos_buf, &[(slot as u64 * 512, 512)]);
     let pos: &[[f32; 2]] = bytemuck::cast_slice(&raw);
     let (s, c) = a.rot.sin_cos();
@@ -159,7 +159,7 @@ fn portrait(gpu: &Gpu, w: &World, cap: &Capture, slot: u32, a: &Agent) -> Vec<u8
     let cam = Camera { center: [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5], zoom: cap_size(cap) / side };
     cap.view.focus.set(slot);
     cap.view.focus_offset.set([cam.center[0] - a.pos_x, cam.center[1] - a.pos_y]);
-    let rgba = cap.render(gpu, w, &cam, 0, 0.15);
+    let rgba = cap.render(gpu, w, &cam, 0, bright);
     cap.view.focus.set(u32::MAX);
     cap.encode_png(&rgba).unwrap_or_default()
 }
@@ -371,7 +371,7 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     // Árvores.
     h += "<h2>Linhagens registadas (árvore da vida)</h2>";
     h += &match lineages {
-        Some(l) => crate::tree_view::viewer(l, w),
+        Some(l) => crate::tree_view::viewer(l, w, Some(&crate::tree_view::portraits(gpu, w, l))),
         None => "<p>Sem registo de linhagens (cena aberta fora da aplicação).</p>".to_string(),
     };
     h += "<h2>Parentesco entre as espécies vivas (árvore inferida)</h2>";
@@ -474,7 +474,7 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
             let share = if strand == 0 { s.same_strand } else { s.count - s.same_strand };
             h += "<figure>";
             match st.rep[strand] {
-                Some((slot, _)) => h += &img(&portrait(gpu, w, &cap, slot, &agents[slot as usize]), 256, "retrato"),
+                Some((slot, _)) => h += &img(&portrait(gpu, w, &cap, slot, &agents[slot as usize], 0.15), 256, "retrato"),
                 None => h += "<div class=\"none\">nenhum vivo nesta forma</div>",
             }
             write!(

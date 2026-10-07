@@ -1127,7 +1127,8 @@ impl Running {
         }
         if std::mem::take(&mut self.ui.tree_now) {
             let epoch = self.world.params.epoch;
-            let html = ribossome::tree_view::page(&self.lineages, &self.world, &format!("Ribossome: árvore das linhagens ao epoch {epoch}"));
+            let pics = ribossome::tree_view::portraits(&self.gpu, &self.world, &self.lineages);
+            let html = ribossome::tree_view::page(&self.lineages, &self.world, &format!("Ribossome: árvore das linhagens ao epoch {epoch}"), Some(&pics));
             self.write_page(&format!("arvore_{epoch}.html"), html, "árvore");
         }
         let n_steps = self.adaptive_steps();

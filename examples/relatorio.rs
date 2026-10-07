@@ -52,7 +52,7 @@ fn main() {
     println!("{out}: {:.1} MB", html.len() as f64 / 1e6);
     // ARVORE=ficheiro: também a página só com a árvore das linhagens.
     if let (Ok(path), Some(l)) = (std::env::var("ARVORE"), lineages.as_ref()) {
-        std::fs::write(&path, ribossome::tree_view::page(l, &w, &format!("Árvore das linhagens, epoch {epoch}"))).unwrap();
+        std::fs::write(&path, ribossome::tree_view::page(l, &w, &format!("Árvore das linhagens, epoch {epoch}"), Some(&ribossome::tree_view::portraits(&gpu, &w, l)))).unwrap();
         println!("{path}");
     }
 }
