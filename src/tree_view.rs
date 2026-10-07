@@ -146,7 +146,7 @@ pub fn viewer(l: &Lineages, w: &World) -> String {
     data.push(']');
     let alive = l.branches.iter().filter(|b| l.alive(b)).count();
     format!(
-        "<p>{} ramos registados em {} censos (de {} em {} epochs), {} vivos. <b>Roda</b> = zoom (com Shift só no tempo, com Alt só na altura), <b>arrastar</b> = mover, <b>clique</b> = ver o ramo. Aproxima para ver o desenho das duas formas de cada ramo.</p>\
+        "<p>{} ramos registados em {} censos (de {} em {} epochs), {} vivos. Cada nó é um ramo, ligado àquele de onde saiu; verde = vivo, cinzento = extinto, linha mais grossa = mais agentes no pico. <b>Roda</b> = zoom, <b>arrastar</b> = mover, <b>clique</b> = ver o ramo. De perto cada nó mostra o desenho das duas formas.</p>\
 <div class=\"tv-bar\"><label>esconder ramos com pico abaixo de <input id=\"tv-min\" type=\"range\" min=\"0\" max=\"100\" value=\"0\"> <span id=\"tv-minv\">0</span></label> <label><input id=\"tv-alive\" type=\"checkbox\"> só os vivos e os seus antepassados</label> <button id=\"tv-fit\">ver tudo</button></div>\
 <div class=\"tv-wrap\"><canvas id=\"tv\"></canvas><div id=\"tv-info\"><i>clica num ramo</i></div></div>\
 <script>const TV_DATA={data};const TV_T0={};const TV_T1={};\n{JS}</script>",
@@ -180,23 +180,30 @@ const JS: &str = r##"(function(){
 const cv=document.getElementById('tv'),ctx=cv.getContext('2d'),info=document.getElementById('tv-info');
 const byId=new Map(TV_DATA.map(b=>[b.id,b]));
 const kids=new Map();TV_DATA.forEach(b=>{const k=b.par===null?-1:b.par;if(!kids.has(k))kids.set(k,[]);kids.get(k).push(b);});
-let minPeak=0,onlyAlive=false,rows=[],rowOf=new Map(),sel=null;
-// vista: x = ox + (t - T0) * kx ; y = oy + linha * ky
-let kx=1,ky=18,ox=10,oy=24,W=100,H=100;
-const LABEL=260;
-function keep(b){ if(b.peak<minPeak) return false; return true; }
+let minPeak=0,onlyAlive=false,nodes=[],sel=null;
+// NÓS E LINHAS: cada ramo é um cartão (desenho das duas formas + texto),
+// ligado ao ramo de onde saiu por uma curva. As raízes saem de um nó
+// "origem". Vista: ecrã = o + mundo * z (zoom igual nos dois eixos).
+const CW=236,CH=74,COL=330,ROW=92;
+const ROOT={id:-1,root:true,alive:true,peak:1,x:0,y:0,kids:[]};
+let z=1,ox=0,oy=0,W=100,H=100;
 function layout(){
-  // vivos e antepassados
   let ok=null;
   if(onlyAlive){ ok=new Set(); TV_DATA.forEach(b=>{ if(b.alive){ let x=b; while(x&&!ok.has(x.id)){ ok.add(x.id); x=x.par===null?null:byId.get(x.par);} } }); }
-  rows=[];rowOf=new Map();
-  const st=(kids.get(-1)||[]).slice().reverse();
-  while(st.length){ const b=st.pop(); const vis=keep(b)&&(!ok||ok.has(b.id)); if(vis){ rowOf.set(b.id,rows.length); rows.push(b);} const k=kids.get(b.id); if(k) for(let i=k.length-1;i>=0;i--) st.push(k[i]); }
+  const vis=b=>b.peak>=minPeak&&(!ok||ok.has(b.id));
+  nodes=[ROOT]; ROOT.kids=[];
+  // filhos visíveis: um ramo escondido passa os filhos ao antepassado visível
+  const st=(kids.get(-1)||[]).map(b=>[b,ROOT]).reverse();
+  while(st.length){ const [b,up]=st.pop(); let me=up; if(vis(b)){ b.kids=[]; b.up=up; b.depth=up.root?1:up.depth+1; up.kids.push(b); nodes.push(b); me=b; } const k=kids.get(b.id); if(k) for(let i=k.length-1;i>=0;i--) st.push([k[i],me]); }
+  ROOT.depth=0;
+  // y: folhas em fila, cada pai a meio dos filhos (pós-ordem sem recursão)
+  let next=0; const post=[]; const s2=[ROOT];
+  while(s2.length){ const n=s2.pop(); post.push(n); for(const k of n.kids) s2.push(k); }
+  for(let i=post.length-1;i>=0;i--){ const n=post[i]; n.x=n.depth*COL; if(!n.kids.length){ n.y=next*ROW; next++; n.live=n.alive; } else { n.y=(n.kids[0].y+n.kids[n.kids.length-1].y)/2; n.live=n.alive||n.kids.some(k=>k.live); } }
 }
-function visParentRow(b){ let p=b.par; while(p!==null&&p!==undefined){ if(rowOf.has(p)) return rowOf.get(p); p=byId.get(p).par; } return null; }
-function X(t){return ox+(t-TV_T0)*kx;} function Y(r){return oy+r*ky;}
-function fit(){ const span=Math.max(1,TV_T1-TV_T0); kx=(W-LABEL-30)/span; ox=14; ky=Math.max(4,Math.min(22,(H-40)/Math.max(1,rows.length))); oy=28; draw(); }
-function resize(){ const r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1; W=r.width;H=r.height; cv.width=W*d;cv.height=H*d; ctx.setTransform(d,0,0,d,0,0); }
+function fit(){ let x1=0,y0=1e9,y1=-1e9; for(const n of nodes){ x1=Math.max(x1,n.x+CW); y0=Math.min(y0,n.y-CH/2); y1=Math.max(y1,n.y+CH/2); }
+  z=Math.min((W-40)/(x1+60),(H-40)/Math.max(1,y1-y0),1.2); ox=20+30*z; oy=H/2-(y0+y1)/2*z; draw(); }
+function resize(){ const r=cv.getBoundingClientRect(); W=r.width;H=r.height; const d=window.devicePixelRatio||1; cv.width=W*d;cv.height=H*d; }
 function body(c,f,cx,cy,size){
   const p=f.p; if(!p.length) return;
   c.lineCap='round';
@@ -204,30 +211,41 @@ function body(c,f,cx,cy,size){
   for(const q of p){ if(q[4]){ c.fillStyle=q[3]; c.beginPath(); c.arc(cx+q[0]*size,cy+q[1]*size,Math.max(1.5,q[2]*size),0,6.2832); c.fill(); c.strokeStyle='#0e1014'; c.lineWidth=1; c.stroke(); } }
   const e=p[p.length-1]; c.fillStyle=e[3]; c.beginPath(); c.arc(cx+e[0]*size,cy+e[1]*size,Math.max(1,e[2]*size),0,6.2832); c.fill();
 }
-function fmtT(t){ const s=TV_T1-TV_T0; return s<2e6? Math.round(t/1e3)+'k' : (t/1e6).toFixed(2)+'M'; }
+function fmtT(t){ return t<2e6? Math.round(t/1e3)+'k' : (t/1e6).toFixed(2)+'M'; }
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
 function draw(){
-  ctx.clearRect(0,0,W,H);
-  // eixo do tempo
-  const span=(W)/kx, step=Math.pow(10,Math.floor(Math.log10(Math.max(1,span/6)))); let st=step; if(span/st>12) st*=5; else if(span/st>6) st*=2;
-  ctx.font='11px system-ui'; ctx.textAlign='center';
-  for(let t=Math.ceil((TV_T0-(ox)/kx)/st)*st; X(t)<W; t+=st){ const x=X(t); ctx.strokeStyle='#1c2128'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x,16); ctx.lineTo(x,H); ctx.stroke(); ctx.fillStyle='#8b96a3'; ctx.fillText(fmtT(t),x,12); }
-  ctx.textAlign='left';
-  const r0=Math.max(0,Math.floor((-oy)/ky)-1), r1=Math.min(rows.length-1,Math.ceil((H-oy)/ky)+1);
-  // ligações ao pai (também de linhas fora do ecrã para dentro)
-  ctx.setLineDash([2,3]); ctx.strokeStyle='#4b5560'; ctx.lineWidth=1;
-  for(let r=0;r<rows.length;r++){ const b=rows[r], pr=visParentRow(b); if(pr===null) continue; if((r<r0&&pr<r0)||(r>r1&&pr>r1)) continue; const x=X(b.born); if(x<-5||x>W+5) continue; ctx.beginPath(); ctx.moveTo(x,Y(pr)); ctx.lineTo(x,Y(r)); ctx.stroke(); }
-  ctx.setLineDash([]);
-  const big=ky>=30;
-  for(let r=r0;r<=r1;r++){ const b=rows[r], y=Y(r), x0=X(b.born), x1=Math.max(X(b.last),x0+2);
-    ctx.strokeStyle=b===sel?'#ffd866':(b.alive?'#6fcf7f':'#6b7480'); ctx.lineWidth=Math.min(Math.max(1,1+Math.log10(Math.max(1,b.peak))*1.1),Math.max(1.5,ky*0.5));
-    ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke();
-    let tx=x1+6;
-    if(big){ const s=ky*0.9; body(ctx,b.a,tx+s/2,y,s); body(ctx,b.b,tx+s*1.5+4,y,s); tx+=2*s+12; }
-    if(ky>=9){ ctx.fillStyle=b===sel?'#ffd866':(b.alive?'#dde3ea':'#7d8792'); ctx.font=(ky>=14?12:10)+'px system-ui'; ctx.fillText('R'+b.id+' ['+b.a.org+'|'+b.b.org+'] '+b.bases+' bases, pico '+b.peak,tx,y+4); }
+  const d=window.devicePixelRatio||1;
+  ctx.setTransform(d,0,0,d,0,0); ctx.clearRect(0,0,W,H);
+  ctx.setTransform(d*z,0,0,d*z,d*ox,d*oy);
+  const vx0=-ox/z,vx1=(W-ox)/z,vy0=-oy/z,vy1=(H-oy)/z;
+  // de longe os cartões passam a pontos (maiores para os ramos com mais gente)
+  const cards=CW*z>=70, text=z>=0.42;
+  const outX=n=>n.root?26:(cards?n.x+CW:n.x+8);
+  // linhas
+  ctx.lineCap='round';
+  for(const n of nodes){ if(n.root) continue; const p=n.up; if(Math.max(n.y,p.y)<vy0-50||Math.min(n.y,p.y)>vy1+50||p.x>vx1||n.x<vx0-COL) continue;
+    const x0=outX(p),x1=n.x-(cards?0:8),m=(x0+x1)/2;
+    ctx.strokeStyle=n.live?'#4f9e62':'#48515c'; ctx.lineWidth=Math.max(1.2/z,1.5+1.3*Math.log10(Math.max(1,n.peak)));
+    ctx.beginPath(); ctx.moveTo(x0,p.y); ctx.bezierCurveTo(m,p.y,m,n.y,x1,n.y); ctx.stroke(); }
+  // nós
+  for(const n of nodes){ if(n.y<vy0-CH||n.y>vy1+CH||n.x>vx1||n.x+CW<vx0) continue;
+    if(n.root){ ctx.fillStyle='#c9a227'; ctx.beginPath(); ctx.arc(8,n.y,18,0,6.2832); ctx.fill(); if(z>=0.3){ ctx.fillStyle='#12151a'; ctx.font='bold 9px system-ui'; ctx.textAlign='center'; ctx.fillText('origem',8,n.y+3); ctx.textAlign='left'; } continue; }
+    const col=n===sel?'#ffd866':(n.alive?'#6fcf7f':'#6b7480');
+    if(!cards){ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(n.x,n.y,Math.max(3/z,6+5*Math.log10(Math.max(1,n.peak))),0,6.2832); ctx.fill(); continue; }
+    const y=n.y-CH/2;
+    rr(n.x,y,CW,CH,10); ctx.fillStyle=n.alive?'#182219':'#1a1e24'; ctx.fill(); ctx.strokeStyle=col; ctx.lineWidth=n===sel?3:1.6; ctx.stroke();
+    body(ctx,n.a,n.x+32,n.y,52); body(ctx,n.b,n.x+90,n.y,52);
+    if(text){ const tx=n.x+124; ctx.fillStyle=n.alive?'#e6edf3':'#9aa4af'; ctx.font='bold 14px system-ui'; ctx.fillText('R'+n.id,tx,y+20);
+      ctx.font='11px system-ui'; ctx.fillStyle='#9fb0c0'; ctx.fillText(n.bases+' bases · pico '+n.peak,tx,y+36,CW-130);
+      ctx.fillText(fmtT(n.born)+' → '+(n.alive?'vivo':fmtT(n.last)),tx,y+50,CW-130);
+      ctx.fillStyle='#c8b06a'; ctx.fillText(n.a.org+' | '+n.b.org,tx,y+65,CW-130); }
   }
 }
+function pick(mx,my){ const x=(mx-ox)/z,y=(my-oy)/z; const cards=CW*z>=70; let best=null,bd=1e18;
+  for(const n of nodes){ if(n.root) continue; if(cards){ if(x>=n.x&&x<=n.x+CW&&Math.abs(y-n.y)<=CH/2) return n; } else { const dd=(x-n.x)**2+(y-n.y)**2; if(dd<bd){bd=dd;best=n;} } }
+  return (!cards&&bd<(14/z)**2)?best:null; }
 function show(b){
-  sel=b; if(!b){ info.innerHTML='<i>clica num ramo</i>'; draw(); return; }
+  sel=b; if(!b||b.root){ sel=null; info.innerHTML='<i>clica num ramo</i>'; draw(); return; }
   const par=b.par===null?'raiz (sem parente reconhecível)':'R'+b.par;
   const kn=(kids.get(b.id)||[]).map(k=>'R'+k.id).join(', ')||'nenhum';
   let h='<h3 style="margin:0">R'+b.id+(b.alive?' · vivo':' · extinto')+'</h3><div>'+b.bases+' bases · pico '+b.peak+' agentes</div><div>apareceu ao epoch '+b.born+', último censo '+b.last+'</div><div>sai de: '+par+'</div><div>ramos que saem dele: '+kn+'</div>';
@@ -245,19 +263,17 @@ function show(b){
 let drag=null,moved=false;
 cv.addEventListener('pointerdown',e=>{ drag=[e.clientX,e.clientY]; moved=false; cv.setPointerCapture(e.pointerId); cv.style.cursor='grabbing'; });
 cv.addEventListener('pointermove',e=>{ if(!drag) return; const dx=e.clientX-drag[0],dy=e.clientY-drag[1]; if(Math.abs(dx)+Math.abs(dy)>3) moved=true; ox+=dx; oy+=dy; drag=[e.clientX,e.clientY]; draw(); });
-cv.addEventListener('pointerup',e=>{ cv.style.cursor='grab'; if(drag&&!moved){ const r=cv.getBoundingClientRect(); const row=Math.round((e.clientY-r.top-oy)/ky); show(row>=0&&row<rows.length?rows[row]:null); } drag=null; });
-cv.addEventListener('wheel',e=>{ e.preventDefault(); const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,f=Math.pow(1.0015,-e.deltaY);
-  if(!e.altKey){ const t=(mx-ox)/kx; kx=Math.min(Math.max(kx*f,1e-7),1); ox=mx-t*kx; }
-  if(!e.shiftKey){ const q=(my-oy)/ky; ky=Math.min(Math.max(ky*f,1.5),260); oy=my-q*ky; }
-  draw(); },{passive:false});
+cv.addEventListener('pointerup',e=>{ cv.style.cursor='grab'; if(drag&&!moved){ const r=cv.getBoundingClientRect(); show(pick(e.clientX-r.left,e.clientY-r.top)); } drag=null; });
+cv.addEventListener('wheel',e=>{ e.preventDefault(); const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,f=Math.pow(1.0018,-e.deltaY);
+  const nz=Math.min(Math.max(z*f,0.02),4); ox=mx-(mx-ox)*nz/z; oy=my-(my-oy)*nz/z; z=nz; draw(); },{passive:false});
 const mn=document.getElementById('tv-min'),mv=document.getElementById('tv-minv');
 const peaks=TV_DATA.map(b=>b.peak).sort((a,b)=>a-b);
-mn.addEventListener('input',()=>{ minPeak=mn.value==0?0:peaks[Math.min(peaks.length-1,Math.floor(peaks.length*mn.value/101))]; mv.textContent=minPeak; layout(); draw(); });
+mn.addEventListener('input',()=>{ minPeak=mn.value==0?0:peaks[Math.min(peaks.length-1,Math.floor(peaks.length*mn.value/101))]; mv.textContent=minPeak; layout(); fit(); });
 document.getElementById('tv-alive').addEventListener('change',e=>{ onlyAlive=e.target.checked; layout(); fit(); });
 document.getElementById('tv-fit').addEventListener('click',fit);
 window.addEventListener('resize',()=>{ resize(); draw(); });
 layout(); resize(); fit();
-// #ky=60&sel=3 no endereço: abre já aproximado nesse ramo (para testar).
+// #z=1&sel=3 no endereço: abre já aproximado nesse ramo (para testar).
 const hs=new URLSearchParams(location.hash.slice(1));
-if(hs.get('ky')){ ky=+hs.get('ky'); const r=Math.min(rows.length-1,+(hs.get('sel')||0)); oy=H/2-r*ky; show(rows[r]); }
+if(hs.get('z')){ z=+hs.get('z'); const n=nodes[Math.min(nodes.length-1,1+(+(hs.get('sel')||0)))]; ox=W/2-(n.x+CW/2)*z; oy=H/2-n.y*z; show(n); }
 })();"##;
