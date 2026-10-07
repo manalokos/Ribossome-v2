@@ -625,8 +625,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * metab * leak * (f32(a.body_len) + organ_upkeep(slot, a.body_len));
-    // PROTEASES LIGADAS: gastam à parte (não passa pela fuga das bocas: é
-    // trabalho do órgão, pago enquanto estiver ativo).
+    // PROTEASES ABERTAS: a manutenção dos espigões (só as de alcance; ver
+    // protease_active em contact.wgsl). Não passa pela fuga das bocas.
     a.energy -= params.maintenance_cost * metab * protease_active(slot, a.body_len);
 
     // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n × massa média por resíduo (os

@@ -141,10 +141,13 @@ fn protease_arms(slot: u32, n: u32) -> ProteaseArms {
     return arms;
 }
 
-// CUSTO DE ESTAR LIGADA, em resíduos de manutenção: força ativa × (1 +
-// alcance / PROTEASE_REACH_REF) × PROTEASE_ACTIVE_COST. Uma protease forte
-// de longo alcance sempre ligada arruína o dono; desligada não gasta isto.
-const PROTEASE_ACTIVE_COST: f32 = 2.0;
+// CUSTO DE ESTAR ABERTA, em residuos de manutencao: so a ESTRUTURA dos
+// espigoes, proporcional ao alcance (alcance / PROTEASE_REACH_REF x
+// PROTEASE_ACTIVE_COST) e a abertura. Nao depende da forca nem do dano: uns
+// picos compridos a espera de presa sao quase gratis de manter (como os de
+// um heliozoario); o que custam e peso e arrasto (tabela). As de contacto
+// nao gastam nada por estarem abertas.
+const PROTEASE_ACTIVE_COST: f32 = 0.5;
 const PROTEASE_REACH_REF: f32 = 40.0;
 fn protease_active(slot: u32, n: u32) -> f32 {
     var c = 0.0;
@@ -152,7 +155,7 @@ fn protease_active(slot: u32, n: u32) -> f32 {
         let o = organ_get(slot, k);
         if (organ_type(o) == ORGAN_PROTEASE) {
             let v = organ_var(o);
-            c += max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v) * (1.0 + max(v.p0, 0.0) / PROTEASE_REACH_REF);
+            c += protease_drive(slot, k, v) * max(v.p0, 0.0) / PROTEASE_REACH_REF;
         }
     }
     return c * PROTEASE_ACTIVE_COST;
