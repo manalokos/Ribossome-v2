@@ -43,6 +43,17 @@ fn main() {
         gpu.queue.submit([enc.finish()]);
         gpu.wait_idle();
     }
+    // MOSAICO=8192 (ou 16384): o mundo inteiro numa imagem, em OUT_mosaico.png.
+    let side = envf("MOSAICO", 0.0) as u32;
+    if side > 0 {
+        let out = std::env::var("OUT").unwrap_or_else(|_| "mundo".into());
+        let t = std::time::Instant::now();
+        let rgb = ribossome::render::capture::world_mosaic(&gpu, &w, side, 0, 0.5, 0.35);
+        let t_draw = t.elapsed();
+        ribossome::render::capture::save_rgb_png(&rgb, side, std::path::Path::new(&format!("{out}_mosaico.png"))).unwrap();
+        println!("mosaico {side}: desenho {:.1} s, total com PNG {:.1} s", t_draw.as_secs_f32(), t.elapsed().as_secs_f32());
+        return;
+    }
     if let Ok(out) = std::env::var("OUT") {
         let size = 1024;
         let cap = Capture::new(&gpu, &w, size);

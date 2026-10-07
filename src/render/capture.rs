@@ -166,3 +166,50 @@ impl Capture {
         Ok(())
     }
 }
+
+/// Lado de cada mosaico da captura grande (uma textura deste tamanho com
+/// MSAA cabe à vontade na memória da placa; uma de 16k não).
+const TILE: u32 = 4096;
+
+/// O MUNDO INTEIRO numa imagem de `total` × `total` píxeis (múltiplo de
+/// 4096), desenhado aos mosaicos com a mesma escala e colado no CPU. Devolve
+/// RGB (linha de cima primeiro). O nível de detalhe depende só da escala, por
+/// isso os mosaicos batem certo uns com os outros.
+pub fn world_mosaic(gpu: &Gpu, world: &World, total: u32, view_mode: u32, brightness: f32, coc: f32) -> Vec<u8> {
+    let n = (total / TILE).max(1);
+    let total = n * TILE;
+    let cap = Capture::new(gpu, world, TILE);
+    cap.view.coc_radius.set(coc);
+    let s = world.cfg.sim_size();
+    let zoom = total as f32 / s;
+    let span = s / n as f32;
+    let (t, w) = (TILE as usize, total as usize);
+    let mut out = vec![0u8; w * w * 3];
+    for ty in 0..n {
+        for tx in 0..n {
+            // Cima no ecrã = +y no mundo: a fila 0 é a do topo do mundo.
+            let cam = Camera { center: [(tx as f32 + 0.5) * span, s - (ty as f32 + 0.5) * span], zoom };
+            let rgba = cap.render(gpu, world, &cam, view_mode, brightness);
+            for y in 0..t {
+                let row = &rgba[y * t * 4..(y + 1) * t * 4];
+                let o = ((ty as usize * t + y) * w + tx as usize * t) * 3;
+                for (d, px) in out[o..o + t * 3].chunks_exact_mut(3).zip(row.chunks_exact(4)) {
+                    d.copy_from_slice(&px[..3]);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Grava RGB num PNG (compressão rápida: as imagens grandes demoram).
+pub fn save_rgb_png(rgb: &[u8], side: u32, path: &std::path::Path) -> std::io::Result<()> {
+    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut enc = png::Encoder::new(file, side, side);
+    enc.set_color(png::ColorType::Rgb);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.set_compression(png::Compression::Fast);
+    let mut w = enc.write_header().map_err(std::io::Error::other)?;
+    w.write_image_data(rgb).map_err(std::io::Error::other)?;
+    w.finish().map_err(std::io::Error::other)
+}

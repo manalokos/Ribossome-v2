@@ -1110,6 +1110,21 @@ impl Running {
         if std::mem::take(&mut self.ui.report_now) {
             self.write_report();
         }
+        let side = std::mem::take(&mut self.ui.big_shot);
+        if side > 0 {
+            let epoch = self.world.params.epoch;
+            let rgb = ribossome::render::capture::world_mosaic(&self.gpu, &self.world, side, self.ui.view_mode, self.ui.monomer_brightness, self.ui.coc_radius);
+            let dir = std::path::Path::new(SAVES_DIR).join("capturas");
+            let _ = std::fs::create_dir_all(&dir);
+            let path = dir.join(format!("mundo_{}k_{epoch}.png", side / 1024));
+            self.ui.scene_msg = format!("a gravar {} (segundo plano)", path.display());
+            log::info!("{}", self.ui.scene_msg);
+            // O PNG comprime-se noutra thread, para a simulação não ficar à espera.
+            std::thread::spawn(move || match ribossome::render::capture::save_rgb_png(&rgb, side, &path) {
+                Ok(()) => log::info!("captura gravada em {}", path.display()),
+                Err(e) => log::error!("captura {}: {e}", path.display()),
+            });
+        }
         if std::mem::take(&mut self.ui.tree_now) {
             let epoch = self.world.params.epoch;
             let html = ribossome::tree_view::page(&self.lineages, &self.world, &format!("Ribossome: árvore das linhagens ao epoch {epoch}"));

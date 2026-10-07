@@ -60,6 +60,8 @@ pub struct UiState {
     pub report_now: bool,
     /// Pedido da página só com a árvore das linhagens.
     pub tree_now: bool,
+    /// Pedido de captura do mundo inteiro: lado da imagem em píxeis (0 = nada).
+    pub big_shot: u32,
     /// Epochs entre censos das linhagens e o estado do registo (texto).
     pub lineage_every: u32,
     pub lineage_info: String,
@@ -197,6 +199,7 @@ impl UiState {
             stats: Stats::default(),
             report_now: false,
             tree_now: false,
+            big_shot: 0,
             lineage_every: 50_000,
             lineage_info: String::new(),
             history: crate::stats::History::default(),
@@ -409,6 +412,18 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     {
         st.tree_now = true;
     }
+    ui.horizontal(|ui| {
+        ui.label("captura do mundo inteiro:");
+        for (name, side) in [("8k", 8192u32), ("16k", 16384)] {
+            if ui
+                .button(name)
+                .on_hover_text("o mundo todo numa imagem PNG (8192 ou 16384 píxeis de lado), com a vista e o brilho escolhidos. Fica em saves/capturas/. A simulação pára uns segundos enquanto desenha; o ficheiro acaba de se gravar em segundo plano (o de 16k ocupa centenas de MB)")
+                .clicked()
+            {
+                st.big_shot = side;
+            }
+        }
+    });
     ui.separator();
     if ui
         .button("mundo novo com os valores por omissão")

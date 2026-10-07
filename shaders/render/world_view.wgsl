@@ -138,6 +138,76 @@ fn soup_at(pc: vec2<f32>, radius: f32) -> Soup {
     return s;
 }
 
+// TERRENO EM GRÃOS (como os monómeros, para não se verem as células). A
+// simulação só sabe os quanta de terreno de cada célula; para o desenho cada
+// célula ganha 4 grãos, um por quadrante, desviados por um hash fixo.
+//   rocha (>= 3): manchas gaussianas largas que somam ~1 no interior; a
+//     borda é a curva de nível 0,5 dessa soma (arredondada, sem degraus);
+//   entulho (1–2): 2 ou 4 seixos pequenos e separados (é poroso).
+// Só o DESENHO: as colisões e a luz continuam a ser por célula.
+const GRAIN_PIXEL_FULL: f32 = 0.5;
+const GRAIN_PIXEL_NONE: f32 = 1.0;
+const ROCK_SIGMA: f32 = 0.5;
+const PEBBLE_SIGMA: f32 = 0.17;
+
+struct Ground {
+    rock: f32,
+    pebble: f32,
+    // Tom (0..1) da rocha e do entulho ali, média dos grãos vizinhos.
+    tone: f32,
+}
+
+fn ground_at(pc: vec2<f32>) -> Ground {
+    var rock = 0.0;
+    var pebble = 0.0;
+    var tone = 0.0;
+    var weight = 1e-5;
+    let base = vec2<i32>(floor(pc));
+    let rock_k = 0.5 / (ROCK_SIGMA * ROCK_SIGMA);
+    let rock_norm = 0.25 / (6.2831853 * ROCK_SIGMA * ROCK_SIGMA);
+    let peb_k = 0.5 / (PEBBLE_SIGMA * PEBBLE_SIGMA);
+    for (var oy = -1; oy <= 1; oy++) {
+        for (var ox = -1; ox <= 1; ox++) {
+            let c = base + vec2<i32>(ox, oy);
+            if (c.x >= 0 && c.y >= 0 && c.x < i32(GRID_SIZE) && c.y < i32(GRID_SIZE)) {
+                let cell = u32(c.y) * GRID_SIZE + u32(c.x);
+                let g = gamma_view[cell];
+                if (g > 0u) {
+                    let grains = select(min(g * 2u, 4u), 4u, g >= 3u);
+                    for (var k = 0u; k < grains; k++) {
+                        let h = dot_hash(cell * 4u + k + 77u);
+                        let jit = vec2<f32>(f32(h & 0xFFu), f32((h >> 8u) & 0xFFu)) / 255.0 - 0.5;
+                        // Quadrante k (a ordem roda com a célula para os
+                        // seixos do entulho não caírem sempre no mesmo canto).
+                        let q = (k + (h >> 20u)) % 4u;
+                        let home = vec2<f32>(0.25 + 0.5 * f32(q & 1u), 0.25 + 0.5 * f32(q >> 1u));
+                        let d = pc - (vec2<f32>(c) + home + jit * select(0.3, 0.2, g >= 3u));
+                        let d2 = dot(d, d);
+                        let t = f32((h >> 16u) & 0xFu) / 15.0;
+                        if (g >= 3u) {
+                            let w = exp(-d2 * rock_k) * rock_norm;
+                            rock += w;
+                            tone += w * t;
+                            weight += w;
+                        } else {
+                            let size = 0.7 + 0.6 * t;
+                            let w = exp(-d2 * peb_k / (size * size));
+                            pebble = max(pebble, w);
+                            tone += w * 0.05 * t;
+                            weight += w * 0.05;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    var out: Ground;
+    out.rock = rock;
+    out.pebble = pebble;
+    out.tone = tone / weight;
+    return out;
+}
+
 @fragment
 fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     // Píxel -> mundo (y invertido: o ecrã cresce para baixo, o mundo para cima).
@@ -223,17 +293,25 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     // Terreno: rocha (>= 3) opaca; o entulho (1–2) é poroso e é o FUNDO por
     // trás dos monómeros que lá estão (desenhados por cima, mais abaixo).
     let g = gamma_view[idx];
-    if (g >= 3u) {
-        let rock = vec3<f32>(0.32, 0.29, 0.26) + 0.04 * f32(g % 3u);
-        // A rocha soma a luz que lhe CHEGA (a da célula de cima): a
-        // superfície fica dourada, o interior não.
-        let ly_up = min(ly + 1u, LIGHT_SIZE - 1u);
-        let light_up = light_view[ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV];
-        let rock_glow = LIGHT_GOLD * sqrt(clamp(light_up, 0.0, 1.0));
-        return vec4<f32>(clamp(rock + rock_glow, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    var rock_m = select(0.0, 1.0, g >= 3u);
+    var rubble_m = select(0.0, 1.0, g > 0u && g < 3u);
+    var tone = 0.5 * f32(g % 3u);
+    // De perto, o terreno em grãos (ver ground_at) em vez de células.
+    let grains = 1.0 - smoothstep(GRAIN_PIXEL_FULL, GRAIN_PIXEL_NONE, pixel_cells);
+    if (grains > 0.0) {
+        let gr = ground_at(world / f32(WORLD_UNITS_PER_CELL));
+        rock_m = mix(rock_m, smoothstep(0.40, 0.56, gr.rock), grains);
+        rubble_m = mix(rubble_m, smoothstep(0.3, 0.55, gr.pebble), grains);
+        tone = mix(tone, gr.tone, grains);
     }
-    let rubble = vec3<f32>(0.22, 0.20, 0.18) * (0.6 + 0.2 * f32(g));
-    let back = select(water, rubble, g > 0u);
+    let rock = vec3<f32>(0.30, 0.27, 0.24) + 0.08 * tone;
+    // A rocha soma a luz que lhe CHEGA (a da célula de cima): a
+    // superfície fica dourada, o interior não.
+    let ly_up = min(ly + 1u, LIGHT_SIZE - 1u);
+    let light_up = light_view[ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV];
+    let rock_col = rock + LIGHT_GOLD * sqrt(clamp(light_up, 0.0, 1.0));
+    let rubble = vec3<f32>(0.22, 0.20, 0.18) * (0.75 + 0.3 * tone);
+    let back = mix(water, rubble, rubble_m);
 
     // Normal: os ATIVADOS têm a média das cores dos seus canais (A vermelho,
     // U amarelo, G verde, C azul, pesada pelas contagens); os GASTOS são
@@ -251,6 +329,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     let hue = mix(MONOMER_SPENT_COLOR, act_col, act_frac);
     let inten = pow(clamp(total_amt, 0.0, 1.0), MONOMER_GAMMA);
     // A noite vê-se só na camada da luz (glow), que já vem escura do topo.
-    let c = mix(back, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
+    var c = mix(back, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
+    c = mix(c, rock_col, rock_m);
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
