@@ -86,7 +86,15 @@ struct RftCtx {
 fn residue_drag_mult(slot: u32, k: u32) -> f32 {
     let o = organ_get(slot, k);
     let aa_drag = max(aa_props[body_get(slot, k)].drag, 0.05);
-    return aa_drag * select(1.0, max(organ_cost(o).drag_mult, 0.05), o != 0u);
+    var organ_drag = select(1.0, max(organ_cost(o).drag_mult, 0.05), o != 0u);
+    // PROTEASE FECHADA: os espigoes estao recolhidos, por isso o arrasto a
+    // mais da variante (as de alcance arrastam muito) so conta na medida em
+    // que esta aberta (protease_drive, com o seu limiar). Fechada arrasta
+    // como um orgao simples.
+    if (organ_type(o) == ORGAN_PROTEASE && organ_drag > 1.0) {
+        organ_drag = mix(1.0, organ_drag, protease_drive(slot, k, organ_var(o)));
+    }
+    return aa_drag * organ_drag;
 }
 
 // Arrasto do resíduo k para a carga das juntas (o peso que o RFT usa).
