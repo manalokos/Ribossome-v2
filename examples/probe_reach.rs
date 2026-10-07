@@ -123,6 +123,20 @@ fn main() {
     let b0 = w.read_agents_blocking(&gpu);
     run(&mut w, 100);
     let b1 = w.read_agents_blocking(&gpu);
+    // OUT=prefixo: retratos dos quatro (para ver os espigões das de alcance).
+    if let Ok(out) = std::env::var("OUT") {
+        let cap = ribossome::render::capture::Capture::new(&gpu, &w, 384);
+        for (i, _) in alone.iter().enumerate() {
+            let x = 3000.0 + 2000.0 * i as f32;
+            if let Some((slot, a)) = b1.iter().enumerate().find(|(_, a)| a.alive != 0 && (a.pos_x - x).abs() < 300.0 && (a.pos_y - (s - 4000.0)).abs() < 300.0) {
+                cap.view.focus.set(slot as u32);
+                cap.view.focus_offset.set([0.0, 0.0]);
+                let cam = ribossome::render::Camera { center: [a.pos_x, a.pos_y], zoom: 384.0 / 330.0 };
+                let rgba = cap.render(&gpu, &w, &cam, 0, 0.1);
+                cap.save_png(&rgba, std::path::Path::new(&format!("{out}_{i}.png"))).unwrap();
+            }
+        }
+    }
     println!("gasto por passo de um agente sozinho (manutenção 0,002):");
     for (i, (name, _)) in alone.iter().enumerate() {
         let x = 3000.0 + 2000.0 * i as f32;
