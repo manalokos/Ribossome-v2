@@ -275,17 +275,15 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             let floor_px = grow * (1.0 + 0.5 * organ_w / max(sum.a, 1e-6));
             var r_lod = max(thick / max(cnt, 1.0) * detail_fat(), floor_px / view.zoom);
             // MORDIDAS (como de perto): a vítima a vermelho; o troço com a
-            // protease que ataca a amarelo. Mais grossos, para o clarão se
-            // ver ao longe.
+            // protease que ataca a amarelo e só um pouco mais grosso. Ao
+            // longe é uma mudança de cor do próprio agente, não uma bola
+            // por cima (com mínimos de píxeis os clarões tapavam o mapa).
             let bite = bite_view[slot];
             if (view.signal_view == 0u) {
-                if (bite.x > 0.0) {
-                    colr = BITE_VICTIM_COLOR;
-                    r_lod = max(r_lod * 1.6, 1.5 / view.zoom);
-                }
+                if (bite.x > 0.0) { colr = mix(colr, BITE_VICTIM_COLOR, 0.8); }
                 if (bite.z > 0.0 && armed) {
                     colr = BITE_ATTACK_COLOR;
-                    r_lod = max(r_lod * BITE_ORGAN_GROW, 2.0 / view.zoom);
+                    r_lod *= 1.3;
                 }
             }
             return capsule_vertex(vi, residue_world_v(slot, a, k0), residue_world_v(slot, a, k1), r_lod, colr);
@@ -349,7 +347,9 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 col = vec3<f32>(0.9, 0.2, 0.2);
                 if (bite.z > 0.0 && glyph) {
                     flash = BITE_ATTACK_COLOR;
-                    r_world *= BITE_ORGAN_GROW;
+                    // Ao longe (quando o corpo já está a ser engrossado) a
+                    // protease cresce menos: a cor amarela chega.
+                    r_world *= mix(BITE_ORGAN_GROW, 1.2, clamp((detail_fat() - 1.0) / 1.5, 0.0, 1.0));
                 }
             }
             if (organ == ORGAN_HOLDFAST) { col = vec3<f32>(0.85, 0.6, 0.3); }
