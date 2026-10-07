@@ -463,7 +463,8 @@ impl World {
         log::info!("código dos órgãos: {code_source}");
         let code_buf = storage_buffer(device, "organ code", 400 * 4);
         let kin_target = storage_buffer(device, "kin target", 257 * 4);
-        let body_grid = storage_buffer(device, "body grid", cells / 4 * 4);
+        // Dois u32 por célula da grelha dos corpos (total e resíduos-alvo por família).
+        let body_grid = storage_buffer(device, "body grid", cells / 4 * 4 * 2);
         let kin_buf = storage_buffer(device, "kinship", max_agents * 4);
         let stats_buf = storage_buffer(device, "population stats", (crate::stats::STAT_WORDS * 4) as u64);
         let stats_staging = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1463,7 +1464,7 @@ impl World {
                 run(&mut pass, "contact_apply", &pl.contact_apply, ab, [ag, 1]);
             }
             // Grelha dos corpos para os sensores de corpos (lida no passo seguinte).
-            let bcells = (self.cfg.grid_size / 2).pow(2);
+            let bcells = 2 * (self.cfg.grid_size / 2).pow(2);
             run(&mut pass, "body_clear", &pl.body_clear, ab, [bcells.div_ceil(256), 1]);
             run(&mut pass, "body_count", &pl.body_count, ab, [ag, 1]);
             // Nascimentos num passe à parte: a morte devolve slots (push) e o

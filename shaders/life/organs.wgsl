@@ -167,14 +167,16 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
 }
 
 // GRELHA DOS CORPOS: resíduos de agentes por célula (BODY_DIV × BODY_DIV
-// células do ambiente), para os sensores de corpos.
+// células do ambiente), para os sensores de corpos. Dois valores por célula:
+// [2i] = todos os resíduos; [2i + 1] = os que cada família de protease corta
+// (10 bits por família: bits 0-9 a 1, 10-19 a 2, 20-29 a 3).
 const BODY_DIV: u32 = 2u;
 const BODY_SIZE: u32 = GRID_SIZE / BODY_DIV;
 
 @compute @workgroup_size(256)
 fn body_clear(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.y * 65535u * 256u + gid.x;
-    if (i < BODY_SIZE * BODY_SIZE) { atomicStore(&body_grid[i], 0u); }
+    if (i < 2u * BODY_SIZE * BODY_SIZE) { atomicStore(&body_grid[i], 0u); }
 }
 
 @compute @workgroup_size(64)
@@ -189,7 +191,14 @@ fn body_count(@builtin(global_invocation_id) gid: vec3<u32>) {
         let c = world_to_cell(pk);
         let bx = (c % GRID_SIZE) / BODY_DIV;
         let by = (c / GRID_SIZE) / BODY_DIV;
-        atomicAdd(&body_grid[by * BODY_SIZE + bx], 1u);
+        let bi = 2u * (by * BODY_SIZE + bx);
+        atomicAdd(&body_grid[bi], 1u);
+        if (a.body_len > 0u) {
+            // Resíduos-alvo de cada família (a mesma coluna que as proteases usam).
+            let m = u32(max(aa_props[body_get(slot, k)].protease_target, 0.0) + 0.5);
+            let add = (m & 1u) | (((m >> 1u) & 1u) << 10u) | (((m >> 2u) & 1u) << 20u);
+            if (add != 0u) { atomicAdd(&body_grid[bi + 1u], add); }
+        }
     }
 }
 
@@ -293,7 +302,10 @@ fn sense_sample(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, k
 
 // Leitura EXATA do disco inteiro (só para os corpos de agentes, onde é
 // preciso descontar o próprio corpo célula a célula).
-fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> f32 {
+// `fam`: 0 = todos os resíduos; 1..3 = só os que essa família de protease
+// corta (× BODY_FAMILY_SCALE: são uma fração dos resíduos de um corpo).
+const BODY_FAMILY_SCALE: f32 = 3.0;
+fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, fam: u32) -> f32 {
     let w = f32(WORLD_UNITS_PER_CELL);
     let r = i32(ceil(SENSOR_RADIUS / w));
     let c0 = vec2<i32>(floor(pos / w));
@@ -325,8 +337,13 @@ fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> 
                 v = f32(min(gamma_count(idx), GAMMA_SOLID_THRESHOLD)) / f32(GAMMA_SOLID_THRESHOLD);
             } else if (what == 3u) {
                 // Residuos por célula do ambiente (a grelha dos corpos é BODY_DIV² maior).
-                let b = atomicLoad(&body_grid[(u32(c.y) / BODY_DIV) * BODY_SIZE + u32(c.x) / BODY_DIV]);
-                v = f32(b) / f32(BODY_DIV * BODY_DIV);
+                let bi = 2u * ((u32(c.y) / BODY_DIV) * BODY_SIZE + u32(c.x) / BODY_DIV);
+                if (fam == 0u) {
+                    v = f32(atomicLoad(&body_grid[bi])) / f32(BODY_DIV * BODY_DIV);
+                } else {
+                    let packed = atomicLoad(&body_grid[bi + 1u]);
+                    v = f32((packed >> (10u * (fam - 1u))) & 1023u) * BODY_FAMILY_SCALE / f32(BODY_DIV * BODY_DIV);
+                }
             } else {
                 v = uv_light_at_cell(u32(c.x), u32(c.y)) * 4.0;
             }
@@ -346,7 +363,7 @@ fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool) -> 
 
 // O que o próprio corpo conta no disco do sensor de corpos (para o
 // descontar: o agente não se sente a si mesmo), na mesma escala de sense_disc.
-fn own_body_in_disc(slot: u32, a: Agent, pos: vec2<f32>, perp: vec2<f32>, directional: bool) -> f32 {
+fn own_body_in_disc(slot: u32, a: Agent, pos: vec2<f32>, perp: vec2<f32>, directional: bool, fam: u32) -> f32 {
     let w = f32(WORLD_UNITS_PER_CELL);
     let r = ceil(SENSOR_RADIUS / w);
     // Células no disco (como em sense_disc, aproximado pela área).
@@ -356,8 +373,14 @@ fn own_body_in_disc(slot: u32, a: Agent, pos: vec2<f32>, perp: vec2<f32>, direct
     for (var k = 0u; k < a.body_len; k++) {
         let d = residue_world(slot, a, k) - pos;
         if (length(d) > SENSOR_RADIUS) { continue; }
+        // Com família: só contam os resíduos-alvo dela, na mesma escala.
+        var wk = 1.0;
+        if (fam != 0u) {
+            let m = u32(max(aa_props[body_get(slot, k)].protease_target, 0.0) + 0.5);
+            wk = select(0.0, BODY_FAMILY_SCALE, ((m >> (fam - 1u)) & 1u) != 0u);
+        }
         let side = dot(d, perp);
-        if (!directional || side > 0.25 * w) { l += 1.0; } else if (side < -0.25 * w) { rt += 1.0; }
+        if (!directional || side > 0.25 * w) { l += wk; } else if (side < -0.25 * w) { rt += wk; }
     }
     if (!directional) { return l / cells; }
     return (l - rt) / (0.5 * cells);
@@ -436,7 +459,22 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 if (what == 3u) {
                     // Corpos: só se conhece a diferença (ou o total) já sem o
                     // próprio corpo; a mesma saturação, com sinal.
-                    let raw = sense_disc(here, perp, what, dir) - own_body_in_disc(slot, a, here, perp, dir);
+                    // ESPECIFICIDADE: a "antena" é o resíduo SEGUINTE da cadeia
+                    // (como no sensor de monómeros) e liga por
+                    // complementaridade, como o bolso de uma protease: um
+                    // vizinho ácido (D, E) vê corpos ricos em lisina e
+                    // arginina (o que a família 1 corta); um básico (K, R)
+                    // vê aspartato e asparagina (família 2); um hidrofóbico
+                    // (F, L, W, Y, I, V) vê os aromáticos e a leucina
+                    // (família 3). Outro vizinho, ou nenhum: todos os corpos.
+                    var fam = 0u;
+                    if (k + 1u < n) {
+                        let nb = body_get(slot, k + 1u);
+                        if (nb == 2u || nb == 3u) { fam = 1u; }
+                        if (nb == 8u || nb == 14u) { fam = 2u; }
+                        if (nb == 4u || nb == 9u || nb == 18u || nb == 19u || nb == 7u || nb == 17u) { fam = 3u; }
+                    }
+                    let raw = sense_disc(here, perp, what, dir, fam) - own_body_in_disc(slot, a, here, perp, dir, fam);
                     sensed = raw / (abs(raw) + sense_k(3u));
                 } else {
                     sensed = sense_sample(here, perp, what, dir, a.id, k, sensor_affinity(slot, k, n));

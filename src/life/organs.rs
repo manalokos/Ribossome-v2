@@ -128,7 +128,7 @@ const FOOD_SENSOR_PROPS: &[PropDef] = &[
     pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ou, no direcional, o contraste relativo (−1..1)"),
     pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
     pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
-    pd("alvo", "0 = comida (ativados; os canais pesados pelas afinidades do aminoácido SEGUINTE da cadeia, a antena), 1 = gastos (já sem variantes), 2 = corpos de outros agentes"),
+    pd("alvo", "0 = comida (ativados; os canais pesados pelas afinidades do aminoácido SEGUINTE da cadeia, a antena), 1 = gastos (já sem variantes), 2 = corpos de outros agentes (a antena é o aminoácido SEGUINTE: D ou E vê só corpos ricos em lisina e arginina, o que a protease da família 1 corta; K ou R vê aspartato e asparagina, família 2; F, L, W, Y, I ou V vê os aromáticos e a leucina, família 3; outro vizinho vê todos)"),
 ];
 
 /// Propriedades de cada tipo de órgão, por ordem (a mesma na GPU).
@@ -202,7 +202,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
     let v = |name: &str| row.variantes.get(p as usize).and_then(|m| m.get(name)).copied().unwrap_or(0.0);
     let alvo = || match v("alvo").round() as i32 {
         1 => "GASTOS (rasto de quem come)",
-        2 => "CORPOS de outros agentes",
+        2 => "CORPOS de outros agentes (todos, ou só os que uma família de protease corta, conforme o aminoácido a seguir: D/E -> K,R; K/R -> D,N; F/L/W/Y/I/V -> aromáticos)",
         _ => "comida (ativados)",
     };
     let alvo_fisico = || match v("alvo").round() as i32 {
