@@ -505,9 +505,10 @@ impl World {
         let tail_buf = storage_buffer(device, "rna tails", max_agents * 32);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
-            // Dois draws indiretos: o completo (0) e o da vista afastada (16);
-            // depois, o retângulo à vista (4 × f32; ver set_draw_rect).
-            size: 48,
+            // Três draws indiretos: o completo (byte 0), o da vista afastada
+            // (16) e o da meia distância (48); entre eles, o retângulo à
+            // vista (32; 4 × f32; ver set_draw_rect).
+            size: 64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1497,6 +1498,7 @@ impl World {
     /// Grava a lista dos agentes vivos e os argumentos do draw indireto.
     pub fn encode_draw_list(&self, enc: &mut wgpu::CommandEncoder) {
         enc.clear_buffer(&self.draw_args_buf, 0, Some(32));
+        enc.clear_buffer(&self.draw_args_buf, 48, Some(16));
         let mut pass =
             enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("draw list"), timestamp_writes: None });
         pass.set_bind_group(0, &self.frame_bg, &[0]);

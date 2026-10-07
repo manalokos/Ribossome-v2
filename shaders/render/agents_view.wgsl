@@ -65,11 +65,22 @@ const BOND_STRIDE_V: u32 = 5u;
 // Instâncias por agente: tubos, órgãos, bases de RNA, ligações e a bola do
 // parentesco.
 const AGENT_INSTANCES: u32 = 3u * MAX_BODY_V + BONDS_V + 1u;
-// VISTA AFASTADA (view.lod): por agente, LOD_TUBES troços de LOD_STRIDE
-// resíduos e a bola de marcação. (17 = o valor em drawlist.wgsl.)
-const LOD_STRIDE: u32 = 4u;
-const LOD_TUBES: u32 = MAX_BODY_V / LOD_STRIDE;
-const LOD_INSTANCES: u32 = LOD_TUBES + 1u;
+// NÍVEIS DE DETALHE (view.lod), para o aspeto de um agente não mudar com o
+// zoom: cada nível é a MÉDIA do anterior, em vez de engordar as coisas
+// pequenas até um mínimo de píxeis (os órgãos engordavam mais do que o corpo
+// e tapavam-se uns aos outros pela ordem de desenho: a cor mudava com o zoom).
+//   0 = detalhe (tubos, órgãos desenhados, fios de RNA, ligações);
+//   1 = um troço liso por resíduo, com a cor que ele tem de perto;
+//   2 = um troço por cada 4 resíduos, com a média das cores dos 4.
+// Em 1 e 2 cada agente leva os seus troços e a bola de marcação
+// (65 e 17 instâncias: os valores em drawlist.wgsl).
+// ÓRGÃOS REFORÇADOS: na média, um resíduo com órgão pesa LOD_ORGAN_WEIGHT
+// (ao perto o órgão é um disco bem maior do que o tubo); assim as manchas
+// de cor que distinguem os tipos de agente continuam a ver-se de longe.
+const LOD_ORGAN_WEIGHT: f32 = 4.0;
+// E o seu troço é mais grosso (ao perto o disco do órgão tem ~3× o raio do
+// tubo), com um mínimo de píxeis um pouco maior.
+const LOD_ORGAN_THICK: f32 = 2.2;
 // Raio da bola do parentesco, em píxeis do ecrã (igual para todos).
 const KIN_DOT_PX: f32 = 5.0;
 const NO_ORGAN: u32 = 0xFFu;
@@ -104,6 +115,52 @@ fn class_color(aa: u32) -> vec3<f32> {
         case 5u: { return vec3<f32>(0.95, 0.95, 0.95); }                  // G
         default: { return vec3<f32>(1.00, 0.60, 0.20); }                  // P
     }
+}
+
+// Cor de um órgão visto de longe: a cor dominante do seu desenho de perto.
+fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
+    let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
+    let v0 = organ_variants_view[organ * ORGAN_VARIANTS + p].p0;
+    switch organ {
+        case ORGAN_MOUTH: { return mix(base, vec3<f32>(1.0), 0.3); }
+        case ORGAN_MUSCLE: { return mix(base, vec3<f32>(0.85, 0.25, 0.25), 0.55); }
+        case ORGAN_FOOD_SENSOR, ORGAN_FOOD_SENSOR_DIR: { return vec3<f32>(0.45, 1.0, 0.45); }
+        case ORGAN_LIGHT_SENSOR, ORGAN_LIGHT_SENSOR_DIR: { return vec3<f32>(1.0, 0.95, 0.4); }
+        case ORGAN_ENERGY_SENSOR: { return vec3<f32>(1.0, 0.85, 0.2); }
+        case ORGAN_CLOCK: { return vec3<f32>(0.85, 0.9, 1.0); }
+        case ORGAN_RELAY: { return vec3<f32>(0.6, 0.9, 1.0); }
+        case ORGAN_PHOTOSYSTEM: { return vec3<f32>(0.35, 0.95, 0.35); }
+        case ORGAN_PROTEASE: { return vec3<f32>(0.9, 0.2, 0.2); }
+        case ORGAN_ANCHOR: { return select(vec3<f32>(0.25, 0.5, 1.0), vec3<f32>(1.0, 0.3, 0.25), v0 >= 0.0); }
+        case ORGAN_BIAS, ORGAN_AGE_BIAS: { return select(vec3<f32>(1.0, 0.55, 0.15), vec3<f32>(0.35, 0.95, 0.35), v0 >= 0.5); }
+        case ORGAN_CHEMO: { return vec3<f32>(0.9, 0.78, 0.15); }
+        case ORGAN_DORMANCY: { return vec3<f32>(0.72, 0.82, 1.0); }
+        case ORGAN_HOLDFAST: { return vec3<f32>(0.85, 0.6, 0.3); }
+        case ORGAN_CHIRAL: { return vec3<f32>(0.95, 0.35, 0.85); }
+        default: { return base * 0.8; }
+    }
+}
+
+// Cor (rgb) e peso (a) do resíduo q nos níveis de detalhe 1 e 2.
+fn lod_residue_color(slot: u32, q: u32) -> vec4<f32> {
+    let aa = (bodies_view[slot * 16u + q / 4u] >> ((q % 4u) * 8u)) & 0xFFu;
+    var col = class_color(aa);
+    var wgt = 1.0;
+    let oc = (organs_view[slot * 32u + q / 2u] >> ((q % 2u) * 16u)) & 0xFFFFu;
+    if (oc != 0u) {
+        col = organ_lod_color((oc & 0x1Fu) - 1u, oc, col);
+        wgt = LOD_ORGAN_WEIGHT;
+    }
+    // Nas vistas de sinais a cor é o sinal do resíduo (sem reforço).
+    let sg = signals_view[slot * MAX_BODY_V + q];
+    switch view.signal_view {
+        case 1u: { col = signed_color(sg.x, vec3<f32>(1.0, 0.45, 0.1), vec3<f32>(0.1, 0.6, 1.0)); wgt = 1.0; }
+        case 2u: { col = signed_color(sg.y, vec3<f32>(0.3, 1.0, 0.3), vec3<f32>(0.95, 0.3, 0.9)); wgt = 1.0; }
+        case 3u: { col = vec3<f32>(0.5 + 0.5 * tanh(sg.x), 0.5 + 0.5 * tanh(sg.y), 0.35); wgt = 1.0; }
+        case 5u: { col = vec3<f32>(0.5 + 0.5 * tanh(sg.z), 0.5 + 0.5 * tanh(sg.w), 0.35); wgt = 1.0; }
+        default: {}
+    }
+    return vec4<f32>(col, wgt);
 }
 
 // Cor de um sinal com sinal: positivo -> `pos`, negativo -> `neg`, zero -> cinzento escuro.
@@ -150,31 +207,51 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     // Instâncias por agente: 0..63 tubos, 64..127 órgãos (por cima),
     // 128..191 bases de RNA não traduzidas nas pontas.
     let far = view.lod != 0u;
-    let per = select(AGENT_INSTANCES, LOD_INSTANCES, far);
+    // Resíduos por troço e troços por agente nos níveis 1 e 2.
+    let stride = select(4u, 1u, view.lod == 1u);
+    let tubes = MAX_BODY_V / stride;
+    let per = select(AGENT_INSTANCES, tubes + 1u, far);
     // Com um agente em foco (imagem do inspetor) desenha-se SÓ esse, com
     // as suas instâncias (o draw não percorre a lista dos vivos).
     var slot = view.focus_slot;
     if (slot == 0xFFFFFFFFu) { slot = draw_list_view[inst / per]; }
     var local_i = inst % per;
     let a = agents_view[slot];
-    // Vista afastada: o troço vai do resíduo lod_k0 ao lod_k1 e leva a cor
-    // do primeiro órgão que tiver (senão a do primeiro resíduo), para o
-    // mapa manter as cores dos órgãos.
-    var lod_k0 = 0u;
-    var lod_k1 = 0u;
     if (far) {
-        if (local_i == LOD_TUBES) { return kin_vertex(vi, slot, a); }
-        lod_k0 = local_i * LOD_STRIDE;
-        lod_k1 = min(lod_k0 + LOD_STRIDE, max(a.body_len, 1u) - 1u);
-        var rep = lod_k0;
-        for (var q = lod_k0; q < min(lod_k0 + LOD_STRIDE, a.body_len); q++) {
-            let oq = (organs_view[slot * 32u + q / 2u] >> ((q % 2u) * 16u)) & 0xFFFFu;
-            if (oq != 0u) {
-                rep = q;
-                break;
+        if (local_i == tubes) { return kin_vertex(vi, slot, a); }
+        if (a.body_len > 0u) {
+            // Um troço liso do resíduo k0 ao k1, com a média pesada das
+            // cores dos seus resíduos e a espessura média deles.
+            var gone: AgentVsOut;
+            gone.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+            let k0 = local_i * stride;
+            if (a.alive == 0u || k0 >= a.body_len) { return gone; }
+            let k1 = min(k0 + stride, a.body_len - 1u);
+            var sum = vec4<f32>(0.0);
+            var thick = 0.0;
+            var cnt = 0.0;
+            var organ_w = 0.0;
+            for (var q = k0; q < min(k0 + stride, a.body_len); q++) {
+                let c = lod_residue_color(slot, q);
+                sum += vec4<f32>(c.rgb * c.a, c.a);
+                let aq = (bodies_view[slot * 16u + q / 4u] >> ((q % 4u) * 8u)) & 0xFFu;
+                let has_organ = ((organs_view[slot * 32u + q / 2u] >> ((q % 2u) * 16u)) & 0xFFFFu) != 0u;
+                thick += (0.9 + 3.0 * pow(aa_props_view[aq].volume / 130.0, 1.4)) * select(1.0, LOD_ORGAN_THICK, has_organ);
+                organ_w += select(0.0, c.a, has_organ);
+                cnt += 1.0;
             }
+            var colr = sum.rgb / max(sum.a, 1e-6);
+            // Pouca energia = mais escuro, e a vítima de uma protease a
+            // vermelho, como no desenho de perto.
+            if (view.signal_view == 0u || view.signal_view == 4u) {
+                colr *= mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
+            }
+            if (bite_view[slot].x > 0.0 && view.signal_view == 0u) { colr = BITE_VICTIM_COLOR; }
+            // Mínimo de 1 píxel de raio; até 1,5 conforme o peso dos órgãos no troço.
+            let r_lod = max(thick / max(cnt, 1.0), (1.0 + 0.5 * organ_w / max(sum.a, 1e-6)) / view.zoom);
+            return capsule_vertex(vi, residue_world_v(slot, a, k0), residue_world_v(slot, a, k1), r_lod, colr);
         }
-        local_i = rep;
+        // RNA nu: o ponto do costume (só a instância 0 desenha).
     }
     if (local_i == 3u * MAX_BODY_V + BONDS_V) {
         return kin_vertex(vi, slot, a);
@@ -273,12 +350,6 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     let dim = mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
     o.color = select(col, col * dim, view.signal_view == 0u || view.signal_view == 4u);
     if (flash.x >= 0.0 && view.signal_view == 0u) { o.color = flash; }
-    if (far && !naked) {
-        // Troço da vista afastada: nunca abaixo de 1 píxel (1,5 com órgão).
-        var r_far = max(r_world, 1.0 / view.zoom);
-        if (organ != NO_ORGAN) { r_far = max(r_world / ORGAN_SCALE, 1.5 / view.zoom); }
-        return capsule_vertex(vi, residue_world_v(slot, a, lod_k0), residue_world_v(slot, a, max(lod_k1, lod_k0)), r_far, o.color);
-    }
     if (!glyph && !naked) {
         // TUBO: cápsula do resíduo k até ao k+1 (o último só tem a ponta).
         // A espessura é a do resíduo k sem o aumento dos órgãos.

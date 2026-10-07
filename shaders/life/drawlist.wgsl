@@ -6,6 +6,7 @@ fn build_draw_list(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (slot == 0u) {
         atomicStore(&draw_args[0], 6u);
         atomicStore(&draw_args[4], 6u);
+        atomicStore(&draw_args[12], 6u);
     }
     if (slot >= params.max_agents || agents[slot].alive == 0u) { return; }
     // Só os que estão À VISTA: draw_args[8..11] é o retângulo da câmara no
@@ -22,4 +23,7 @@ fn build_draw_list(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Segundo draw (argumentos 4..7), para a vista AFASTADA: 16 troços de 4
     // resíduos e a bola de marcação (LOD_INSTANCES em agents_view.wgsl).
     atomicAdd(&draw_args[5], 17u);
+    // Terceiro draw (argumentos 12..15), para a MEIA distância: um troço por
+    // resíduo e a bola de marcação (65 instâncias).
+    atomicAdd(&draw_args[13], 65u);
 }

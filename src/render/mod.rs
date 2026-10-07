@@ -63,15 +63,17 @@ pub struct WorldView {
     /// GPU mais este desvio (cam_center em agents_view.wgsl).
     pub focus_offset: std::cell::Cell<[f32; 2]>,
     /// A última atualização escolheu a vista afastada (ver `update`).
-    lod: std::cell::Cell<bool>,
+    lod: std::cell::Cell<u32>,
 }
 
 /// Instâncias por agente no desenho completo (AGENT_INSTANCES em agents_view.wgsl).
 const AGENT_INSTANCES: u32 = 197;
 /// Comprimento de referência de um resíduo (SEGMENT_LEN em body.wgsl).
 const RESIDUE_UNITS: f32 = 11.0;
-/// Abaixo deste tamanho de um resíduo no ecrã (píxeis) usa-se a vista afastada.
-const LOD_RESIDUE_PX: f32 = 0.75;
+/// Tamanho de um resíduo no ecrã (píxeis) abaixo do qual se passa a um troço
+/// liso por resíduo, e abaixo do qual se passa a um troço por cada 4.
+const LOD_MID_PX: f32 = 3.0;
+const LOD_FAR_PX: f32 = 0.75;
 
 impl WorldView {
     pub fn new(device: &wgpu::Device, world: &World, format: wgpu::TextureFormat) -> Self {
@@ -298,7 +300,7 @@ impl WorldView {
             mark_organ: std::cell::Cell::new(0),
             origin: std::cell::Cell::new([0.0; 2]),
             focus_offset: std::cell::Cell::new([0.0; 2]),
-            lod: std::cell::Cell::new(false),
+            lod: std::cell::Cell::new(0),
             coc_radius: std::cell::Cell::new(0.35),
         }
     }
@@ -312,11 +314,19 @@ impl WorldView {
         brightness: f32,
         signal_view: u32,
     ) {
-        // VISTA AFASTADA: quando um resíduo ocupa menos de LOD_RESIDUE_PX
-        // píxeis, não se distinguem resíduos nem órgãos; desenha-se cada
-        // agente com 17 instâncias em vez de 197 (o desenho de 145 mil
-        // agentes custava 14 ms por frame, quase todo em vértices).
-        let lod = cam.zoom * RESIDUE_UNITS < LOD_RESIDUE_PX && self.focus.get() == u32::MAX;
+        // NÍVEL DE DETALHE pelo tamanho de um resíduo no ecrã (ver
+        // agents_view.wgsl): abaixo de LOD_MID_PX deixa de se distinguir a
+        // forma dos órgãos e passa a um troço liso por resíduo; abaixo de
+        // LOD_FAR_PX, a um troço por cada 4. Além de manter a cor estável,
+        // poupa vértices (65 ou 17 instâncias por agente em vez de 197).
+        let px = cam.zoom * RESIDUE_UNITS;
+        let lod = if self.focus.get() != u32::MAX || px >= LOD_MID_PX {
+            0
+        } else if px >= LOD_FAR_PX {
+            1
+        } else {
+            2
+        };
         self.lod.set(lod);
         let p = ViewParams {
             center_x: cam.center[0],
@@ -334,7 +344,7 @@ impl WorldView {
             coc_radius: self.coc_radius.get(),
             origin_x: self.origin.get()[0],
             origin_y: self.origin.get()[1],
-            lod: lod as u32,
+            lod,
             focus_dx: self.focus_offset.get()[0],
             focus_dy: self.focus_offset.get()[1],
             _pad_w0: 0,
@@ -356,7 +366,7 @@ impl WorldView {
             // principal (14 ms por frame com 145 mil agentes).
             pass.draw(0..6, 0..AGENT_INSTANCES);
         } else {
-            pass.draw_indirect(&self.draw_args, if self.lod.get() { 16 } else { 0 });
+            pass.draw_indirect(&self.draw_args, [0, 48, 16][self.lod.get().min(2) as usize]);
         }
     }
 }
