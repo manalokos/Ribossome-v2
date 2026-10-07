@@ -126,6 +126,7 @@ fn portrait(gpu: &Gpu, w: &World, cap: &Capture, slot: u32, a: &Agent) -> Vec<u8
     let side = ((hi[0] - lo[0]).max(hi[1] - lo[1]) + 80.0).max(60.0);
     let cam = Camera { center: [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5], zoom: cap_size(cap) / side };
     cap.view.focus.set(slot);
+    cap.view.focus_offset.set([cam.center[0] - a.pos_x, cam.center[1] - a.pos_y]);
     let rgba = cap.render(gpu, w, &cam, 0, 0.15);
     cap.view.focus.set(u32::MAX);
     cap.encode_png(&rgba).unwrap_or_default()

@@ -842,6 +842,12 @@ gpu_struct! {
         /// 1 = vista afastada: cada agente desenha-se com poucas instâncias
         /// (troços de vários resíduos), sem fios de RNA nem ligações.
         pub lod: u32,
+        /// Com um agente em foco: desvio do centro da câmara em relação à
+        /// posição atual desse agente (unidades do mundo).
+        pub focus_dx: f32,
+        pub focus_dy: f32,
+        pub _pad_w0: u32,
+        pub _pad_w1: u32,
     }
 }
 

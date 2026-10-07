@@ -59,6 +59,9 @@ pub struct WorldView {
     pub coc_radius: std::cell::Cell<f32>,
     /// Canto do viewport no alvo (píxeis); 0,0 quando ocupa o alvo todo.
     pub origin: std::cell::Cell<[f32; 2]>,
+    /// Com um agente em foco, o centro da câmara é a posição atual dele na
+    /// GPU mais este desvio (cam_center em agents_view.wgsl).
+    pub focus_offset: std::cell::Cell<[f32; 2]>,
     /// A última atualização escolheu a vista afastada (ver `update`).
     lod: std::cell::Cell<bool>,
 }
@@ -294,6 +297,7 @@ impl WorldView {
             daylight: std::cell::Cell::new(1.0),
             mark_organ: std::cell::Cell::new(0),
             origin: std::cell::Cell::new([0.0; 2]),
+            focus_offset: std::cell::Cell::new([0.0; 2]),
             lod: std::cell::Cell::new(false),
             coc_radius: std::cell::Cell::new(0.35),
         }
@@ -331,6 +335,10 @@ impl WorldView {
             origin_x: self.origin.get()[0],
             origin_y: self.origin.get()[1],
             lod: lod as u32,
+            focus_dx: self.focus_offset.get()[0],
+            focus_dy: self.focus_offset.get()[1],
+            _pad_w0: 0,
+            _pad_w1: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }

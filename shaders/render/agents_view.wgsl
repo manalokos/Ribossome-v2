@@ -112,6 +112,19 @@ fn signed_color(v: f32, pos: vec3<f32>, neg: vec3<f32>) -> vec3<f32> {
     return mix(vec3<f32>(0.18), select(neg, pos, v >= 0.0), t);
 }
 
+// Centro da câmara. Com um agente em foco (imagem do inspetor) é a posição
+// ATUAL desse agente mais um desvio fixo: a posição que o CPU conhece vem de
+// uma leitura com um ou dois frames de atraso, e um agente pequeno levado
+// depressa pela corrente já tinha saído do enquadramento.
+fn cam_center() -> vec2<f32> {
+    var c = vec2<f32>(view.center_x, view.center_y);
+    if (view.focus_slot != 0xFFFFFFFFu) {
+        let f = agents_view[view.focus_slot];
+        c = vec2<f32>(f.pos_x + view.focus_dx, f.pos_y + view.focus_dy);
+    }
+    return c;
+}
+
 // Tamanho do quadrado em múltiplos do raio do disco, por tipo de órgão.
 fn organ_extent(t: u32) -> f32 {
     switch t {
@@ -286,7 +299,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         // Quadrado orientado que cobre a cápsula.
         let along = select(-r_tube, l + r_tube, c.x > 0.0);
         let w = centre + e * along + nn * (c.y * r_tube);
-        let px = vec2<f32>((w.x - view.center_x) * view.zoom, (w.y - view.center_y) * view.zoom);
+        let px = (w - cam_center()) * view.zoom;
         o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);
         o.mode = 0u;
         o.local = w - centre;
@@ -308,7 +321,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     // Nunca menos de 1,5 píxeis, para se ver com o zoom afastado.
     let r = max(r_world * ext, 1.5 / view.zoom);
     let w = centre + c * r;
-    let px = vec2<f32>((w.x - view.center_x) * view.zoom, (w.y - view.center_y) * view.zoom);
+    let px = (w - cam_center()) * view.zoom;
     o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);
     o.local = c;
     o.organ = organ;
@@ -331,7 +344,7 @@ fn capsule_vertex(vi: u32, a_w: vec2<f32>, b_w: vec2<f32>, r: f32, col: vec3<f32
     let nn = vec2<f32>(-e.y, e.x);
     let along = select(-r, l + r, c.x > 0.0);
     let w = a_w + e * along + nn * (c.y * r);
-    let px = vec2<f32>((w.x - view.center_x) * view.zoom, (w.y - view.center_y) * view.zoom);
+    let px = (w - cam_center()) * view.zoom;
     o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);
     o.mode = 0u;
     o.local = w - a_w;
@@ -380,7 +393,7 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
     let nn = vec2<f32>(-e.y, e.x);
     let along = select(-r_tube, l + r_tube, c.x > 0.0);
     let w = p0 + e * along + nn * (c.y * r_tube);
-    let px = vec2<f32>((w.x - view.center_x) * view.zoom, (w.y - view.center_y) * view.zoom);
+    let px = (w - cam_center()) * view.zoom;
     o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);
     o.mode = 0u;
     o.local = w - p0;

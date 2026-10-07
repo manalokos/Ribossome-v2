@@ -14,8 +14,9 @@ use crate::render::capture::Capture;
 use crate::world::World;
 
 /// Bytes lidos por agente: Agent (64) + genoma (64) + corpo (64) + órgãos (128).
-/// agente 64 + genoma 64 + corpo 64 + órgãos 128 + posições 512 + ligações 64.
-const READ_BYTES: u64 = 896;
+/// agente 64 + genoma 64 + corpo 64 + órgãos 128 + posições 512 + ligações 64
+/// + sinais 1024.
+const READ_BYTES: u64 = 1920;
 /// Candidatos (os de centro mais próximo) a que o clique mede a distância
 /// resíduo a resíduo.
 const PICK_CANDIDATES: usize = 48;
@@ -39,6 +40,8 @@ pub struct InspectData {
     pub body_pos: Vec<[f32; 2]>,
     /// Ids dos agentes a que está ligado por âncoras (e se é de nascimento).
     pub bonds: Vec<(u32, bool)>,
+    /// Sinais internos [α, β, γ, δ] de cada resíduo.
+    pub signals: Vec<[f32; 4]>,
 }
 
 impl InspectData {
@@ -168,6 +171,7 @@ impl Inspector {
         enc.copy_buffer_to_buffer(&world.body_pos_buf, s * 512, &self.staging, 320, 512);
         // As 4 ligações (a 5.ª entrada do slot é a proposta do passo).
         enc.copy_buffer_to_buffer(&world.bonds_buf, s * crate::world::BOND_STRIDE * 16, &self.staging, 832, 64);
+        enc.copy_buffer_to_buffer(&world.signals_buf, s * 1024, &self.staging, 896, 1024);
         self.state = Readback::Encoded;
     }
 
@@ -178,6 +182,9 @@ impl Inspector {
         // giração ao nascer: cortava as pontas dos corpos compridos).
         let (center, side) = d.bounds();
         let cam = Camera { center, zoom: PREVIEW_SIZE as f32 / (side + 2.0 * PREVIEW_MARGIN).max(40.0) };
+        // O agente desenha-se na posição que tem AGORA na GPU; só o desvio
+        // do centro da caixa do corpo vem desta leitura (atrasada).
+        self.preview.view.focus_offset.set([center[0] - d.agent.pos_x, center[1] - d.agent.pos_y]);
         self.preview.view.focus.set(sel.slot);
         self.preview.encode(queue, enc, &cam, 0, 0.2);
     }
@@ -221,7 +228,9 @@ impl Inspector {
         let body_pos = pw[..(agent.body_len as usize).min(64)].to_vec();
         let lw: &[[u32; 4]] = bytemuck::cast_slice(&bytes[832..896]);
         let bonds = lw.iter().filter(|b| b[0] != u32::MAX).map(|b| (b[1], b[2] >> 16 != 0)).collect();
-        self.data = Some(InspectData { agent, genome, body, organs, body_pos, bonds });
+        let sw: &[[f32; 4]] = bytemuck::cast_slice(&bytes[896..1920]);
+        let signals = sw[..(agent.body_len as usize).min(64)].to_vec();
+        self.data = Some(InspectData { agent, genome, body, organs, body_pos, bonds, signals });
     }
 }
 
@@ -261,6 +270,50 @@ fn colored_seq(ui: &mut egui::Ui, items: impl Iterator<Item = (char, egui::Color
 /// Volume médio dos 20 aminoácidos (igual a CAP_VOLUME_REF no shader).
 const CAP_VOLUME_REF: f32 = 141.26;
 
+/// SINAIS INTERNOS: uma barra por canal, com um segmento por resíduo (ponta N
+/// à esquerda). Cor cheia = sinal forte; as duas cores de cada canal são o
+/// sinal positivo e o negativo (as mesmas da vista "sinal α" / "sinal β").
+/// Por cima, um traço branco marca os resíduos com órgão.
+fn signal_bars(ui: &mut egui::Ui, d: &InspectData) {
+    let n = d.signals.len();
+    if n == 0 {
+        return;
+    }
+    const NAMES: [&str; 4] = ["α", "β", "γ", "δ"];
+    const POS: [[f32; 3]; 4] = [[1.0, 0.45, 0.1], [0.3, 1.0, 0.3], [1.0, 0.25, 0.3], [0.3, 0.9, 0.9]];
+    const NEG: [[f32; 3]; 4] = [[0.1, 0.6, 1.0], [0.95, 0.3, 0.9], [0.35, 0.45, 1.0], [0.9, 0.8, 0.2]];
+    let (label_w, row_h, gap) = (16.0, 12.0, 3.0);
+    let width = ui.available_width().min(340.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 6.0 + 4.0 * (row_h + gap)), egui::Sense::hover());
+    let p = ui.painter_at(rect);
+    let cell = (width - label_w) / n as f32;
+    let x0 = rect.left() + label_w;
+    for (k, o) in d.organs.iter().enumerate().take(n) {
+        if *o != 0 {
+            let x = x0 + k as f32 * cell;
+            p.rect_filled(egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2((cell - 1.0).max(1.0), 3.0)), 0.0, egui::Color32::WHITE);
+        }
+    }
+    for ch in 0..4 {
+        let y = rect.top() + 6.0 + ch as f32 * (row_h + gap);
+        p.text(egui::pos2(rect.left(), y + row_h * 0.5), egui::Align2::LEFT_CENTER, NAMES[ch], egui::FontId::proportional(12.0), egui::Color32::GRAY);
+        for (k, s) in d.signals.iter().enumerate() {
+            let v = s[ch];
+            // Os modos 0 e 4 limitam o sinal a ±1; os outros a ±4: a tanh mostra bem os dois.
+            let t = v.abs().tanh().clamp(0.0, 1.0);
+            let c = if v >= 0.0 { POS[ch] } else { NEG[ch] };
+            let base = 0.13;
+            let col = egui::Color32::from_rgb(
+                (255.0 * (base + (c[0] - base) * t)) as u8,
+                (255.0 * (base + (c[1] - base) * t)) as u8,
+                (255.0 * (base + (c[2] - base) * t)) as u8,
+            );
+            p.rect_filled(egui::Rect::from_min_size(egui::pos2(x0 + k as f32 * cell, y), egui::vec2((cell - 1.0).max(1.0), row_h)), 0.0, col);
+        }
+    }
+    ui.small("sinais por resíduo (ponta N à esquerda): α laranja + / azul −, β verde + / magenta −, γ vermelho + / azul −, δ ciano + / amarelo −; traço branco = órgão");
+}
+
 /// O inspetor, na barra fixa da direita (só existe com um organismo escolhido).
 pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life::table::OrganRow], amino: &[crate::life::table::AminoRow]) {
     let mut open = true;
@@ -284,6 +337,7 @@ pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life:
             ui.image((t, egui::vec2(256.0, 256.0)));
         }
         ui.checkbox(&mut ins.follow, "câmara segue este organismo");
+        signal_bars(ui, d);
         egui::Grid::new("ins").striped(true).show(ui, |ui| {
             let mut row = |k: &str, v: String| {
                 ui.label(k);
