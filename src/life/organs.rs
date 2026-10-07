@@ -163,7 +163,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("canal", "−1 = sempre ativa; 2 = só com sinal γ positivo; 3 = só com sinal δ positivo (proporcional ao sinal, até 1)"),
     ],
     &[
-        pd("polaridade", "+1 ou −1: liga-se a âncoras de polaridade oposta de outros agentes"),
+        pd("polaridade", "já não decide a quem se liga (qualquer âncora serve); só escolhe a cor do anel: +1 vermelho, −1 azul"),
         pd("quebra", "probabilidade por passo de se soltar (0 = permanente)"),
     ],
     &[pd("canal", "0 = emite em α, 1 = em β"), pd("valor", "sinal constante emitido (× intensidade)")],
@@ -319,10 +319,8 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             v("eficiencia") * g
         ),
         12 => format!(
-            "âncora {} [anel {}]: agarra-se a uma âncora {}, a uma ventosa ou a um relé (livres) de outro agente que toque, ou a um filho; {}",
-            if v("polaridade") >= 0.0 { "+" } else { "−" },
+            "âncora [anel {}]: agarra-se a outra âncora, a uma ventosa ou a um relé (livres) de outro agente que toque, ou a um filho; {}",
             if v("polaridade") >= 0.0 { "vermelho" } else { "azul" },
-            if v("polaridade") >= 0.0 { "−" } else { "+" },
             if v("quebra") <= 0.0 {
                 "permanente (só se solta se esticar demais)".to_string()
             } else {

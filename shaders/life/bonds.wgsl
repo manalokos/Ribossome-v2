@@ -67,11 +67,11 @@ fn bond_theirs(b: vec4<u32>) -> u32 {
     return (b.z >> 8u) & 0xFFu;
 }
 
-// Polaridade da âncora no resíduo k (+1, −1) ou 0 se não for âncora.
+// 1 se o resíduo k é uma âncora, 0 se não. (As âncoras tinham polaridade +/−
+// e só se ligavam às de sinal contrário; agora ligam-se a qualquer âncora.
+// A coluna "polaridade" da tabela ficou só a escolher a cor do anel.)
 fn anchor_polarity(slot: u32, k: u32) -> f32 {
-    let o = organ_get(slot, k);
-    if (organ_type(o) != ORGAN_ANCHOR) { return 0.0; }
-    return select(-1.0, 1.0, organ_var(o).p0 >= 0.0);
+    return select(0.0, 1.0, organ_type(organ_get(slot, k)) == ORGAN_ANCHOR);
 }
 
 // Probabilidade de quebra por passo da âncora no resíduo k.
@@ -231,7 +231,6 @@ fn bond_propose(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     if (k == BOND_NONE) { return; }
-    let pol = anchor_polarity(slot, k);
     let ra = residue_world(slot, a, k);
     let c = contact_cell_xy(ra);
     for (var dy = -1; dy <= 1; dy++) {
@@ -251,7 +250,7 @@ fn bond_propose(@builtin(global_invocation_id) gid: vec3<u32>) {
                         // ADESÃO ESPECÍFICA: a âncora só se agarra a certos
                         // órgãos do outro corpo (os seus "recetores"), o
                         // mais próximo que lhe toque e esteja livre:
-                        //   - outra âncora de polaridade oposta;
+                        //   - outra âncora;
                         //   - uma ventosa (o pé de um agarra o outro);
                         //   - um relé (a ligação passa sinais: fica uma
                         //     sinapse, com o relé a decidir o que entra).
@@ -262,7 +261,7 @@ fn bond_propose(@builtin(global_invocation_id) gid: vec3<u32>) {
                         for (var j = 0u; j < b.body_len; j++) {
                             let pj = anchor_polarity(e, j);
                             let tj = organ_type(organ_get(e, j));
-                            let ok = (pj == -pol || tj == ORGAN_HOLDFAST || tj == ORGAN_RELAY) && !anchor_busy(e, j);
+                            let ok = (pj != 0.0 || tj == ORGAN_HOLDFAST || tj == ORGAN_RELAY) && !anchor_busy(e, j);
                             let dj = length(residue_world(e, b, j) - ra);
                             if (ok && dj <= best_d) {
                                 best_d = dj;
@@ -327,7 +326,7 @@ fn bond_accept_pass(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 
 // LIGAÇÃO DE NASCIMENTO (chamada em agents_birth): uma âncora livre do pai
-// e uma de polaridade oposta do filho ligam-se logo (sem lugar livre no
+// e uma do filho ligam-se logo (sem lugar livre no
 // pai, ou sem âncoras compatíveis, separam-se).
 // Âncora do pai onde o filho vai nascer: a primeira livre, se o pai tiver
 // um lugar de ligação livre. BOND_NONE = nasce solto.
@@ -360,12 +359,11 @@ fn birth_bond(parent: u32, pa: Agent, child: u32, k: u32) {
         }
     }
     if (slot_i == BOND_NONE) { return; }
-    let pol = anchor_polarity(parent, k);
-    // O filho agarra-se com uma âncora oposta, se tiver; senão pela ponta.
+    // O filho agarra-se com uma âncora sua, se tiver; senão pela ponta.
     var j = 0u;
     var pb = anchor_break(parent, k);
     for (var q = 0u; q < ca.body_len; q++) {
-        if (anchor_polarity(child, q) == -pol) {
+        if (anchor_polarity(child, q) != 0.0) {
             j = q;
             pb = max(pb, anchor_break(child, q));
             break;
