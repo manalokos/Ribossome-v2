@@ -240,7 +240,7 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
     data.push(']');
     let alive = l.branches.iter().filter(|b| l.alive(b)).count();
     format!(
-        "<p>{} ramos registados em {} censos (de {} em {} epochs), {} vivos. O eixo horizontal é o TEMPO: cada nó está no epoch em que o ramo apareceu e a barra à frente dele dura enquanto existiu. Liga-se por uma curva ao ramo de onde saiu. Verde = vivo, cinzento = extinto, mais grosso = mais agentes no pico. <b>Roda</b> = zoom, <b>arrastar</b> = mover, <b>clique</b> = ver o ramo. De perto cada nó mostra o desenho das duas formas.</p>\
+        "<p>{} ramos registados em {} censos (de {} em {} epochs), {} vivos. O eixo horizontal é o TEMPO: cada nó está no epoch em que o ramo apareceu e a barra à frente dele dura enquanto existiu. Liga-se por uma curva ao ramo de onde saiu. Verde = vivo (a barra acaba em seta); cinzento = extinto (a barra acaba numa travessa, no último censo em que apareceu); mais grosso = mais agentes no pico. Tracejado = o ramo novo apareceu depois de o de origem ter desaparecido. <b>Roda</b> = zoom, <b>arrastar</b> = mover, <b>clique</b> = ver o ramo. De perto cada nó mostra o desenho das duas formas.</p>\
 <div class=\"tv-bar\"><label>esconder ramos com pico abaixo de <input id=\"tv-min\" type=\"range\" min=\"0\" max=\"100\" value=\"0\"> <span id=\"tv-minv\">0</span></label> <label><input id=\"tv-alive\" type=\"checkbox\"> só os vivos e os seus antepassados</label> <button id=\"tv-fit\">ver tudo</button></div>\
 <div class=\"tv-wrap\"><canvas id=\"tv\"></canvas><div id=\"tv-info\"><i>clica num ramo</i></div></div>\
 <script>const TV_DATA={data};const TV_T0={};const TV_T1={};const TV_EVERY={};\n{JS}</script>",
@@ -276,6 +276,10 @@ const cv=document.getElementById('tv'),ctx=cv.getContext('2d'),info=document.get
 const byId=new Map(TV_DATA.map(b=>[b.id,b]));
 const kids=new Map();TV_DATA.forEach(b=>{const k=b.par===null?-1:b.par;if(!kids.has(k))kids.set(k,[]);kids.get(k).push(b);});
 let minPeak=0,onlyAlive=false,nodes=[],sel=null;
+// Os ramos que saem do mesmo ramo ficam do MAIS NOVO para o mais velho por
+// baixo dele: assim a descida para um ramo antigo passa a esquerda de todos
+// os mais novos e nenhuma linha atravessa outra.
+kids.forEach(a=>a.sort((p,q)=>q.born-p.born||q.id-p.id));
 // NÓS E LINHAS NO TEMPO. x = epoch em que o ramo apareceu (um censo = STEP
 // unidades); cada ramo tem a sua linha, por baixo do ramo de onde saiu. O nó
 // é um cartão (retratos das duas formas + texto) e a barra à frente dele
@@ -292,7 +296,7 @@ function layout(){
   nodes=[];
   // um ramo escondido passa os filhos ao antepassado visível
   const st=(kids.get(-1)||[]).map(b=>[b,null]).reverse();
-  while(st.length){ const [b,up]=st.pop(); let me=up; if(vis(b)){ b.up=up; b.x=Math.max(TX(b.born),up?up.x+STEP:0); b.y=nodes.length*ROW; b.end=Math.max(b.x+CW,b.x+TX(b.last)-TX(b.born)); b.reach=b.end; if(up) up.reach=Math.max(up.reach,b.x-60); nodes.push(b); me=b; } const k=kids.get(b.id); if(k) for(let i=k.length-1;i>=0;i--) st.push([k[i],me]); }
+  while(st.length){ const [b,up]=st.pop(); let me=up; if(vis(b)){ b.up=up; b.x=Math.max(TX(b.born),up?up.x+STEP:0); b.y=nodes.length*ROW; b.end=Math.max(b.x+CW,b.x+TX(b.last)-TX(b.born)); b.reach=b.end; nodes.push(b); me=b; } const k=kids.get(b.id); if(k) for(let i=k.length-1;i>=0;i--) st.push([k[i],me]); }
 }
 function fit(){ let x1=1,y1=1; for(const n of nodes){ x1=Math.max(x1,n.reach); y1=Math.max(y1,n.y); }
   z=Math.min((W-50)/x1,(H-70)/(y1+CH),1.2); ox=20; oy=44+CH/2*z; draw(); }
@@ -323,13 +327,17 @@ function draw(){
   ctx.lineCap='round';
   // ligações: saem da barra do ramo de origem, um pouco antes do nó, e descem em curva
   for(const n of nodes){ const p=n.up; if(!p) continue; if(n.y<vy0-ROW||p.y>vy1+ROW||n.x<vx0||n.x-60>vx1) continue;
-    const x0=n.x-60; ctx.strokeStyle=n.alive?'#4f9e62':'#56606b'; ctx.lineWidth=wd(n);
-    ctx.beginPath(); ctx.moveTo(x0,p.y); ctx.bezierCurveTo(x0+4,n.y,x0+10,n.y,n.x,n.y); ctx.stroke(); }
+    // sai da barra do ramo de origem; se este ja tinha desaparecido dos censos
+    // quando o novo apareceu, sai do fim da barra, a tracejado
+    const late=n.x-60>p.end+1, x0=late?p.end:n.x-60; ctx.strokeStyle=n.alive?'#4f9e62':'#56606b'; ctx.lineWidth=wd(n);
+    if(late) ctx.setLineDash([6/z,5/z]);
+    ctx.beginPath(); ctx.moveTo(x0,p.y); ctx.bezierCurveTo(x0+4,n.y,x0+10,n.y,x0+50,n.y); ctx.lineTo(n.x,n.y); ctx.stroke(); ctx.setLineDash([]); }
   for(const n of nodes){ if(n.y<vy0-CH||n.y>vy1+CH||n.x>vx1||n.reach<vx0) continue;
     const col=n===sel?'#ffd866':(n.alive?'#6fcf7f':'#6b7480');
     // barra da vida do ramo (e o prolongamento fino até ao último ramo que sai dele)
-    if(n.reach>n.end){ ctx.strokeStyle='#3a424c'; ctx.lineWidth=1.2/z; ctx.beginPath(); ctx.moveTo(n.end,n.y); ctx.lineTo(n.reach,n.y); ctx.stroke(); }
     ctx.strokeStyle=n.alive?'#4f9e62':'#56606b'; ctx.lineWidth=wd(n); ctx.beginPath(); ctx.moveTo(n.x,n.y); ctx.lineTo(n.end,n.y); ctx.stroke();
+    // ponta da barra: seta = continua vivo; travessa = ultimo censo em que apareceu (extinto)
+    if(n.end>n.x+CW+2||!cards){ const e=n.end, k=Math.max(7,5/z); if(n.alive){ ctx.fillStyle='#6fcf7f'; ctx.beginPath(); ctx.moveTo(e+k*1.6,n.y); ctx.lineTo(e,n.y-k); ctx.lineTo(e,n.y+k); ctx.fill(); } else { ctx.strokeStyle='#8a94a0'; ctx.lineWidth=Math.max(2,1.5/z); ctx.beginPath(); ctx.moveTo(e,n.y-k); ctx.lineTo(e,n.y+k); ctx.stroke(); } }
     if(!cards){ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(n.x,n.y,Math.max(3/z,6+5*Math.log10(Math.max(1,n.peak))),0,6.2832); ctx.fill(); continue; }
     const y=n.y-CH/2;
     rr(n.x,y,CW,CH,10); ctx.fillStyle='#07090b'; ctx.fill(); ctx.strokeStyle=col; ctx.lineWidth=n===sel?3:1.6; ctx.stroke();
