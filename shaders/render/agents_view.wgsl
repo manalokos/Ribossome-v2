@@ -354,8 +354,10 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 var drive = 1.0;
                 if (pv.p2 >= 0.0) { drive = clamp(signals_view[base + k][u32(clamp(pv.p2, 0.0, 3.0))], 0.0, 1.0); }
                 spike = max(pv.p0, 0.0) * drive;
-                // O leque abre na medida em que a protease esta ligada.
-                phase = drive;
+                // Para o desenho: numero de espigoes pela FORCA (variante x
+                // intensidade) na parte inteira, abertura na fracionaria.
+                let force = max(pv.p1, 0.0) * exp2((f32(oc >> 8u) - 32.0) / 8.0);
+                phase = clamp(round(4.0 + 3.5 * force), 6.0, 24.0) + drive * 0.99;
                 if (bite.z > 0.0 && glyph) {
                     flash = BITE_ATTACK_COLOR;
                     // Ao longe (quando o corpo já está a ser engrossado) a
@@ -746,20 +748,30 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             return vec4<f32>(0.72, 0.82, 1.0, 1.0);
         }
         case ORGAN_PROTEASE: {
-            // LEQUE de 5 agulhas finas para um dos lados da cadeia, a do
-            // meio mais comprida. Desligada, o leque esta fechado (um
-            // feixe); ligada, abre. Com alcance, as agulhas tem o
-            // comprimento do alcance (o quadrado cresce no vertice).
-            let open = clamp(in.core_phase.y, 0.0, 1.0);
-            let step = mix(0.05, 0.5, open);
+            // OURICO: tantos espigoes quanta a forca da protease (6 a 24),
+            // cada um com o seu angulo e comprimento (um hash do indice).
+            // Desligada, estao recolhidos num feixe para um lado da
+            // cadeia; ligada, abrem a toda a volta. Com alcance, o mais
+            // comprido tem o alcance (o quadrado cresce no vertice).
+            let count = floor(in.core_phase.y);
+            let open = clamp((in.core_phase.y - count) / 0.99, 0.0, 1.0);
+            let half = mix(0.22, 3.0, open);
+            let gap = 2.0 * half / count;
             let ang = atan2(u, v);
-            let i = clamp(round(ang / step), -2.0, 2.0);
-            let off = min(abs(ang - i * step), 1.5);
-            let tip = 0.97 * (1.0 - 0.16 * abs(i));
-            let needle = core * 0.15 * (1.0 - 0.8 * d / tip);
             let hub = core * 0.42;
-            if (d > hub && (d > tip || d * sin(off) > needle)) { discard; }
-            let pale = mix(in.color, vec3<f32>(1.0, 0.8, 0.65), 0.3 + 0.5 * d / tip);
+            var tip = 0.0;
+            for (var i = 0.0; i < count; i += 1.0) {
+                let r1 = fract(sin(i * 12.9898 + 4.1) * 43758.5453);
+                let r2 = fract(sin(i * 78.233 + 1.7) * 24634.6345);
+                let at = -half + gap * (i + 0.5 + (r1 - 0.5) * 0.9);
+                let len = 0.97 * (0.5 + 0.5 * r2);
+                var da = abs(ang - at);
+                da = min(da, 6.2831853 - da);
+                let needle = core * 0.12 * (1.0 - 0.8 * d / len);
+                if (d <= len && da < 1.5 && d * sin(da) <= needle) { tip = max(tip, len); }
+            }
+            if (d > hub && tip == 0.0) { discard; }
+            let pale = mix(in.color, vec3<f32>(1.0, 0.8, 0.65), 0.3 + 0.5 * d / max(tip, 0.01));
             return vec4<f32>(select(pale, in.color, d <= hub), 1.0);
         }
         case ORGAN_CHIRAL: {
