@@ -249,7 +249,7 @@ fn groups() -> Vec<(&'static str, Vec<usize>)> {
     vec![
         ("População", vec![0]),
         ("Nascimentos e mortes", vec![1, 2]),
-        ("Órgãos (% dos agentes com cada um)", (BASE.len()..BASE.len() + ORGAN_TYPES).collect()),
+        ("Órgãos (agentes com cada um)", (BASE.len()..BASE.len() + ORGAN_TYPES).collect()),
         ("Predação", vec![12]),
         ("Corpo e genoma", vec![4, 5, 9]),
         ("Energia, gerações e ligações", vec![3, 6, 7, 8]),
@@ -261,12 +261,14 @@ fn groups() -> Vec<(&'static str, Vec<usize>)> {
 pub struct ChartSel {
     pub group: [usize; 2],
     pub hidden: std::collections::HashSet<usize>,
+    /// Órgãos em NÚMERO de agentes (e não em % da população).
+    pub organ_counts: bool,
 }
 
 impl Default for ChartSel {
     fn default() -> Self {
         // População em cima, órgãos em baixo.
-        Self { group: [0, 2], hidden: Default::default() }
+        Self { group: [0, 2], hidden: Default::default(), organ_counts: true }
     }
 }
 
@@ -299,17 +301,33 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History, sel: &mut ChartSel) {
         return;
     }
     let last: Vec<f32> = h.last_rows(1).first().map(|(_, v)| v.to_vec()).unwrap_or_default();
+    // ÓRGÃOS EM NÚMERO DE AGENTES: as séries guardam a % da população com
+    // cada órgão; em % todas as linhas sobem e descem juntas quando um grupo
+    // grande cresce ou encolhe (o ciclo do dia punha tudo às ondas). O
+    // número de agentes (% × vivos) de um órgão não depende dos outros.
+    let organs = BASE.len()..BASE.len() + ORGAN_TYPES;
+    // (O valor deste frame; a caixa de seleção só conta no seguinte.)
+    let by_count = sel.organ_counts;
+    let as_count = |i: usize| by_count && organs.contains(&i);
+    let alive_last = last.first().copied().unwrap_or(0.0);
     let names: Vec<String> = h
         .names
         .iter()
         .enumerate()
         .map(|(i, n)| match last.get(i) {
+            Some(v) if as_count(i) => format!("{}: {:.0}", n.trim_start_matches("% "), v * alive_last / 100.0),
             Some(v) if v.abs() >= 100.0 => format!("{n}: {v:.0}"),
             Some(v) => format!("{n}: {v:.1}"),
             None => n.clone(),
         })
         .collect();
     let series = h.plot_series();
+    // (Média por intervalo da % × média dos vivos: chega para desenhar.)
+    let counts: Vec<Vec<[f64; 2]>> = if by_count {
+        organs.clone().map(|i| series[i].iter().zip(&series[0]).map(|(p, a)| [p[0], p[1] * a[1] / 100.0]).collect()).collect()
+    } else {
+        Vec::new()
+    };
     let groups = groups();
     let block = (ui.available_height() - 8.0) / 2.0;
     for slot in 0..2 {
@@ -321,6 +339,10 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History, sel: &mut ChartSel) {
                     ui.selectable_value(&mut sel.group[slot], g, *title);
                 }
             });
+            if groups[sel.group[slot]].1.first().is_some_and(|i| organs.contains(i)) {
+                ui.checkbox(&mut sel.organ_counts, "em número de agentes")
+                    .on_hover_text("ligado: quantos agentes têm cada órgão (uma linha não mexe nas outras). Desligado: em % da população, que faz todas as linhas ondular juntas quando um grupo grande cresce ou encolhe");
+            }
             ui.small("clica num nome para esconder ou mostrar a linha");
         });
         let idx = &groups[sel.group[slot]].1;
@@ -340,8 +362,9 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History, sel: &mut ChartSel) {
         egui_plot::Plot::new(("grafico", slot, sel.group[slot])).height(height).allow_scroll(false).show(ui, |p| {
             for (k, &i) in idx.iter().enumerate() {
                 if !sel.hidden.contains(&i) {
+                    let pts = if as_count(i) { counts[i - organs.start].clone() } else { series[i].clone() };
                     p.line(
-                        egui_plot::Line::new(names[i].clone(), egui_plot::PlotPoints::from(series[i].clone()))
+                        egui_plot::Line::new(names[i].clone(), egui_plot::PlotPoints::from(pts))
                             .id(egui::Id::new(("serie", i)))
                             .color(series_color(k)),
                     );
