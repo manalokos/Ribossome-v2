@@ -94,6 +94,9 @@ pub struct UiState {
     /// Ficheiro do autosave (None = desligado neste arranque, p. ex. testes).
     pub autosave_path: Option<String>,
     pub scene_msg: String,
+    /// Nome do mundo que está a correr (names.rs): mostra-se no separador
+    /// da cena e é o nome sugerido ao gravar.
+    pub scene_name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,8 +160,6 @@ pub enum TerrainAction {
     Load,
     /// Mundo vazio (só água, sem fumarolas), semeado de novo: para pintar.
     Empty,
-    /// Pista de corridas: terreno do circuito, parâmetros do ensaio e recomeço.
-    Track,
     /// Escolhe onde gravar (janela) e grava o terreno atual em PNG.
     Save,
     /// Volta ao terreno gerado e semeia de novo.
@@ -266,6 +267,7 @@ impl UiState {
             autosave_every: 50_000,
             autosave_path: None,
             scene_msg: String::new(),
+            scene_name: String::new(),
         }
     }
 }
@@ -295,7 +297,7 @@ pub fn draw(root: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
     });
     // Sempre presente: a simulação não muda de tamanho ao escolher um organismo.
     egui::Panel::right("inspetor").default_size(300.0).size_range(280.0..=600.0).resizable(true).show(root, |ui| {
-        inspector::panel(ui, ins, &world.organ_table, &world.amino);
+        inspector::panel(ui, ins, &world.organ_table, &world.amino, &world.organ_code, world.params.require_start != 0);
     });
     let free = root.available_rect_before_wrap();
     if st.tab == Tab::Graficos {
@@ -399,6 +401,14 @@ fn changed_params(ui: &mut egui::Ui, world: &mut World) {
 }
 
 fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
+    if !st.scene_name.is_empty() {
+        ui.horizontal(|ui| {
+            ui.label("world:");
+            ui.label(egui::RichText::new(st.scene_name.replace('_', " ")).italics().strong())
+                .on_hover_text("name of this world, given when it was created, restarted or seeded again (or taken from the scene file that was loaded). It is the suggested file name when you save the scene");
+        });
+        ui.separator();
+    }
     changed_params(ui, world);
     ui.separator();
     ui.label("A scene = the whole world (matter, terrain, water, agents) and all the parameters.");
@@ -794,7 +804,7 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.add(egui::Slider::new(&mut p.spawn_energy, 0.1..=50.0).text("initial energy"));
     ui.add(egui::Slider::new(&mut p.pairing_rate, 0.0..=8.0).text("pairing (bases/step)"));
     ui.add(egui::Slider::new(&mut p.pairing_cost, 0.0..=2.0).text("cost per base copied"))
-        .on_hover_text("energy spent for each base of the genome that is copied. On the race track it is the cost of a CHILD that counts: this value holds for a 33-base genome, and a longer genome pays less per base (the same total), so as not to punish complex bodies");
+        .on_hover_text("energy spent for each base of the genome that is copied");
     let mut salvage = p.salvage > 0.0;
     ui.checkbox(&mut salvage, "recharge: producers copy themselves with spent monomers")
         .on_hover_text("the energy that overflows from a photosystem or a chemosynthesis organ first charges a spent monomer for the copy of its own genome (building with raw material); only what is of no use for that goes on to reactivate monomers in the medium. Off = all the overflow goes to the medium (as it was)");
@@ -840,21 +850,6 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
         .on_hover_text("how the α/β signals travel along the chain and bend the joints. 0: conduction and sensitivity of each amino acid (v3). 1: equal diffusion to both sides and all joints respond alike (α bends one way, β the other). 2: the signal only travels from the N side to the C side, same response. 3: it travels from N to C and each joint responds according to its amino acid (the body decides which way it turns). 4: transport from the table (conduction of each amino acid and organ, as in 0) but all joints respond alike");
     ui.add(egui::Slider::new(&mut p.signal_crosstalk, 0.0..=0.5).text("leakage into the other channels"))
         .on_hover_text("an organ that emits on one channel lets this fraction of the emission leak into each of the other three (imperfect specificity): an α sensor also puts a little into β, γ and δ. Relays have no leakage (they serve to separate channels). 0 = clean emission");
-    if p.track_mode != 0 {
-        ui.strong("Race track");
-        ui.add(egui::Slider::new(&mut p.track_gain, 0.0..=1.0).logarithmic(true).text("energy per unit advanced"))
-            .on_hover_text("energy an agent gains for each world unit of NET advance along the track (only going past the farthest point it has already reached pays). Whoever goes back more than 150 units pays for the excess at the same price. A 20-residue agent spends ~0.04 per step just to stay alive");
-        ui.add(egui::Slider::new(&mut p.wall_damage, 0.0..=1.0).logarithmic(true).text("wall damage"))
-            .on_hover_text("energy lost per step with the agent's center on top of a wall (proportional to how far its radius goes into it)");
-        ui.add(egui::Slider::new(&mut p.track_pop, 20..=20000).logarithmic(true).text("population cap"))
-            .on_hover_text("maximum number of agents on the track: when full, nobody is born. While there are fewer than half, random genomes come in (immigration), so it never goes extinct; the other half is for the children of those that advance");
-        ui.add(egui::Slider::new(&mut p.track_lifespan, 0..=200000).logarithmic(true).text("mean lifespan (steps)"))
-            .on_hover_text("on each step every agent dies with probability 1 / this value, whether a good or a bad swimmer: lives last this number of steps on average. It makes sure there are always new places even with the track full of good swimmers. 0 = no limit");
-        let mut same = p.copy_same != 0;
-        if ui.checkbox(&mut same, "children identical to the parent").on_hover_text("the child is a copy of the parent's genome instead of the reverse complement (a single form per lineage)").changed() {
-            p.copy_same = same as u32;
-        }
-    }
     ui.add(egui::Slider::new(&mut p.clock_mute, 0.0..=1.0).text("mute clocks"))
         .on_hover_text("experiment: removes amplitude from all clocks (1 = mute). The organ stays in the body and keeps paying its cost; it is for seeing whether the agents move without it (sensors, emission by contact)");
     ui.small(match p.signal_mode.round() as i32 {

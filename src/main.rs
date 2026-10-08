@@ -24,10 +24,6 @@ struct Running {
     /// Alvo com várias amostras onde o mundo é desenhado (do tamanho da
     /// janela; refeito quando ela muda). Resolve para a imagem da janela.
     msaa: Option<wgpu::Texture>,
-    /// Parâmetros que estavam antes de entrar na pista (repostos ao sair).
-    pre_track: Option<(ribossome::params::SimParams, f32)>,
-    /// Pista: epoch da próxima leva de imigrantes.
-    track_next_seed: u32,
     /// Genoma carregado de um ficheiro (bases 0..3 = A, U, G, C).
     loaded_agent: Option<Vec<u8>>,
     /// MODO FOTO/VÍDEO: alvo de captura (refeito se o tamanho mudar), pasta
@@ -308,8 +304,6 @@ impl Running {
             cam,
             egui_state,
             msaa: None,
-            pre_track: None,
-            track_next_seed: 0,
             loaded_agent: None,
             shot_cap: None,
             rec_tx: None,
@@ -347,8 +341,12 @@ impl Running {
         };
         r.ui.autosave_path = autosave_path;
         r.ui.scene_msg = scene_msg;
+        r.ui.scene_name = ribossome::names::new_scene_name(&r.world, r.seed);
         if let Some(extra) = resumed {
             r.apply_interface(&extra);
+            // Mundo retomado do autosave: o nome sai só da semente dele, para
+            // ser o mesmo de cada vez que o programa arranca.
+            r.ui.scene_name = r.loaded_scene_name(std::path::Path::new(""));
             if let Some(b) = resumed_stats {
                 r.ui.history = ribossome::stats::History::from_saved(&extra["estatisticas"], &b);
             }
@@ -415,6 +413,15 @@ impl Running {
 
     }
 
+    /// Nome de um mundo lido de um ficheiro: o do ficheiro, se parecer um
+    /// nome de cena ("Abyssus_lucidus_417_e52000.ribo"); senão um tirado só
+    /// da semente do mundo (o mesmo de cada vez que se abre).
+    fn loaded_scene_name(&self, path: &std::path::Path) -> String {
+        path.file_stem()
+            .and_then(|s| ribossome::names::name_from_stem(&s.to_string_lossy()))
+            .unwrap_or_else(|| ribossome::names::scene_name_with(self.seed, &ribossome::names::world_moods(&self.world)))
+    }
+
     /// Começa a gravar uma cena (espera pela gravação anterior, se houver).
     fn start_save(&mut self, path: std::path::PathBuf, keep_previous: bool) {
         self.finish_save(true);
@@ -457,7 +464,7 @@ impl Running {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Ribossome scene", &["ribo"])
                     .set_directory(dir.canonicalize().unwrap_or_default())
-                    .set_file_name(format!("cena_epoch{epoch}.ribo"))
+                    .set_file_name(format!("{}_e{epoch}.ribo", self.ui.scene_name))
                     .set_title("Save scene")
                     .save_file()
                 {
@@ -479,6 +486,7 @@ impl Running {
                     match scene.and_then(|s| self.world.load_scene(&self.gpu, &s)) {
                         Ok((extra, notes)) => {
                             self.apply_interface(&extra);
+                            self.ui.scene_name = self.loaded_scene_name(&path);
                             // O registo das linhagens é o da cena (ou vazio, se ela não o tiver).
                             self.lineages = lineage_bytes.and_then(|b| ribossome::lineage::Lineages::from_bytes(&b)).unwrap_or_default();
                             self.ui.history = ribossome::stats::History::from_saved(
@@ -946,59 +954,8 @@ impl Running {
         }
     }
 
-    /// Na pista, as sementes nascem dentro do corredor (ao acaso ao longo
-    /// da volta e da largura) em vez de espalhadas pelo mundo, que é rocha.
-    fn onto_track(&mut self, reqs: &mut [ribossome::params::SpawnRequest]) {
-        if self.world.params.track_mode == 0 {
-            return;
-        }
-        let sim = self.world.cfg.sim_size();
-        for r in reqs {
-            let p = ribossome::track::point(sim, self.seed_rng.f32(), self.seed_rng.f32() * 2.0 - 1.0);
-            r.pos_x = p[0];
-            r.pos_y = p[1];
-        }
-    }
-
-    /// PISTA DE CORRIDAS: terreno do circuito, parâmetros do ensaio (só a
-    /// energia do avanço conta) e recomeço do zero.
-    fn start_track(&mut self) {
-        let (gamma, heat) = ribossome::track::terrain(&self.world.cfg);
-        self.world.apply_terrain_live(&self.gpu, gamma, heat, None);
-        self.world.settings.fluid_enabled = false;
-        self.world.settings.contact_enabled = false;
-        // As paredes são fixas: sem sedimento, erosão nem grãos a cair.
-        self.world.settings.terrain_enabled = false;
-        // Guarda os parâmetros do mundo normal (só da primeira vez) e passa
-        // aos do ensaio; ao sair da pista voltam.
-        if self.world.params.track_mode == 0 {
-            self.pre_track = Some((self.world.params, self.world.seed_density));
-        }
-        // Sem monómeros nenhuns na pista.
-        self.world.seed_density = 0.0;
-        ribossome::track::preset(&mut self.world.params);
-        // Recomeço já aqui (e não pela marca de "recomeçar"), para poder
-        // semear logo a seguir: genomas ao acaso espalhados pela pista.
-        self.seed += 1;
-        self.ui.baseline = self.world.restart_keeping_terrain(&self.gpu, self.seed);
-        self.ui.ledger = None;
-        self.ui.history = ribossome::stats::History::default();
-        self.lineages = ribossome::lineage::Lineages::default();
-        self.last_autosave = 0;
-        let mut reqs = ribossome::life::seed_requests(self.world.params.track_pop / 2, self.ui.seed_len, self.ui.seed_aug, self.world.cfg.sim_size(), &mut self.seed_rng);
-        self.onto_track(&mut reqs);
-        self.world.request_seeds(&reqs);
-        self.track_next_seed = 0;
-        self.ui.terrain_msg = "race track: energy only from advancing; walls glow and hurt; children identical to the parent".into();
-        log::info!("{}", self.ui.terrain_msg);
-    }
-
     fn terrain_action(&mut self, action: ribossome::ui::TerrainAction) {
         use ribossome::ui::TerrainAction;
-        if action == TerrainAction::Track {
-            self.start_track();
-            return;
-        }
         // Janela de ficheiros do sistema, a começar no último caminho usado.
         let last = std::path::PathBuf::from(self.ui.terrain_path.trim());
         let dir = last
@@ -1012,7 +969,7 @@ impl Running {
         let chosen = match action {
             TerrainAction::Load => dialog.set_title("Load terrain").pick_file(),
             TerrainAction::Save => dialog.set_title("Save terrain").set_file_name(&name).save_file(),
-            TerrainAction::Generated | TerrainAction::Empty | TerrainAction::Track => Some(last.clone()),
+            TerrainAction::Generated | TerrainAction::Empty => Some(last.clone()),
         };
         let Some(path) = chosen else {
             self.ui.terrain_msg = "canceled".into();
@@ -1049,33 +1006,8 @@ impl Running {
                 self.ui.terrain_msg = "empty world (water only); seeded again".into();
                 true
             }
-            TerrainAction::Track => false,
         };
         if resow {
-            // Sair da pista: voltam os parâmetros que estavam antes de entrar.
-            let was_track = self.world.params.track_mode != 0;
-            if let Some((old, density)) = self.pre_track.take() {
-                let epoch = self.world.params.epoch;
-                self.world.params = old;
-                self.world.seed_density = density;
-                self.world.params.epoch = epoch;
-                self.world.settings.fluid_enabled = true;
-                self.world.settings.contact_enabled = true;
-                self.world.settings.terrain_enabled = true;
-            } else if was_track {
-                // A pista veio de um autosave ou de uma cena (os parâmetros de
-                // antes já não existem): volta TUDO aos valores por omissão.
-                // Sem isto o mundo normal ficava com as regras do ensaio (sem
-                // monómeros, sem comer, sem corrente, sem contacto).
-                let (seed, epoch) = (self.world.params.seed, self.world.params.epoch);
-                self.world.params = ribossome::params::SimParams { seed, epoch, ..Default::default() };
-                self.world.settings = Default::default();
-                self.world.seed_density = ribossome::world::SEED_DENSITY_DEFAULT;
-                self.world.seed_active = ribossome::world::SEED_ACTIVE_DEFAULT;
-                log::info!("left the track with no saved parameters: default values");
-            }
-            self.world.params.track_mode = 0;
-            self.world.params.copy_same = 0;
             // Mesma semente: só o terreno muda.
             self.seed -= 1;
             self.ui.reseed = true;
@@ -1174,7 +1106,7 @@ impl Running {
     fn write_report(&mut self) {
         let t = std::time::Instant::now();
         let epoch = self.world.params.epoch;
-        let html = ribossome::report::generate(&self.gpu, &self.world, Some(&self.lineages), &format!("Ribossome: report at epoch {epoch}"));
+        let html = ribossome::report::generate(&self.gpu, &self.world, Some(&self.lineages), &format!("Ribossome: {}, report at epoch {epoch}", self.ui.scene_name.replace('_', " ")));
         self.write_page(&format!("relatorio_{epoch}.html"), html, &format!("report ({:.1} s)", t.elapsed().as_secs_f32()));
     }
 
@@ -1225,34 +1157,15 @@ impl Running {
             self.ui.ledger_epoch = self.world.params.epoch;
         }
         self.ui.stats.update(self.world.params.epoch, self.world.last_counters, self.world.cfg.max_agents);
-        // PISTA: imigração. Enquanto houver menos de metade do teto vivos,
-        // entram genomas ao acaso na pista (até 200 de cada vez): a
-        // população nunca se extingue e há sempre candidatos novos até
-        // aparecer quem consiga avançar e copiar-se.
-        if self.world.params.track_mode != 0
-            && self.world.params.epoch >= self.track_next_seed
-            && let Some(c) = self.world.last_counters
-        {
-            let alive = c.alive(self.world.cfg.max_agents);
-            // Só até METADE do teto: a outra metade é para os filhos de quem avança.
-            let target = self.world.params.track_pop / 2;
-            if alive < target {
-                let mut reqs = ribossome::life::seed_requests((target - alive).min(200), self.ui.seed_len, self.ui.seed_aug, self.world.cfg.sim_size(), &mut self.seed_rng);
-                self.onto_track(&mut reqs);
-                self.world.request_seeds(&reqs);
-            }
-            self.track_next_seed = self.world.params.epoch + 200;
-        }
         if self.ui.seed_now {
             self.ui.seed_now = false;
-            let mut reqs = ribossome::life::seed_requests(
+            let reqs = ribossome::life::seed_requests(
                 self.ui.seed_count,
                 self.ui.seed_len,
                 self.ui.seed_aug,
                 self.world.cfg.sim_size(),
                 &mut self.seed_rng,
             );
-            self.onto_track(&mut reqs);
             self.world.request_seeds(&reqs);
         }
         if std::mem::take(&mut self.ui.activate_now) {
@@ -1275,7 +1188,8 @@ impl Running {
             self.ui.history = ribossome::stats::History::default();
             self.lineages = ribossome::lineage::Lineages::default();
             self.last_autosave = 0;
-            log::info!("restart: same terrain and parameters, epoch 0");
+            self.ui.scene_name = ribossome::names::new_scene_name(&self.world, self.seed);
+            log::info!("restart: same terrain and parameters, epoch 0; world {}", self.ui.scene_name);
         }
         if self.ui.reseed {
             self.ui.reseed = false;
@@ -1291,6 +1205,8 @@ impl Running {
             self.ui.history = ribossome::stats::History::default();
             self.lineages = ribossome::lineage::Lineages::default();
             self.ui.history.next_epoch = self.world.params.epoch;
+            self.ui.scene_name = ribossome::names::new_scene_name(&self.world, self.seed);
+            log::info!("world seeded again: {}", self.ui.scene_name);
         }
         let want_vsync = matches!(self.surface_cfg.present_mode, wgpu::PresentMode::AutoVsync);
         if want_vsync != self.ui.vsync {

@@ -139,12 +139,6 @@ fn light_propagate(@builtin(global_invocation_id) gid: vec3<u32>) {
 fn light_commit(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.y * 65535u * 256u + gid.x;
     if (i >= LIGHT_SIZE * LIGHT_SIZE) { return; }
-    if (params.track_mode != 0u) {
-        // PISTA: a luz vem das paredes (função da distância), não do sol.
-        let c = (vec2<f32>(f32(i % LIGHT_SIZE), f32(i / LIGHT_SIZE)) + 0.5) * f32(LIGHT_DIV * WORLD_UNITS_PER_CELL);
-        light_grid[i] = track_light(c);
-        return;
-    }
     light_grid[i] = light_next[i];
 }
 

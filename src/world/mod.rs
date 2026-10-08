@@ -1443,8 +1443,7 @@ impl World {
             // a partir do estado antes do passo, depois copiar de volta.
             // (De N em N passos, com N vezes o deslocamento: ver
             // params.transport_every e transport_scale no shader.)
-            // (Na pista não há monómeros: o transporte não corre.)
-            if self.params.track_mode == 0 && epoch % self.params.transport_every.max(1) == 0 {
+            if epoch % self.params.transport_every.max(1) == 0 {
                 if self.params.aggregation > 0.0 {
                     run(&mut pass, "agg_count", &pl.agg_count, ab, [g, g]);
                     run(&mut pass, "agg_neighbours", &pl.agg_neighbours, ab, [g, g]);

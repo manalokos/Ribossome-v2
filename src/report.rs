@@ -172,7 +172,7 @@ fn cap_size(cap: &Capture) -> f32 {
 
 /// Árvore de parentesco entre as espécies vivas (UPGMA sobre a distância
 /// entre os genomas dos líderes), desenhada de lado.
-fn inferred_tree(species: &[&Species], total: usize) -> String {
+fn inferred_tree(species: &[&Species], names: &[String], total: usize) -> String {
     let n = species.len();
     if n < 2 {
         return "<p>There is only one species above 1%.</p>".into();
@@ -245,17 +245,18 @@ fn inferred_tree(species: &[&Species], total: usize) -> String {
         let s = species[leaf];
         write!(
             svg,
-            "<text x=\"{:.0}\" y=\"{:.0}\">S{} · {:.1}% · {} bases</text>",
+            "<text x=\"{:.0}\" y=\"{:.0}\">S{} <tspan font-style=\"italic\">{}</tspan> · {:.1}% · {} bases</text>",
             left + width + 8.0,
             18.0 + r as f32 * row,
             leaf + 1,
+            esc(&names[leaf]),
             100.0 * s.count as f32 / total.max(1) as f32,
             s.leader.len()
         )
         .unwrap();
     }
     format!(
-        "<svg class=\"tree\" width=\"760\" height=\"{:.0}\">{svg}</svg><p class=\"note\">Branch length = distance between genomes (the maximum drawn is {:.0}% difference). It is an estimate made from the living species only.</p>",
+        "<svg class=\"tree\" width=\"900\" height=\"{:.0}\">{svg}</svg><p class=\"note\">Branch length = distance between genomes (the maximum drawn is {:.0}% difference). It is an estimate made from the living species only.</p>",
         28.0 + n as f32 * row,
         max_h * 200.0
     )
@@ -378,7 +379,9 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     };
     h += "<h2>Kinship between the living species (inferred tree)</h2>";
     let card_species: Vec<&Species> = cards.iter().map(|&i| &species[i]).collect();
-    h += &inferred_tree(&card_species, total);
+    // Nome em latim de cada espécie com ficha (o da linhagem do seu líder).
+    let names: Vec<String> = cards.iter().map(|&i| crate::names::lineage_name_in(&species[i].leader, rs, &code)).collect();
+    h += &inferred_tree(&card_species, &names, total);
 
     // Corpos das duas fitas de cada espécie com ficha.
     let bodies: Vec<[Vec<Residue>; 2]> =
@@ -386,12 +389,12 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
 
     // Quem pode atacar quem.
     h += "<h2>Who can attack whom</h2><p>Energy that one species (row) takes from another (column) per step of contact, by the rules: strength of the proteases of each family × fraction of target residues in the victim × proline defense. It is the best case between the two strands of each one; the diagonal is cannibalism.</p><table class=\"m\"><tr><th></th>";
-    for k in 0..cards.len() {
-        write!(h, "<th>S{}</th>", k + 1).unwrap();
+    for (k, name) in names.iter().enumerate() {
+        write!(h, "<th title=\"{}\">S{}</th>", esc(name), k + 1).unwrap();
     }
     h += "</tr>";
     for (a, ba) in bodies.iter().enumerate() {
-        write!(h, "<tr><th>S{}</th>", a + 1).unwrap();
+        write!(h, "<tr><th class=\"sp\">S{} · <i>{}</i></th>", a + 1, esc(&names[a])).unwrap();
         for bv in &bodies {
             let mut v = 0.0f32;
             for x in ba {
@@ -432,7 +435,7 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
                 h,
                 "<figure>{}<figcaption>victim: {} · loses {:.2} energy per step</figcaption></figure>",
                 img(&shot.encode_png(&rgba).unwrap_or_default(), 300, "attack"),
-                species_name(sv, &cards),
+                species_name(sv, &cards, &names),
                 bite[v as usize][0]
             )
             .unwrap();
@@ -449,13 +452,13 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
         list.sort_by(|a, b| b.1.cmp(a.1));
         h += "<ul>";
         for ((a, b), n) in list.into_iter().take(10) {
-            write!(h, "<li>{n} bonds between {} and {}</li>", species_name(*a, &cards), species_name(*b, &cards)).unwrap();
+            write!(h, "<li>{n} bonds between {} and {}</li>", species_name(*a, &cards, &names), species_name(*b, &cards, &names)).unwrap();
         }
         h += "</ul>";
     }
 
     // Fichas.
-    h += "<h2>The species</h2><p>Each species has two forms: the child is read from the strand complementary to the parent's, so form A produces B and B produces A. The \"life cycle\" is that alternation.</p>";
+    h += "<h2>The species</h2><p>Each species has two forms: the child is read from the strand complementary to the parent's, so form A produces B and B produces A. The \"life cycle\" is that alternation. The Latin name belongs to the pair: the genus tells the way of life (from the organs of one of the two forms, always the same one), the second word comes from the genome, and one of the two forms carries <i>_B</i>.</p>";
     let cap = Capture::new(gpu, w, 256);
     for (k, &i) in cards.iter().enumerate() {
         let s = &species[i];
@@ -463,7 +466,8 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
         let n = st.n.max(1) as f64;
         write!(
             h,
-            "<section><h3>S{} · {:.1}% of the agents ({}) · {} bases · {} distinct genomes</h3><div class=\"row\">",
+            "<section><h3><i>{}</i> · S{} · {:.1}% of the agents ({}) · {} bases · {} distinct genomes</h3><div class=\"row\">",
+            esc(&names[k]),
             k + 1,
             100.0 * s.count as f32 / total.max(1) as f32,
             s.count,
@@ -481,8 +485,11 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
             }
             write!(
                 h,
-                "<figcaption><b>form {}</b> · {:.0}% of the group · {} residues<br><span class=\"seq\">{}</span></figcaption>",
+                "<figcaption><b>form {}</b> · <i>{}{}</i> · {:.0}% of the group · {} residues<br><span class=\"seq\">{}</span></figcaption>",
                 if strand == 0 { "A" } else { "B" },
+                esc(&names[k]),
+                // O sufixo é o da fita: a canónica (a menor das duas) não leva nada.
+                if crate::names::canonical(&s.leader).1 == (strand == 0) { "_B" } else { "" },
                 100.0 * share as f32 / s.count.max(1) as f32,
                 body.len(),
                 protein_html(body)
@@ -518,9 +525,9 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     h
 }
 
-fn species_name(s: u32, cards: &[usize]) -> String {
+fn species_name(s: u32, cards: &[usize], names: &[String]) -> String {
     match cards.iter().position(|&i| i as u32 == s) {
-        Some(k) => format!("S{}", k + 1),
+        Some(k) => format!("<i>{}</i> (S{})", esc(&names[k]), k + 1),
         None => "a rare species".into(),
     }
 }
@@ -533,7 +540,7 @@ img{border-radius:6px;display:block}.seq{font-family:Consolas,monospace;font-siz
 ul.org{font-size:12px;color:#aab4c0;padding-left:16px;margin:6px 0}ul.org b{color:#fff}\
 .facts{font-size:12px}.facts td{padding:1px 10px 1px 0;color:#aab4c0}.facts td+td{color:#dde3ea}\
 .note{font-size:12px;color:#8b96a3}.none{width:256px;height:256px;display:flex;align-items:center;justify-content:center;background:#0e1014;color:#666;border-radius:6px;font-size:12px}\
-table.m{border-collapse:collapse;font-size:12px}table.m td,table.m th{border:1px solid #2c333b;padding:3px 7px;text-align:center}\
+table.m{border-collapse:collapse;font-size:12px}table.m td,table.m th{border:1px solid #2c333b;padding:3px 7px;text-align:center}table.m th.sp{text-align:left;font-weight:normal;white-space:nowrap}\
 svg.tree line{stroke:#9fb0c3;stroke-width:1.3}svg.tree text{fill:#dde3ea;font-size:11px}svg.tree line.alive{stroke:#6fcf7f}svg.tree line.dead{stroke:#6b7480}\
 svg.tree line.link{stroke:#55606c;stroke-dasharray:2 2}svg.tree line.axis{stroke:#262c34}svg.tree text.axis{fill:#8b96a3;text-anchor:middle}svg.tree text.dead{fill:#7d8792}\
 .facts .row{margin-top:10px}.facts .row div{display:flex;flex-direction:column;gap:4px;color:#aab4c0}svg.bands rect{fill:#e8b84a}svg.map .bg{fill:#0e1014}svg.map circle{fill:#6fcf7f}details{margin:8px 0}";

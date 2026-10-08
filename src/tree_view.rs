@@ -220,9 +220,11 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
         let counts: Vec<String> = b.counts.iter().map(|(e, n)| format!("[{e},{n}]")).collect();
         write!(
             data,
-            "{}{{\"id\":{},\"par\":{},\"born\":{},\"last\":{},\"alive\":{},\"peak\":{},\"bases\":{},\"c\":[{}],\"a\":{},\"b\":{},\"ia\":{},\"ib\":{}}}",
+            "{}{{\"id\":{},\"name\":{},\"par\":{},\"born\":{},\"last\":{},\"alive\":{},\"peak\":{},\"bases\":{},\"c\":[{}],\"a\":{},\"b\":{},\"ia\":{},\"ib\":{}}}",
             if i > 0 { "," } else { "" },
             b.id,
+            // Nome em latim da linhagem do líder (as duas formas partilham-no).
+            js_str(&crate::names::lineage_name_in(&b.leader, w.params.require_start != 0, &code)),
             b.parent.map_or("null".to_string(), |p| p.to_string()),
             b.born,
             b.last,
@@ -343,8 +345,8 @@ function draw(){
     const ia=img(n,'ia'), ib=img(n,'ib');
     if(ia) ctx.drawImage(ia,n.x+5,y+4,66,66); else body(ctx,n.a,n.x+38,n.y,52);
     if(ib) ctx.drawImage(ib,n.x+73,y+4,66,66); else body(ctx,n.b,n.x+106,n.y,52);
-    if(text){ const tx=n.x+146; ctx.fillStyle=n.alive?'#e6edf3':'#9aa4af'; ctx.font='bold 14px system-ui'; ctx.fillText('B'+n.id,tx,y+20);
-      ctx.font='11px system-ui'; ctx.fillStyle='#9fb0c0'; ctx.fillText(n.bases+' bases · peak '+n.peak,tx,y+36,CW-152);
+    if(text){ const tx=n.x+146; ctx.fillStyle=n.alive?'#e6edf3':'#9aa4af'; ctx.font='italic bold 12px system-ui'; ctx.fillText(n.name,tx,y+19,CW-152);
+      ctx.font='11px system-ui'; ctx.fillStyle='#9fb0c0'; ctx.fillText('B'+n.id+' · '+n.bases+' bases · peak '+n.peak,tx,y+36,CW-152);
       ctx.fillText(fmtT(n.born)+' → '+(n.alive?'alive':fmtT(n.last)),tx,y+50,CW-152);
       ctx.fillStyle='#c8b06a'; ctx.fillText(n.a.org+' | '+n.b.org,tx,y+65,CW-152); }
   }
@@ -355,9 +357,10 @@ function pick(mx,my){ const x=(mx-ox)/z,y=(my-oy)/z; const cards=CW*z>=64; let b
   return (!cards&&bd<(14/z)**2)?best:null; }
 function show(b){
   sel=b; if(!b){ info.innerHTML='<i>click a branch</i>'; draw(); return; }
-  const par=b.par===null?'root (no recognizable relative)':'B'+b.par;
-  const kn=(kids.get(b.id)||[]).map(k=>'B'+k.id).join(', ')||'none';
-  let h='<h3 style="margin:0">B'+b.id+(b.alive?' · alive':' · extinct')+'</h3><div>'+b.bases+' bases · peak '+b.peak+' agents</div><div>appeared at epoch '+b.born+', last census '+b.last+'</div><div>comes from: '+par+'</div><div>branches that come from it: '+kn+'</div>';
+  const nm=x=>'<i>'+x.name+'</i> (B'+x.id+')';
+  const par=b.par===null?'root (no recognizable relative)':(byId.has(b.par)?nm(byId.get(b.par)):'B'+b.par);
+  const kn=(kids.get(b.id)||[]).map(nm).join(', ')||'none';
+  let h='<h3 style="margin:0"><i>'+b.name+'</i></h3><div>B'+b.id+(b.alive?' · alive':' · extinct')+'</div><div>'+b.bases+' bases · peak '+b.peak+' agents</div><div>appeared at epoch '+b.born+', last census '+b.last+'</div><div>comes from: '+par+'</div><div>branches that come from it: '+kn+'</div>';
   h+='<h4>population at the censuses</h4><canvas id="tv-sp" width="300" height="60"></canvas>';
   for(const [nm,f,im] of [['form A',b.a,b.ia],['form B (the complement, the children)',b.b,b.ib]]){
     h+='<h4>'+nm+' · '+f.n+' residues</h4>'+(im?'<img width="300" height="300" src="'+im+'">':'<canvas class="tv-b" width="300" height="200"></canvas>')+'<div class="seq" title="list of amino acids, from N to C; organs in white">'+f.ph+'</div><ul>'+(f.list.length?f.list.map(x=>'<li>'+x.replace(/</g,'&lt;')+'</li>').join(''):'<li>no organs</li>')+'</ul>';

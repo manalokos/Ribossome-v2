@@ -149,8 +149,6 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
         sensor_mem[slot * MAX_BODY + k] = 0.0;
         sensor_avg[slot * MAX_BODY + k] = SENSOR_UNSET;
     }
-    // Memória do avanço na pista (lifecycle.wgsl): o corpo novo começa do zero.
-    if (n < MAX_BODY) { sensor_mem[slot * MAX_BODY + MAX_BODY - 1u] = 0.0; }
     rebuild_body(slot, n);
     return n;
 }

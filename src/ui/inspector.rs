@@ -92,6 +92,10 @@ pub struct Inspector {
     pos_reads: Vec<PosRead>,
     frame: u64,
     track: Option<Track>,
+    /// Nome em latim do escolhido: (genoma, AUG obrigatório, frames até
+    /// recalcular, nome). Recalcula-se de vez em quando porque o código dos
+    /// órgãos pode mudar no editor.
+    name: Option<(Vec<u8>, bool, u32, String)>,
     selected: Option<Selected>,
     staging: wgpu::Buffer,
     state: Readback,
@@ -129,6 +133,7 @@ impl Inspector {
             pos_reads,
             frame: 0,
             track: None,
+            name: None,
             selected: None,
             staging,
             state: Readback::Idle,
@@ -410,8 +415,31 @@ fn signal_bars(ui: &mut egui::Ui, d: &InspectData) {
 }
 
 /// O inspetor, na barra fixa da direita (só existe com um organismo escolhido).
-pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life::table::OrganRow], amino: &[crate::life::table::AminoRow]) {
+pub fn panel(
+    ui: &mut egui::Ui,
+    ins: &mut Inspector,
+    organ_table: &[crate::life::table::OrganRow],
+    amino: &[crate::life::table::AminoRow],
+    organ_code: &crate::life::table::OrganCode,
+    require_start: bool,
+) {
     let mut open = true;
+    // Nome em latim (names.rs): o da linhagem, com "_B" na fita complementar.
+    let name = match (&ins.data, &mut ins.name) {
+        (None, _) => {
+            ins.name = None;
+            String::new()
+        }
+        (Some(d), Some((g, rs, left, name))) if *g == d.genome && *rs == require_start && *left > 0 => {
+            *left -= 1;
+            name.clone()
+        }
+        (Some(d), _) => {
+            let name = crate::names::organism_name_in(&d.genome, require_start, &crate::life::table::code_to_gpu(organ_code));
+            ins.name = Some((d.genome.clone(), require_start, 120, name.clone()));
+            name
+        }
+    };
     ui.horizontal(|ui| {
         ui.heading("Inspector");
         if ins.data.is_some() && ui.button("release").on_hover_text("stop following this organism").clicked() {
@@ -434,6 +462,11 @@ pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life:
         ui.checkbox(&mut ins.follow, "camera follows this organism");
         signal_bars(ui, d);
         egui::Grid::new("ins").striped(true).show(ui, |ui| {
+            ui.label("name");
+            ui.label(egui::RichText::new(&name).italics().strong()).on_hover_text(
+                "Latin name of the lineage: the genus tells the way of life (energy source + habit, from the organs), the second word comes from the genome. The two forms of a lineage (a genome and its reverse complement) share the name; one of them carries _B",
+            );
+            ui.end_row();
             let mut row = |k: &str, v: String| {
                 ui.label(k);
                 ui.label(v);

@@ -382,34 +382,13 @@ gpu_struct! {
         /// (especificidade imperfeita). Os relés não (são eles que separam
         /// canais). 0 = emissão limpa.
         pub signal_crosstalk: f32,
-        /// PISTA DE CORRIDAS (banco de ensaio; ver common/track.wgsl): 1 =
-        /// as paredes dão a luz, avançar na pista dá energia e tocar nas
-        /// paredes tira. 0 = mundo normal.
-        pub track_mode: u32,
-        /// 1 = o filho é uma CÓPIA do pai (a mesma sequência, base a base)
-        /// em vez do complemento reverso: captura as mesmas bases do genoma,
-        /// por isso a matéria continua exata. Para a pista (uma só forma).
-        pub copy_same: u32,
-        /// Pista: energia ganha por unidade do mundo de avanço LÍQUIDO (só
-        /// rende passar do ponto mais avançado a que já se chegou).
-        pub track_gain: f32,
-        /// Pista: energia perdida por passo a tocar numa parede (inteira
-        /// com o centro em cima dela).
-        pub wall_damage: f32,
-        /// Pista: TETO da população. Com este número de vivos não nasce
-        /// mais ninguém (quem já copiou o genoma espera por um lugar). A
-        /// imigração de genomas ao acaso só enche até metade.
-        pub track_pop: u32,
-        /// Pista: VIDA MÉDIA em passos (em cada passo morre-se com
-        /// probabilidade 1 / isto). Sem isto, com a pista cheia de bons
-        /// nadadores ninguém morre e deixa de haver lugar para filhos.
-        /// 0 = sem limite.
-        pub track_lifespan: u32,
         /// CORPOS PESADOS SEGUEM MENOS A CORRENTE: o arrasto pela corrente de
         /// cada agente divide-se por 1 + isto × (massa média por resíduo ÷ a
         /// de um resíduo normal − 1). 0 = todos seguem a água por igual.
         pub flow_mass: f32,
-        pub _pad_track2: u32,
+        pub _pad_s0: u32,
+        pub _pad_s1: u32,
+        pub _pad_s2: u32,
     }
 }
 
@@ -590,14 +569,10 @@ impl Default for SimParams {
             brownian_rot: 1.0,
             transport_every: 1,
             signal_crosstalk: 0.1,
-            track_mode: 0,
-            copy_same: 0,
-            track_gain: 0.1,
-            wall_damage: 0.05,
-            track_pop: 400,
-            track_lifespan: 20000,
             flow_mass: 1.0,
-            _pad_track2: 0,
+            _pad_s0: 0,
+            _pad_s1: 0,
+            _pad_s2: 0,
         }
     }
 }
