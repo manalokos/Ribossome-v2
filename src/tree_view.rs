@@ -285,7 +285,7 @@ kids.forEach(a=>a.sort((p,q)=>q.born-p.born||q.id-p.id));
 // unidades); cada ramo tem a sua linha, por baixo do ramo de onde saiu. O nó
 // é um cartão (retratos das duas formas + texto) e a barra à frente dele
 // dura até ao último censo em que apareceu. Vista: ecrã = o + mundo * z.
-const CW=262,CH=74,STEP=350,ROW=88;
+const CW=200,CH=176,STEP=300,ROW=192,IM=96;
 let z=1,ox=0,oy=0,W=100,H=100;
 const TX=t=>(t-TV_T0)/TV_EVERY*STEP;
 let pend=false; function later(){ if(!pend){ pend=true; requestAnimationFrame(()=>{pend=false;draw();}); } }
@@ -297,7 +297,7 @@ function layout(){
   nodes=[];
   // um ramo escondido passa os filhos ao antepassado visível
   const st=(kids.get(-1)||[]).map(b=>[b,null]).reverse();
-  while(st.length){ const [b,up]=st.pop(); let me=up; if(vis(b)){ b.up=up; b.x=Math.max(TX(b.born),up?up.x+STEP:0); b.y=nodes.length*ROW; b.end=Math.max(b.x+CW,b.x+TX(b.last)-TX(b.born)); b.reach=b.end; nodes.push(b); me=b; } const k=kids.get(b.id); if(k) for(let i=k.length-1;i>=0;i--) st.push([k[i],me]); }
+  while(st.length){ const [b,up]=st.pop(); let me=up; if(vis(b)){ b.up=up; b.x=Math.max(TX(b.born),up?up.x+STEP:0); b.y=nodes.length*ROW; b.end=Math.max(b.x+CW,b.x+TX(b.last)-TX(b.born)); b.reach=b.end; b.late=!!up&&!up.alive&&b.born>up.last; if(up&&!b.late) up.reach=Math.max(up.reach,b.x-60); nodes.push(b); me=b; } const k=kids.get(b.id); if(k) for(let i=k.length-1;i>=0;i--) st.push([k[i],me]); }
 }
 function fit(){ let x1=1,y1=1; for(const n of nodes){ x1=Math.max(x1,n.reach); y1=Math.max(y1,n.y); }
   z=Math.min((W-50)/x1,(H-70)/(y1+CH),1.2); ox=20; oy=44+CH/2*z; draw(); }
@@ -323,14 +323,14 @@ function draw(){
   ctx.setTransform(d*z,0,0,d*z,d*ox,d*oy);
   const vx0=-ox/z,vx1=(W-ox)/z,vy0=-oy/z,vy1=(H-oy)/z;
   // de longe os cartões passam a pontos
-  const cards=CW*z>=64, text=z>=0.42;
+  const cards=CW*z>=96, thumbs=!cards&&IM*z>=11, text=cards;
   const wd=n=>Math.max(1.2/z,1.5+1.3*Math.log10(Math.max(1,n.peak)));
   ctx.lineCap='round';
   // ligações: saem da barra do ramo de origem, um pouco antes do nó, e descem em curva
   for(const n of nodes){ const p=n.up; if(!p) continue; if(n.y<vy0-ROW||p.y>vy1+ROW||n.x<vx0||n.x-60>vx1) continue;
     // sai da barra do ramo de origem; se este ja tinha desaparecido dos censos
     // quando o novo apareceu, sai do fim da barra, a tracejado
-    const late=n.x-60>p.end+1, x0=late?p.end:n.x-60; ctx.strokeStyle=n.alive?'#4f9e62':'#56606b'; ctx.lineWidth=wd(n);
+    const late=n.late, x0=late?p.end:n.x-60; ctx.strokeStyle=n.alive?'#4f9e62':'#56606b'; ctx.lineWidth=wd(n);
     if(late) ctx.setLineDash([6/z,5/z]);
     ctx.beginPath(); ctx.moveTo(x0,p.y); ctx.bezierCurveTo(x0+4,n.y,x0+10,n.y,x0+50,n.y); ctx.lineTo(n.x,n.y); ctx.stroke(); ctx.setLineDash([]); }
   for(const n of nodes){ if(n.y<vy0-CH||n.y>vy1+CH||n.x>vx1||n.reach<vx0) continue;
@@ -338,21 +338,34 @@ function draw(){
     // barra da vida do ramo (e o prolongamento fino até ao último ramo que sai dele)
     ctx.strokeStyle=n.alive?'#4f9e62':'#56606b'; ctx.lineWidth=wd(n); ctx.beginPath(); ctx.moveTo(n.x,n.y); ctx.lineTo(n.end,n.y); ctx.stroke();
     // ponta da barra: seta = continua vivo; travessa = ultimo censo em que apareceu (extinto)
-    if(n.end>n.x+CW+2||!cards){ const e=n.end, k=Math.max(7,5/z); if(n.alive){ ctx.fillStyle='#6fcf7f'; ctx.beginPath(); ctx.moveTo(e+k*1.6,n.y); ctx.lineTo(e,n.y-k); ctx.lineTo(e,n.y+k); ctx.fill(); } else { ctx.strokeStyle='#8a94a0'; ctx.lineWidth=Math.max(2,1.5/z); ctx.beginPath(); ctx.moveTo(e,n.y-k); ctx.lineTo(e,n.y+k); ctx.stroke(); } }
+    if(n.reach>n.x+CW+2||!cards){ const e=n.reach, k=Math.max(7,5/z); if(n.alive){ ctx.fillStyle='#6fcf7f'; ctx.beginPath(); ctx.moveTo(e+k*1.6,n.y); ctx.lineTo(e,n.y-k); ctx.lineTo(e,n.y+k); ctx.fill(); } else { ctx.strokeStyle='#8a94a0'; ctx.lineWidth=Math.max(2,1.5/z); ctx.beginPath(); ctx.moveTo(e,n.y-k); ctx.lineTo(e,n.y+k); ctx.stroke(); } }
+    // prolongamento da barra até ao último ramo que sai dela
+    if(n.reach>n.end+1){ ctx.strokeStyle=n.alive?'#4f9e62':'#56606b'; ctx.lineWidth=Math.max(1.2/z,1.5); ctx.beginPath(); ctx.moveTo(n.end,n.y); ctx.lineTo(n.reach,n.y); ctx.stroke(); }
+    if(thumbs){ const y=n.y-IM/2; ctx.fillStyle='#07090b'; ctx.fillRect(n.x,y,2*IM+2,IM); const ia=img(n,'ia'), ib=img(n,'ib');
+      if(ia) ctx.drawImage(ia,n.x,y,IM,IM); else body(ctx,n.a,n.x+IM/2,n.y,IM*0.8);
+      if(ib) ctx.drawImage(ib,n.x+IM+2,y,IM,IM); else body(ctx,n.b,n.x+IM*1.5+2,n.y,IM*0.8);
+      ctx.strokeStyle=col; ctx.lineWidth=Math.max(1.5/z,2); ctx.strokeRect(n.x,y,2*IM+2,IM); continue; }
     if(!cards){ ctx.fillStyle=col; ctx.beginPath(); ctx.arc(n.x,n.y,Math.max(3/z,6+5*Math.log10(Math.max(1,n.peak))),0,6.2832); ctx.fill(); continue; }
     const y=n.y-CH/2;
     rr(n.x,y,CW,CH,10); ctx.fillStyle='#07090b'; ctx.fill(); ctx.strokeStyle=col; ctx.lineWidth=n===sel?3:1.6; ctx.stroke();
     const ia=img(n,'ia'), ib=img(n,'ib');
-    if(ia) ctx.drawImage(ia,n.x+5,y+4,66,66); else body(ctx,n.a,n.x+38,n.y,52);
-    if(ib) ctx.drawImage(ib,n.x+73,y+4,66,66); else body(ctx,n.b,n.x+106,n.y,52);
-    if(text){ const tx=n.x+146; ctx.fillStyle=n.alive?'#e6edf3':'#9aa4af'; ctx.font='italic bold 12px system-ui'; ctx.fillText(n.name,tx,y+19,CW-152);
-      ctx.font='11px system-ui'; ctx.fillStyle='#9fb0c0'; ctx.fillText('B'+n.id+' · '+n.bases+' bases · peak '+n.peak,tx,y+36,CW-152);
-      ctx.fillText(fmtT(n.born)+' → '+(n.alive?'alive':fmtT(n.last)),tx,y+50,CW-152);
-      ctx.fillStyle='#c8b06a'; ctx.fillText(n.a.org+' | '+n.b.org,tx,y+65,CW-152); }
+    if(ia) ctx.drawImage(ia,n.x+3,y+3,IM,IM); else body(ctx,n.a,n.x+3+IM/2,y+3+IM/2,IM*0.8);
+    if(ib) ctx.drawImage(ib,n.x+CW-3-IM,y+3,IM,IM); else body(ctx,n.b,n.x+CW-3-IM/2,y+3+IM/2,IM*0.8);
+    if(text){ const tx=n.x+8; ctx.fillStyle=n.alive?'#e6edf3':'#9aa4af'; ctx.font='italic bold 14px system-ui'; ctx.fillText(n.name,tx,y+IM+22,CW-16);
+      ctx.font='11px system-ui'; ctx.fillStyle='#9fb0c0'; ctx.fillText('B'+n.id+' · '+n.bases+' bases · peak '+n.peak,tx,y+IM+40,CW-16);
+      ctx.fillText(fmtT(n.born)+' → '+(n.alive?'alive':fmtT(n.last)),tx,y+IM+55,CW-16);
+      ctx.fillStyle='#c8b06a'; ctx.fillText(n.a.org+' | '+n.b.org,tx,y+IM+70,CW-16); }
   }
   ctx.restore();
+  { ctx.setTransform(d,0,0,d,0,0); const lx=12, ly=H-86; ctx.fillStyle='rgba(10,12,16,0.85)'; ctx.fillRect(lx-6,ly-14,330,94); ctx.strokeStyle='#2c333b'; ctx.lineWidth=1; ctx.strokeRect(lx-6,ly-14,330,94);
+    ctx.font='11px system-ui'; ctx.textAlign='left'; ctx.lineCap='butt';
+    const row=(i,draw,txt)=>{ const y=ly+i*20; draw(y); ctx.fillStyle='#aab4c0'; ctx.fillText(txt,lx+56,y+4); };
+    row(0,y=>{ ctx.strokeStyle='#4f9e62'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(lx,y); ctx.lineTo(lx+36,y); ctx.stroke(); ctx.fillStyle='#6fcf7f'; ctx.beginPath(); ctx.moveTo(lx+46,y); ctx.lineTo(lx+36,y-6); ctx.lineTo(lx+36,y+6); ctx.fill(); },'lineage still alive (the bar runs to now)');
+    row(1,y=>{ ctx.strokeStyle='#56606b'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(lx,y); ctx.lineTo(lx+40,y); ctx.stroke(); ctx.strokeStyle='#8a94a0'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(lx+40,y-6); ctx.lineTo(lx+40,y+6); ctx.stroke(); },'extinct (the bar ends at its last census)');
+    row(2,y=>{ ctx.strokeStyle='#4f9e62'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(lx,y-6); ctx.bezierCurveTo(lx+2,y+2,lx+8,y+2,lx+44,y+2); ctx.stroke(); },'branch that split from the line above');
+    row(3,y=>{ ctx.strokeStyle='#4f9e62'; ctx.lineWidth=2; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(lx,y); ctx.lineTo(lx+44,y); ctx.stroke(); ctx.setLineDash([]); },'appeared after its parent line had vanished'); }
 }
-function pick(mx,my){ const x=(mx-ox)/z,y=(my-oy)/z; const cards=CW*z>=64; let best=null,bd=1e18;
+function pick(mx,my){ const x=(mx-ox)/z,y=(my-oy)/z; const cards=CW*z>=96, thumbs=!cards&&IM*z>=11; let best=null,bd=1e18;
   for(const n of nodes){ if(cards){ if(x>=n.x&&x<=n.x+CW&&Math.abs(y-n.y)<=CH/2) return n; } else { const dd=(x-n.x)**2+(y-n.y)**2; if(dd<bd){bd=dd;best=n;} } }
   return (!cards&&bd<(14/z)**2)?best:null; }
 function show(b){
