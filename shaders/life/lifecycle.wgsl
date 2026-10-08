@@ -306,12 +306,17 @@ fn die_release(slot: u32, a_in: Agent, budget_in: u32) {
     if (a.energy < 1.0) { atomicAdd(&life_counters[LC_STARVED], 1u); }
 }
 
-// CAPACIDADE DE ENERGIA = o corpo. Cada aminoácido guarda em proporção do
-// volume da sua cadeia lateral (em média 1 por resíduo: CAP_VOLUME_REF é o
-// volume médio dos 20). Um corpo de aminoácidos grandes (W, Y, F) é uma
-// pilha maior, e mais pesada; um de glicina e alanina é leve e guarda pouco.
-// Não há órgão de armazenamento: viver de reservas pede um corpo maior. O
-// RNA nu guarda 1.
+// CAPACIDADE DE ENERGIA = o corpo + os órgãos de ARMAZENAMENTO.
+// - Corpo: cada aminoácido guarda em proporção do volume da sua cadeia
+//   lateral, BODY_CAPACITY por resíduo de volume médio (CAP_VOLUME_REF é o
+//   volume médio dos 20). É pouco: chega para o dia a dia de quem come
+//   sempre, não para atravessar uma noite ou esperar por uma presa.
+// - Armazenamento: cada órgão soma a capacidade da sua variante × a
+//   intensidade. É um depósito a sério, mas pesado e de muito arrasto (ver a
+//   tabela): serve a corpos grandes, a quem está parado ou a cistos
+//   (dormência + reserva), não a nadadores.
+// O RNA nu guarda 1.
+const BODY_CAPACITY: f32 = 0.5;
 const CAP_VOLUME_REF: f32 = 141.26;
 // RECARGA: um produtor (luz, fumarolas) com energia a transbordar usa-a
 // primeiro para a SUA cópia: carrega um monómero GASTO da célula, o que o
@@ -330,8 +335,13 @@ fn recharge_copy(slot: u32, cell: u32, pair_count: u32, gene_len: u32) -> bool {
 
 fn energy_capacity(slot: u32, a: Agent) -> f32 {
     var vol = 0.0;
-    for (var k = 0u; k < a.body_len; k++) { vol += aa_props[body_get(slot, k)].volume; }
-    return max(vol / CAP_VOLUME_REF, 1.0);
+    var store = 0.0;
+    for (var k = 0u; k < a.body_len; k++) {
+        vol += aa_props[body_get(slot, k)].volume;
+        let o = organ_get(slot, k);
+        if (organ_type(o) == ORGAN_STORAGE) { store += max(organ_var(o).p0, 0.0) * organ_gain(o); }
+    }
+    return max(BODY_CAPACITY * vol / CAP_VOLUME_REF + store, 1.0);
 }
 
 @compute @workgroup_size(64)

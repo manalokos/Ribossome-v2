@@ -25,8 +25,8 @@
 //! - relógio: canal, período e modulação por α/β vêm das variantes (assets/orgaos.json);
 //! - relé: bits 0–1 modo (α->β, β->α, inverte α, inverte β), bit 2 ganho ×2;
 //! - boca: catálise ×(2 + p); músculo: resposta ×(2 + p/2);
-//!   armazenamento: DESATIVADO (a capacidade de energia vem do volume dos
-//!   aminoácidos do corpo; o tipo fica só para ler cenas antigas);
+//!   armazenamento: soma a capacidade da variante × intensidade à do corpo
+//!   (que vem do volume dos aminoácidos, 0,5 por resíduo médio); é pesado;
 //! - fotossistema: bit 0 = energia da luz (0) ou reativar gastos (1);
 //! - protease: família (o que corta), força e canal que a ativa;
 //! - bias de idade: sinal que decai com a idade.
@@ -153,7 +153,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("ganho", "multiplica o que emite (× a força do 3.º codão)"),
         pd("limiar", "limiar das portas e do modo 5 (módulo do sinal de entrada)"),
     ],
-    &[pd("capacidade", "sem efeito: o órgão está desativado (a capacidade vem do volume dos aminoácidos)")],
+    &[pd("capacidade", "energia que este órgão acrescenta à capacidade do corpo (× a intensidade); o corpo sozinho guarda 0,5 por resíduo de volume médio")],
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
     &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],

@@ -354,8 +354,20 @@ pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life:
                 row("ligado a", list.join(", "));
             }
             row("idade", format!("{} passos", a.age));
-            // Capacidade: o volume dos aminoácidos do corpo (em média 1 por resíduo).
-            let cap = (d.body.iter().map(|&aa| amino.get(aa as usize).map_or(0.0, |r| r.volume)).sum::<f32>() / CAP_VOLUME_REF).max(1.0);
+            // Capacidade (energy_capacity em lifecycle.wgsl): o volume dos
+            // aminoácidos do corpo (0,5 por resíduo médio) + os órgãos de
+            // armazenamento (capacidade da variante × intensidade).
+            let body_cap = 0.5 * d.body.iter().map(|&aa| amino.get(aa as usize).map_or(0.0, |r| r.volume)).sum::<f32>() / CAP_VOLUME_REF;
+            let store: f32 = d
+                .organs
+                .iter()
+                .filter(|&&o| o != 0 && (o & 0x1F) - 1 == 7)
+                .map(|&o| {
+                    let v = organ_table.get(7).and_then(|r| r.variantes.get(((o >> 5) & 0x7) as usize)).and_then(|v| v.get("capacidade")).copied().unwrap_or(0.0);
+                    v.max(0.0) * crate::life::organs::organ_gain((o >> 8) as u8)
+                })
+                .sum();
+            let cap = (body_cap + store).max(1.0);
             row("energia", format!("{:.2} / {:.1}", a.energy, cap));
             row("cópia", format!("{} / {} bases", a.pair_count, a.gene_len));
             row(
