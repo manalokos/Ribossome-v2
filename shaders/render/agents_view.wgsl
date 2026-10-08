@@ -714,9 +714,9 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             if (d < core) { return vec4<f32>(mix(in.color, ant_col, rim_mix), 1.0); }
             var hit = 0.0;
             if (in.organ == ORGAN_FOOD_SENSOR_DIR || in.organ == ORGAN_LIGHT_SENSOR_DIR) {
-                // Duas antenas em V, as duas do lado que o sensor le (core_phase.y = +1 esquerda, -1 direita).
+                // UMA antena, do lado que o sensor le (core_phase.y = +1 esquerda, -1 direita).
                 let side = select(-1.0, 1.0, in.core_phase.y >= 0.0);
-                hit = max(antenna(p, nrm * (0.8 * side) + t * 0.42, core), antenna(p, nrm * (0.8 * side) - t * 0.42, core));
+                hit = antenna(p, nrm * (0.92 * side), core);
             } else {
                 // Coroa de 6 antenas curtas (amostra à volta toda).
                 for (var i = 0u; i < 6u; i++) {
