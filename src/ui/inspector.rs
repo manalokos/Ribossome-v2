@@ -68,7 +68,30 @@ enum Readback {
     Mapping(Arc<AtomicBool>),
 }
 
+/// Uma leitura pequena (só a posição) do agente selecionado. Há três, em
+/// roda: pede-se uma por frame e cada uma chega um ou dois frames depois,
+/// por isso há uma posição nova em todos os frames.
+struct PosRead {
+    buf: wgpu::Buffer,
+    state: Readback,
+    /// Frame e id do agente a que o pedido diz respeito.
+    frame: u64,
+    id: u32,
+}
+
+/// Última posição lida do selecionado e a sua velocidade (por frame).
+#[derive(Clone, Copy)]
+struct Track {
+    id: u32,
+    frame: u64,
+    pos: [f32; 2],
+    vel: [f32; 2],
+}
+
 pub struct Inspector {
+    pos_reads: Vec<PosRead>,
+    frame: u64,
+    track: Option<Track>,
     selected: Option<Selected>,
     staging: wgpu::Buffer,
     state: Readback,
@@ -89,7 +112,23 @@ impl Inspector {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let pos_reads = (0..3)
+            .map(|_| PosRead {
+                buf: gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("inspector pos"),
+                    size: 8,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                state: Readback::Idle,
+                frame: 0,
+                id: 0,
+            })
+            .collect();
         Self {
+            pos_reads,
+            frame: 0,
+            track: None,
             selected: None,
             staging,
             state: Readback::Idle,
@@ -161,7 +200,29 @@ impl Inspector {
     }
 
     /// Grava a cópia dos dados do selecionado para o staging (se não houver leitura em curso).
+    /// Posição do selecionado para ESTE frame: a última lida, avançada pela
+    /// velocidade o número de frames que a leitura demorou a chegar (no
+    /// máximo 4). Para a mira não andar aos saltos.
+    pub fn tracked_pos(&self) -> Option<[f32; 2]> {
+        let (t, sel) = (self.track?, self.selected?);
+        if t.id != sel.id {
+            return None;
+        }
+        let lag = (self.frame.saturating_sub(t.frame)).min(4) as f32;
+        Some([t.pos[0] + t.vel[0] * lag, t.pos[1] + t.vel[1] * lag])
+    }
+
     pub fn encode(&mut self, world: &World, enc: &mut wgpu::CommandEncoder) {
+        // Posição em todos os frames (8 bytes), numa das três leituras livres.
+        self.frame += 1;
+        if let Some(sel) = self.selected
+            && let Some(r) = self.pos_reads.iter_mut().find(|r| matches!(r.state, Readback::Idle))
+        {
+            enc.copy_buffer_to_buffer(&world.agents_buf, sel.slot as u64 * 64, &r.buf, 0, 8);
+            r.state = Readback::Encoded;
+            r.frame = self.frame;
+            r.id = sel.id;
+        }
         let (Some(sel), Readback::Idle) = (self.selected, &self.state) else { return };
         let s = sel.slot as u64;
         enc.copy_buffer_to_buffer(&world.agents_buf, s * 64, &self.staging, 0, 64);
@@ -190,6 +251,18 @@ impl Inspector {
     }
 
     pub fn after_submit(&mut self) {
+        for r in &mut self.pos_reads {
+            if let Readback::Encoded = r.state {
+                let ready = Arc::new(AtomicBool::new(false));
+                let flag = ready.clone();
+                r.buf.map_async(wgpu::MapMode::Read, .., move |res| {
+                    if res.is_ok() {
+                        flag.store(true, Ordering::Release);
+                    }
+                });
+                r.state = Readback::Mapping(ready);
+            }
+        }
         if let Readback::Encoded = self.state {
             let ready = Arc::new(AtomicBool::new(false));
             let flag = ready.clone();
@@ -203,8 +276,30 @@ impl Inspector {
     }
 
     pub fn poll(&mut self, device: &wgpu::Device) {
-        let Readback::Mapping(ready) = &self.state else { return };
         device.poll(wgpu::PollType::Poll).ok();
+        for r in &mut self.pos_reads {
+            let Readback::Mapping(ready) = &r.state else { continue };
+            if !ready.load(Ordering::Acquire) {
+                continue;
+            }
+            let bytes = r.buf.get_mapped_range(..).map(|v| v.to_vec()).unwrap_or_default();
+            r.buf.unmap();
+            r.state = Readback::Idle;
+            if bytes.len() != 8 {
+                continue;
+            }
+            let pos: [f32; 2] = *bytemuck::from_bytes(&bytes);
+            // Só conta se for mais recente do que a que já se tem.
+            match self.track {
+                Some(t) if t.id == r.id && r.frame <= t.frame => {}
+                Some(t) if t.id == r.id => {
+                    let df = (r.frame - t.frame) as f32;
+                    self.track = Some(Track { id: r.id, frame: r.frame, pos, vel: [(pos[0] - t.pos[0]) / df, (pos[1] - t.pos[1]) / df] });
+                }
+                _ => self.track = Some(Track { id: r.id, frame: r.frame, pos, vel: [0.0; 2] }),
+            }
+        }
+        let Readback::Mapping(ready) = &self.state else { return };
         if !ready.load(Ordering::Acquire) {
             return;
         }
