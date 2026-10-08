@@ -306,7 +306,7 @@ pub fn controls(ui: &mut egui::Ui, h: &mut History) {
     ui.label("the charts are in the middle panel (on top of the simulation, which keeps running). Switch tabs to see it again.");
     ui.horizontal(|ui| {
         ui.label("sample every");
-        ui.add(egui::DragValue::new(&mut h.every).range(100..=1_000_000).speed(100));
+        ui.add(egui::DragValue::new(&mut h.every).update_while_editing(false).range(100..=1_000_000).speed(100));
         ui.label("epochs");
     });
     ui.label(format!(
