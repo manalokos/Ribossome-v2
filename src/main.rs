@@ -26,6 +26,8 @@ struct Running {
     msaa: Option<wgpu::Texture>,
     /// Parâmetros que estavam antes de entrar na pista (repostos ao sair).
     pre_track: Option<(ribossome::params::SimParams, f32)>,
+    /// Pista: epoch da próxima leva de imigrantes.
+    track_next_seed: u32,
     cam: Camera,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -297,6 +299,7 @@ impl Running {
             egui_state,
             msaa: None,
             pre_track: None,
+            track_next_seed: 0,
             egui_renderer,
             profiler: Profiler::from_env(),
             ui: UiState::new(baseline),
@@ -790,6 +793,8 @@ impl Running {
         self.world.apply_terrain_live(&self.gpu, gamma, heat, None);
         self.world.settings.fluid_enabled = false;
         self.world.settings.contact_enabled = false;
+        // As paredes são fixas: sem sedimento, erosão nem grãos a cair.
+        self.world.settings.terrain_enabled = false;
         // Guarda os parâmetros do mundo normal (só da primeira vez) e passa
         // aos do ensaio; ao sair da pista voltam.
         if self.world.params.track_mode == 0 {
@@ -809,6 +814,7 @@ impl Running {
         let mut reqs = ribossome::life::seed_requests(TRACK_SEEDS, self.ui.seed_len, self.ui.seed_aug, self.world.cfg.sim_size(), &mut self.seed_rng);
         self.onto_track(&mut reqs);
         self.world.request_seeds(&reqs);
+        self.track_next_seed = 0;
         self.ui.terrain_msg = "pista de corridas: energia só do avanço; paredes luminosas e que magoam; filhos iguais ao pai".into();
         log::info!("{}", self.ui.terrain_msg);
     }
@@ -880,6 +886,7 @@ impl Running {
                 self.world.params.epoch = epoch;
                 self.world.settings.fluid_enabled = true;
                 self.world.settings.contact_enabled = true;
+                self.world.settings.terrain_enabled = true;
             }
             self.world.params.track_mode = 0;
             self.world.params.copy_same = 0;
@@ -1032,6 +1039,22 @@ impl Running {
             self.ui.ledger_epoch = self.world.params.epoch;
         }
         self.ui.stats.update(self.world.params.epoch, self.world.last_counters, self.world.cfg.max_agents);
+        // PISTA: imigração. Enquanto houver menos de TRACK_SEEDS vivos,
+        // entram genomas ao acaso na pista (até 200 de cada vez): a
+        // população nunca se extingue e há sempre candidatos novos até
+        // aparecer quem consiga avançar e copiar-se.
+        if self.world.params.track_mode != 0
+            && self.world.params.epoch >= self.track_next_seed
+            && let Some(c) = self.world.last_counters
+        {
+            let alive = c.alive(self.world.cfg.max_agents);
+            if alive < TRACK_SEEDS {
+                let mut reqs = ribossome::life::seed_requests((TRACK_SEEDS - alive).min(200), self.ui.seed_len, self.ui.seed_aug, self.world.cfg.sim_size(), &mut self.seed_rng);
+                self.onto_track(&mut reqs);
+                self.world.request_seeds(&reqs);
+            }
+            self.track_next_seed = self.world.params.epoch + 200;
+        }
         if self.ui.seed_now {
             self.ui.seed_now = false;
             let mut reqs = ribossome::life::seed_requests(

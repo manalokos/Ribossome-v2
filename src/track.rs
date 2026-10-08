@@ -65,6 +65,9 @@ pub fn preset(p: &mut crate::params::SimParams) {
     p.photo_yield = 0.0;
     p.uv_damage = 1.0;
     p.sedimentation = 0.0;
+    // Terreno parado (as paredes não se desfazem).
+    p.sediment_transport = 0.0;
+    p.bioturbation = 0.0;
     // Nasce-se com pouca energia: senão quem tem um órgão de armazenamento
     // guarda a energia inicial toda e sobrevive muito mais tempo sem avançar.
     p.spawn_energy = 3.0;

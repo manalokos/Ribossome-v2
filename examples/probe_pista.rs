@@ -31,6 +31,7 @@ fn main() {
     w.seed_matter(&gpu, 3);
     w.settings.fluid_enabled = false;
     w.settings.contact_enabled = false;
+    w.settings.terrain_enabled = false;
     ribossome::track::preset(&mut w.params);
     w.params.mutation_rate = 0.0;
     let envf = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
@@ -108,6 +109,11 @@ fn main() {
         }
     }
     let after = w.ledger_blocking(&gpu);
+    // As paredes têm de ficar exatamente como foram geradas.
+    let gamma: Vec<u32> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.gamma_buf)).to_vec();
+    let (g0, _) = ribossome::track::terrain(&cfg);
+    let moved = gamma.iter().zip(&g0).filter(|(a, b)| a != b).count();
+    println!("células de terreno diferentes da pista gerada: {moved}");
     println!("matéria por canal antes {:?}\n                 depois {:?}  {}", per(&before), per(&after), "(na pista não há monómeros: só conta a matéria dos genomas, que nasce e morre com eles)");
     if let Ok(out) = std::env::var("OUT") {
         let cap = ribossome::render::capture::Capture::new(&gpu, &w, 1024);
