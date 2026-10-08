@@ -24,6 +24,9 @@ struct Running {
     /// Alvo com várias amostras onde o mundo é desenhado (do tamanho da
     /// janela; refeito quando ela muda). Resolve para a imagem da janela.
     msaa: Option<wgpu::Texture>,
+    /// ECRÃ DE ENTRADA: a imagem (carregada no primeiro frame) e quando
+    /// começou. Some ao fim de SPLASH_SECS ou com um clique ou tecla.
+    splash: Option<(Option<egui::TextureHandle>, std::time::Instant)>,
     /// Genoma carregado de um ficheiro (bases 0..3 = A, U, G, C).
     loaded_agent: Option<Vec<u8>>,
     /// MODO FOTO/VÍDEO: alvo de captura (refeito se o tamanho mudar), pasta
@@ -133,6 +136,8 @@ fn test_scenario(world: &mut World) {
 const DEFAULT_TERRAIN: &str = "assets/terreno.png";
 
 /// Pasta das cenas gravadas e do autosave.
+/// Duração do ecrã de entrada (segundos).
+const SPLASH_SECS: f32 = 5.0;
 const SAVES_DIR: &str = "saves";
 
 /// O autosave deste modo (o laboratório tem outro tamanho de mundo).
@@ -305,6 +310,8 @@ impl Running {
             egui_state,
             msaa: None,
             loaded_agent: None,
+            // RIBO_NO_SPLASH=1 salta o ecrã de entrada.
+            splash: std::env::var("RIBO_NO_SPLASH").is_err().then(|| (None, std::time::Instant::now())),
             shot_cap: None,
             rec_tx: None,
             rec_path: std::path::PathBuf::new(),
@@ -1233,6 +1240,41 @@ impl Running {
         let cam_now = self.cam;
         let mut out = ctx.run_ui(raw, |root| {
             free = ui::draw(root, &mut self.ui, &mut self.world, &mut self.profiler, &mut self.inspector);
+            // ECRÃ DE ENTRADA por cima de tudo, a desvanecer no fim.
+            if let Some((tex, t0)) = &mut self.splash {
+                let ctx = root.ctx().clone();
+                let tex = tex.get_or_insert_with(|| {
+                    let dec = png::Decoder::new(std::io::Cursor::new(&include_bytes!("../assets/splash.png")[..]));
+                    let mut reader = dec.read_info().expect("assets/splash.png");
+                    let mut buf = vec![0; reader.output_buffer_size()];
+                    let info = reader.next_frame(&mut buf).expect("assets/splash.png");
+                    let img = egui::ColorImage::from_rgb([info.width as usize, info.height as usize], &buf[..info.buffer_size()]);
+                    ctx.load_texture("splash", img, egui::TextureOptions::LINEAR)
+                });
+                let t = t0.elapsed().as_secs_f32();
+                let fade = ((SPLASH_SECS - t) / 0.7).clamp(0.0, 1.0);
+                let screen = ctx.content_rect();
+                let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("splash")));
+                painter.rect_filled(screen, 0.0, egui::Color32::from_black_alpha((215.0 * fade) as u8));
+                // A imagem cabe em 82% do ecrã, sem deformar.
+                let size = tex.size_vec2();
+                let k = (0.82 * screen.width() / size.x).min(0.82 * screen.height() / size.y);
+                let r = egui::Rect::from_center_size(screen.center(), size * k);
+                let tint = egui::Color32::from_white_alpha((255.0 * fade) as u8);
+                painter.image(tex.id(), r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
+                painter.text(
+                    r.left_bottom() + egui::vec2(14.0, -34.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("version {}  ·  click or press a key to start", env!("CARGO_PKG_VERSION")),
+                    egui::FontId::proportional(13.0),
+                    egui::Color32::from_white_alpha((170.0 * fade) as u8),
+                );
+                ctx.request_repaint();
+                let skip = ctx.input(|i| i.pointer.any_click() || i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })));
+                if t >= SPLASH_SECS || (skip && t > 0.3) {
+                    self.splash = None;
+                }
+            }
             // Por cima da vista: mira do agente selecionado e do enquadramento.
             if let Some(r) = free {
                 let ppp = root.ctx().pixels_per_point();
