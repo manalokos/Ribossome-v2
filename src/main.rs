@@ -877,6 +877,7 @@ impl Running {
         };
         if resow {
             // Sair da pista: voltam os parâmetros que estavam antes de entrar.
+            let was_track = self.world.params.track_mode != 0;
             if let Some((old, density)) = self.pre_track.take() {
                 let epoch = self.world.params.epoch;
                 self.world.params = old;
@@ -885,6 +886,17 @@ impl Running {
                 self.world.settings.fluid_enabled = true;
                 self.world.settings.contact_enabled = true;
                 self.world.settings.terrain_enabled = true;
+            } else if was_track {
+                // A pista veio de um autosave ou de uma cena (os parâmetros de
+                // antes já não existem): volta TUDO aos valores por omissão.
+                // Sem isto o mundo normal ficava com as regras do ensaio (sem
+                // monómeros, sem comer, sem corrente, sem contacto).
+                let (seed, epoch) = (self.world.params.seed, self.world.params.epoch);
+                self.world.params = ribossome::params::SimParams { seed, epoch, ..Default::default() };
+                self.world.settings = Default::default();
+                self.world.seed_density = ribossome::world::SEED_DENSITY_DEFAULT;
+                self.world.seed_active = ribossome::world::SEED_ACTIVE_DEFAULT;
+                log::info!("saída da pista sem parâmetros guardados: valores por omissão");
             }
             self.world.params.track_mode = 0;
             self.world.params.copy_same = 0;
