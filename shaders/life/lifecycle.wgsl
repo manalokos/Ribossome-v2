@@ -1029,12 +1029,32 @@ fn agents_ledger(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }
 
-// FIOS DE RNA DAS PONTAS (só visual): cada fio é passivo e mole. Quando a
-// ponta do corpo se mexe de lado, o fio fica para trás e curva no sentido
-// oposto; parado, endireita aos poucos (relaxação sobreamortecida).
-const TAIL_DRAG: f32 = 0.08;
-const TAIL_RELAX: f32 = 0.96;
-const TAIL_MAX_BEND: f32 = 2.5;
+// FIOS DE RNA DAS PONTAS (só visual): cada fio é uma fita MOLE rebocada
+// pela ponta do corpo. Guarda-se só a posição da PONTA LIVRE de cada fio, no
+// mundo; em cada passo ela é puxada na direção da ponta do corpo até ficar
+// ao comprimento do fio ("segue o líder": um fio mole em baixo Reynolds
+// quase não escorrega de lado, vai atrás por onde foi puxado). Não tem
+// rigidez nenhuma: se o corpo recua para cima dela, encolhe (até
+// TAIL_MIN_CHORD do comprimento) em vez de empurrar. O desenho faz a curva
+// entre a raiz (que sai na direção do corpo) e essa ponta.
+// Custo: dois vetores por agente e meia dúzia de contas por passo.
+const TAIL_BASES_MAX: u32 = 32u;
+const TAIL_SPACING: f32 = 5.0;
+const TAIL_MIN_CHORD: f32 = 0.5;
+
+fn tail_follow(tip: vec2<f32>, root: vec2<f32>, out_dir: vec2<f32>, len: f32, fresh: bool) -> vec2<f32> {
+    var t = tip;
+    let d = t - root;
+    let dist = length(d);
+    // Acabado de nascer, sem comprimento ou longe demais (slot reutilizado,
+    // cena antiga): estica a direito para fora do corpo.
+    if (fresh || len <= 0.0 || dist > 3.0 * len + 1.0 || dist < 1e-3) {
+        t = root + out_dir * len;
+    } else {
+        t = root + d / dist * clamp(dist, TAIL_MIN_CHORD * len, len);
+    }
+    return t;
+}
 
 fn update_rna_tails(slot: u32, a: Agent) {
     let n = a.body_len;
@@ -1043,22 +1063,21 @@ fn update_rna_tails(slot: u32, a: Agent) {
     var bend = rna_tail[slot * 2u + 1u]; // zw = média da natação (não mexer)
     let pn = residue_world(slot, a, 0u);
     let pc = residue_world(slot, a, n - 1u);
-    if (a.age > 1u) {
-        // Direção para fora de cada ponta e o seu perpendicular.
-        var dn = vec2<f32>(-1.0, 0.0);
-        var dc = vec2<f32>(1.0, 0.0);
-        if (n > 1u) {
-            dn = normalize(pn - residue_world(slot, a, 1u) + vec2<f32>(1e-6, 0.0));
-            dc = normalize(pc - residue_world(slot, a, n - 2u) + vec2<f32>(1e-6, 0.0));
-        }
-        let vn = pn - s0.xy;
-        let vc = pc - s0.zw;
-        // Movimento de lado (no perpendicular esquerdo) curva o fio para o outro lado.
-        bend.x = clamp(bend.x * TAIL_RELAX - TAIL_DRAG * dot(vn, vec2<f32>(-dn.y, dn.x)), -TAIL_MAX_BEND, TAIL_MAX_BEND);
-        bend.y = clamp(bend.y * TAIL_RELAX - TAIL_DRAG * dot(vc, vec2<f32>(-dc.y, dc.x)), -TAIL_MAX_BEND, TAIL_MAX_BEND);
-    } else {
-        bend = vec4<f32>(0.0, 0.0, bend.z, bend.w);
+    var dn = vec2<f32>(-1.0, 0.0);
+    var dc = vec2<f32>(1.0, 0.0);
+    if (n > 1u) {
+        dn = normalize(pn - residue_world(slot, a, 1u) + vec2<f32>(1e-6, 0.0));
+        dc = normalize(pc - residue_world(slot, a, n - 2u) + vec2<f32>(1e-6, 0.0));
     }
-    rna_tail[slot * 2u] = vec4<f32>(pn, pc);
+    // Bases não traduzidas de cada ponta (como no desenho).
+    let start = a.coding_span & 0xFFFFu;
+    let after = a.coding_span >> 16u;
+    let len_n = f32(min(start, TAIL_BASES_MAX)) * TAIL_SPACING;
+    let len_c = f32(min(a.gene_len - min(after, a.gene_len), TAIL_BASES_MAX)) * TAIL_SPACING;
+    let fresh = a.age <= 1u;
+    let tn = tail_follow(s0.xy, pn, dn, len_n, fresh);
+    let tc = tail_follow(s0.zw, pc, dc, len_c, fresh);
+    bend = vec4<f32>(0.0, 0.0, bend.z, bend.w);
+    rna_tail[slot * 2u] = vec4<f32>(tn, tc);
     rna_tail[slot * 2u + 1u] = bend;
 }

@@ -630,25 +630,39 @@ fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
         anchor = body_pos_view[slot * MAX_BODY_V + n - 1u];
         if (n > 1u) { dir = normalize(anchor - body_pos_view[slot * MAX_BODY_V + n - 2u] + vec2<f32>(1e-6, 0.0)); }
     }
-    // Caminha base a base até m: ondula devagar (a flutuar) e curva com a
-    // curvatura do fio, que vem do movimento da ponta (fica para trás).
-    var ang = atan2(dir.y, dir.x);
-    let bend_state = rna_tail_view[slot * 2u + 1u];
-    let bend = select(bend_state.x, bend_state.y, trailer) / f32(RNA_PER_END);
-    var p = anchor;
-    var prev = anchor;
-    let seed = f32(a.id % 977u) * 0.37 + select(0.0, 2.1, trailer);
-    for (var t = 0u; t <= m; t++) {
-        ang += RNA_WIGGLE * sin(f32(t) * 0.7 + f32(a.age) * 0.03 + seed) + bend;
-        prev = p;
-        p += vec2<f32>(cos(ang), sin(ang)) * RNA_SPACING;
-    }
-    // Para o mundo.
     let cr = cos(a.rot);
     let sr = sin(a.rot);
     let c0 = vec2<f32>(a.pos_x, a.pos_y);
-    let pw = c0 + vec2<f32>(cr * p.x - sr * p.y, sr * p.x + cr * p.y);
-    let qw = c0 + vec2<f32>(cr * prev.x - sr * prev.y, sr * prev.x + cr * prev.y);
+    var pw = c0;
+    var qw = c0;
+    if (n == 0u) {
+        // RNA nu: caminha base a base, a ondular devagar.
+        var ang = atan2(dir.y, dir.x);
+        var p = anchor;
+        var prev = anchor;
+        let seed = f32(a.id % 977u) * 0.37 + select(0.0, 2.1, trailer);
+        for (var t = 0u; t <= m; t++) {
+            ang += RNA_WIGGLE * sin(f32(t) * 0.7 + f32(a.age) * 0.03 + seed);
+            prev = p;
+            p += vec2<f32>(cos(ang), sin(ang)) * RNA_SPACING;
+        }
+        pw = c0 + vec2<f32>(cr * p.x - sr * p.y, sr * p.x + cr * p.y);
+        qw = c0 + vec2<f32>(cr * prev.x - sr * prev.y, sr * prev.x + cr * prev.y);
+    } else {
+        // FITA MOLE (ver update_rna_tails): curva de Bézier da raiz, que sai
+        // na direção da ponta do corpo, até à ponta livre guardada no mundo.
+        let cnt = f32(max(select(min(start, RNA_PER_END), min(a.gene_len - min(after, a.gene_len), RNA_PER_END), trailer), 1u));
+        let len = cnt * RNA_SPACING;
+        let p0 = c0 + vec2<f32>(cr * anchor.x - sr * anchor.y, sr * anchor.x + cr * anchor.y);
+        let dw = vec2<f32>(cr * dir.x - sr * dir.y, sr * dir.x + cr * dir.y);
+        let tips = rna_tail_view[slot * 2u];
+        let p2 = select(tips.xy, tips.zw, trailer);
+        let p1 = p0 + dw * (0.5 * len);
+        let ta = f32(m) / cnt;
+        let tb = f32(m + 1u) / cnt;
+        qw = mix(mix(p0, p1, ta), mix(p1, p2, ta), ta);
+        pw = mix(mix(p0, p1, tb), mix(p1, p2, tb), tb);
+    }
     return capsule_vertex(vi, qw, pw, max(RNA_RADIUS, 1.0 / view.zoom), base_color(genome_base(slot, base_i)) * 0.85);
 }
 

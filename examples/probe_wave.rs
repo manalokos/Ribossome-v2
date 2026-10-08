@@ -15,7 +15,10 @@ fn main() {
     let tail: usize = std::env::var("TAIL").ok().and_then(|v| v.parse().ok()).unwrap_or(15);
     let gpu = Gpu::new_headless().unwrap();
     let cfg = WorldConfig::DEFAULT;
-    let genome = bases(&format!("AUG CAU CUU GAA {} UAA", "GGU ".repeat(tail)));
+    // UTR=1: com bases não traduzidas nas duas pontas (os fios de RNA), para ver a fita mole.
+    let utr = std::env::var("UTR").is_ok();
+    let (lead, trail) = if utr { ("GCC GCA GCC GCA GCC ", " GCU CGC UCG CUC GCU CGC UCG CUC GCU CGC") } else { ("", "") };
+    let genome = bases(&format!("{lead}AUG CAU CUU GAA {} UAA{trail}", "GGU ".repeat(tail)));
     for mode in [0.0f32, 2.0] {
         let mut w = World::new(&gpu, cfg, 3);
         w.custom_terrain = Some((vec![0; cfg.cells() as usize], vec![0.0; cfg.cells() as usize]));
@@ -75,5 +78,16 @@ fn main() {
         println!("  resíduo:            {}", (0..n).map(|k| format!("{k:5}")).collect::<String>());
         println!("  amplitude do sinal α{}", (0..n).map(|k| format!("{:5.2}", (smax[k] - smin[k]) / 2.0)).collect::<String>());
         println!("  vaivém lateral      {}", (0..n).map(|k| format!("{:5.1}", (ymax[k] - ymin[k]) / 2.0)).collect::<String>());
+        if let Ok(out) = std::env::var("OUT") {
+            let cap = ribossome::render::capture::Capture::new(&gpu, &w, 384);
+            for shot in 0..3 {
+                step(&mut w, 9);
+                let b = w.read_agents_blocking(&gpu)[slot];
+                cap.view.focus.set(slot as u32);
+                cap.view.focus_offset.set([0.0, 0.0]);
+                let rgba = cap.render(&gpu, &w, &ribossome::render::Camera { center: [b.pos_x, b.pos_y], zoom: 384.0 / 520.0 }, 0, 0.0);
+                cap.save_png(&rgba, std::path::Path::new(&format!("{out}_{}_{shot}.png", mode as u32))).unwrap();
+            }
+        }
     }
 }
