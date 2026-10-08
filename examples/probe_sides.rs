@@ -101,5 +101,24 @@ fn main() {
     for (kind, name) in ["índice par (lado esquerdo)", "índice ímpar (lado direito)"].iter().enumerate() {
         println!("{name:28} {:>14.3} (n={:<3}) {:>14.3} (n={:<3})", tally[kind][0].1 / tally[kind][0].0.max(1) as f32, tally[kind][0].0, tally[kind][1].1 / tally[kind][1].0.max(1) as f32, tally[kind][1].0);
     }
+    // OUT=prefixo: retratos de um sensor par e de um ímpar (antenas de um lado só).
+    if let Ok(out) = std::env::var("OUT") {
+        let cap = ribossome::render::capture::Capture::new(&gpu, &w, 256);
+        let mut done = [false; 2];
+        for (slot, a) in agents.iter().enumerate() {
+            if a.alive == 0 || a.body_len as usize != body.len() {
+                continue;
+            }
+            let kind = ((((a.pos_x - 4000.0) / 1500.0).round() as i64 + 16 * ((a.pos_y - 4000.0) / 1500.0).round() as i64).rem_euclid(2)) as usize;
+            if done[kind] {
+                continue;
+            }
+            done[kind] = true;
+            cap.view.focus.set(slot as u32);
+            cap.view.focus_offset.set([0.0, 0.0]);
+            let rgba = cap.render(&gpu, &w, &ribossome::render::Camera { center: [a.pos_x, a.pos_y], zoom: 256.0 / 160.0 }, 0, 0.0);
+            cap.save_png(&rgba, std::path::Path::new(&format!("{out}_{kind}.png"))).unwrap();
+        }
+    }
     println!("(cada célula: |sinal| médio no sensor; só agentes com a cadeia quase perpendicular às presas)");
 }

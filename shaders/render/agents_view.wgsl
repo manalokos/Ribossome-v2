@@ -361,6 +361,17 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 // Flash: so a cor, com a forma que a protease tem no momento.
                 if (bite.z > 0.0 && glyph && drive > 0.0) { flash = BITE_ATTACK_COLOR; }
             }
+            if (organ == ORGAN_FOOD_SENSOR_DIR || organ == ORGAN_LIGHT_SENSOR_DIR) {
+                // SENSOR DE UM LADO: o lado que le (como em organs.wgsl):
+                // indice de intensidade par = esquerda, impar = direita, e
+                // troca por cada orgao quiral antes dele na cadeia.
+                var side = select(1.0, -1.0, ((oc >> 8u) & 1u) == 1u);
+                for (var j = 0u; j < k; j++) {
+                    let oj = (organs_view[slot * 32u + j / 2u] >> ((j % 2u) * 16u)) & 0xFFFFu;
+                    if (oj != 0u && (oj & 0x1Fu) - 1u == ORGAN_CHIRAL) { side = -side; }
+                }
+                phase = side;
+            }
             if (organ == ORGAN_STORAGE) {
                 // DEPOSITO: um oval ao longo da cadeia, maior e mais
                 // comprido quanto mais guarda (capacidade x intensidade).
@@ -688,8 +699,9 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             if (d < core) { return vec4<f32>(mix(in.color, ant_col, rim_mix), 1.0); }
             var hit = 0.0;
             if (in.organ == ORGAN_FOOD_SENSOR_DIR || in.organ == ORGAN_LIGHT_SENSOR_DIR) {
-                // Duas antenas, uma de cada lado, ligeiramente inclinadas para a frente.
-                hit = max(antenna(p, nrm * 0.85 + t * 0.3, core), antenna(p, -nrm * 0.85 + t * 0.3, core));
+                // Duas antenas em V, as duas do lado que o sensor le (core_phase.y = +1 esquerda, -1 direita).
+                let side = select(-1.0, 1.0, in.core_phase.y >= 0.0);
+                hit = max(antenna(p, nrm * (0.8 * side) + t * 0.42, core), antenna(p, nrm * (0.8 * side) - t * 0.42, core));
             } else {
                 // Coroa de 6 antenas curtas (amostra à volta toda).
                 for (var i = 0u; i < 6u; i++) {
