@@ -28,6 +28,9 @@ struct Running {
     pre_track: Option<(ribossome::params::SimParams, f32)>,
     /// Pista: epoch da próxima leva de imigrantes.
     track_next_seed: u32,
+    /// Posição (mundo) da mira do agente selecionado, suavizada: a posição
+    /// lida da placa chega aos soluços, de vários em vários frames.
+    cross: Option<(u32, [f32; 2])>,
     /// Genoma carregado de um ficheiro (bases 0..3 = A, U, G, C).
     loaded_agent: Option<Vec<u8>>,
     /// MODO FOTO/VÍDEO: alvo de captura (refeito se o tamanho mudar), pasta
@@ -311,6 +314,7 @@ impl Running {
             pre_track: None,
             track_next_seed: 0,
             loaded_agent: None,
+            cross: None,
             shot_cap: None,
             rec_tx: None,
             rec_path: std::path::PathBuf::new(),
@@ -1324,8 +1328,20 @@ impl Running {
                 let centre = r.center();
                 let dark = egui::Stroke::new(3.0, egui::Color32::from_black_alpha(140));
                 if let Some(d) = self.inspector.data.as_ref().filter(|_| !self.inspector.dead) {
+                    // A posição lida chega de vários em vários frames: a mira
+                    // aproxima-se dela aos poucos (30% por frame) em vez de
+                    // saltar. Agente novo ou salto grande: vai logo para lá.
+                    let target = [d.agent.pos_x, d.agent.pos_y];
+                    let w = match self.cross {
+                        Some((id, q)) if id == d.agent.id && (q[0] - target[0]).hypot(q[1] - target[1]) * cam_now.zoom < 150.0 => {
+                            [q[0] + 0.3 * (target[0] - q[0]), q[1] + 0.3 * (target[1] - q[1])]
+                        }
+                        _ => target,
+                    };
+                    self.cross = Some((d.agent.id, w));
+                    root.ctx().request_repaint();
                     // Mundo -> ecrã (cima no ecrã = +y no mundo).
-                    let p = centre + egui::vec2((d.agent.pos_x - cam_now.center[0]) * cam_now.zoom / ppp, -(d.agent.pos_y - cam_now.center[1]) * cam_now.zoom / ppp);
+                    let p = centre + egui::vec2((w[0] - cam_now.center[0]) * cam_now.zoom / ppp, -(w[1] - cam_now.center[1]) * cam_now.zoom / ppp);
                     let rad = (d.agent.radius * cam_now.zoom / ppp + 8.0).max(16.0);
                     let light = egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 235, 120));
                     for st in [dark, light] {
