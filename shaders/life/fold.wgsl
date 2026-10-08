@@ -97,6 +97,21 @@ fn residue_drag_mult(slot: u32, k: u32) -> f32 {
     return aa_drag * organ_drag;
 }
 
+// VARETA E BOLA. A natação vem de o arrasto de uma vareta fina ser maior de
+// lado do que de frente. Um órgão volumoso (depósito, protease de alcance,
+// fotossistema...) não é uma vareta: é uma bola, que resiste o mesmo em
+// todas as direções e por isso trava mas NÃO serve de pá. Do peso de
+// arrasto `lw` de um resíduo, só o que um resíduo simples teria (comprimento
+// até 1, arrasto do aminoácido) conta como vareta; o resto é bola.
+fn residue_rod_weight(slot: u32, k: u32, lw: f32) -> f32 {
+    var rod = lw;
+    if (organ_get(slot, k) != 0u) {
+        let plain = min(residue_len(slot, k) / SEGMENT_LEN, 1.0) * max(aa_props[body_get(slot, k)].drag, 0.05);
+        rod = min(lw, plain);
+    }
+    return rod;
+}
+
 // Arrasto do resíduo k para a carga das juntas (o peso que o RFT usa).
 fn joint_drag_weight(slot: u32, k: u32) -> f32 {
     return residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k);
@@ -216,7 +231,11 @@ fn rft_solve(slot: u32, c: RftCtx, old: ptr<function, array<vec2<f32>, 64>>) -> 
         // entulho é igual em todas as direções (env.z − 1), por isso dilui a
         // anisotropia e a propulsão perde eficiência no sedimento.
         let lw = residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k);
-        let rr = (tt + max(params.swim_grip, 1.0) * (id - tt) + (env.z - 1.0) * id) * lw;
+        // A parte "bola" de um órgão volumoso: isotrópica, com a média dos
+        // dois coeficientes da vareta (ver residue_rod_weight).
+        let rod = residue_rod_weight(slot, k, lw);
+        let grip = max(params.swim_grip, 1.0);
+        let rr = (tt + grip * (id - tt)) * rod + id * (0.5 * (1.0 + grip) * (lw - rod)) + (env.z - 1.0) * id * lw;
         // Colunas de D: ∂v/∂Vx = (1,0), ∂v/∂Vy = (0,1), ∂v/∂Ω = (−r.y, r.x).
         let d0 = vec2<f32>(1.0, 0.0);
         let d1 = vec2<f32>(0.0, 1.0);
@@ -490,7 +509,10 @@ fn push_fluid(slot: u32, a: Agent, c: RftCtx, old: ptr<function, array<vec2<f32>
         // aderência da natação: essa representa um meio que agarra o corpo
         // (gel), e com ela a 30 um corpo parado no entulho travava e agitava
         // a corrente 15 vezes mais do que devia.
-        let rr = (tt + min(max(params.swim_grip, 1.0), 2.0) * (id - tt)) * (residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k));
+        let lw_w = residue_len(slot, k) / SEGMENT_LEN * residue_drag_mult(slot, k);
+        let rod_w = residue_rod_weight(slot, k, lw_w);
+        let grip_w = min(max(params.swim_grip, 1.0), 2.0);
+        let rr = (tt + grip_w * (id - tt)) * rod_w + id * (0.5 * (1.0 + grip_w) * (lw_w - rod_w));
         // Velocidade do resíduo RELATIVA à água (quem só é levado não empurra).
         let v = s.xy + s.z * vec2<f32>(-r.y, r.x) + u - env.xy * env.z;
         let f_body = rr * v;
