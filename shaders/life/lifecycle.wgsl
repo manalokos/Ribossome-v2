@@ -783,7 +783,12 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         heat_hazard = params.heat_kill * (wt - params.denature_temp) / 10.0 * (1.0 - stab);
     }
     // A reserva de energia protege até death_energy_cap (0 = sem teto, v3).
-    var e_eff = max(a.energy, 0.01);
+    // (÷ BODY_CAPACITY: a capacidade do corpo passou a metade quando voltou
+    // o órgão de armazenamento; sem isto a mesma criatura cheia ficava com
+    // metade da proteção e morria ao dobro do ritmo, e só quem tinha
+    // depósito durava. O teto death_energy_cap continua a limitar o que um
+    // depósito grande pode proteger.)
+    var e_eff = max(a.energy / BODY_CAPACITY, 0.01);
     if (params.death_energy_cap > 0.0) { e_eff = min(e_eff, params.death_energy_cap); }
     // RITMO DE VIDA: quem gasta devagar (dormência, bocas fechadas ou sem
     // boca, frio) também envelhece devagar; é o que deixa existir formas de
