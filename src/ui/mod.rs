@@ -883,6 +883,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
         .on_hover_text("0 = físico: à escala molecular a água amortece tudo, um corpo que pára de bater pára logo. Acima de 0 a velocidade aproxima-se da pedida com peso 1/(1 + isto × massa/massa de um corpo médio): os pesados deslizam e aceleram devagar, como nadadores grandes");
     ui.add(egui::Slider::new(&mut p.flow_coupling, 0.0..=1.0).text("arrasto pela corrente"))
         .on_hover_text("1 = físico (um corpo livre segue a água); menos = experiência: as correntes levam-nos menos e eles também empurram menos a água");
+    ui.add(egui::Slider::new(&mut p.flow_mass, 0.0..=4.0).text("pesados seguem menos a corrente"))
+        .on_hover_text("o arrasto pela corrente de cada agente divide-se por 1 + este valor × (massa média por resíduo ÷ a de um resíduo normal − 1): um corpo com órgãos pesados (depósitos, proteases de alcance) é menos levado pela água. Conta a densidade, não o comprimento. 0 = todos seguem a água por igual");
     ui.add(egui::Slider::new(&mut p.agent_fluid_push, -1.0..=1.0).text("agentes empurram a água"))
         .on_hover_text("cada resíduo devolve ao fluido o seu arrasto (só no mundo com fluido)");
     let mut fso = p.fluid_swim_only != 0;

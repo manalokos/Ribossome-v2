@@ -405,7 +405,10 @@ gpu_struct! {
         /// nadadores ninguém morre e deixa de haver lugar para filhos.
         /// 0 = sem limite.
         pub track_lifespan: u32,
-        pub _pad_track1: u32,
+        /// CORPOS PESADOS SEGUEM MENOS A CORRENTE: o arrasto pela corrente de
+        /// cada agente divide-se por 1 + isto × (massa média por resíduo ÷ a
+        /// de um resíduo normal − 1). 0 = todos seguem a água por igual.
+        pub flow_mass: f32,
         pub _pad_track2: u32,
     }
 }
@@ -593,7 +596,7 @@ impl Default for SimParams {
             wall_damage: 0.05,
             track_pop: 400,
             track_lifespan: 20000,
-            _pad_track1: 0,
+            flow_mass: 1.0,
             _pad_track2: 0,
         }
     }

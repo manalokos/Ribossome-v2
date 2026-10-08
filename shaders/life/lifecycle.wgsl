@@ -451,7 +451,13 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (a.age == 0u) { aux = vec4<f32>(0.0); } // slot reutilizado: sem herança
     // Orientação a meio do passo (o corpo roda durante o passo).
     // Transporte pela água × flow_coupling (1 = físico).
-    let fc = clamp(params.flow_coupling, 0.0, 1.0);
+    // CORPOS PESADOS (órgãos densos, depósitos) seguem MENOS a corrente:
+    // divide-se por 1 + flow_mass × (massa média por resíduo ÷ a de um
+    // resíduo normal − 1). Conta a densidade, não o comprimento: um corpo
+    // comprido e leve é levado como um curto.
+    let mass = body_mass(slot, a.body_len);
+    let heavy = max(mass / (f32(max(a.body_len, 1u)) * MASS_RESIDUE_REF) - 1.0, 0.0);
+    let fc = clamp(params.flow_coupling, 0.0, 1.0) / (1.0 + max(params.flow_mass, 0.0) * heavy);
     let rot_mid = a.rot + 0.5 * (js.swim.z + fc * js.flow.z);
     let sv_phys = rotate(js.swim.xy, rot_mid);
     let avg = mix(aux.zw, sv_phys, 1.0 / max(params.swim_memory, 1.0));
@@ -467,7 +473,6 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // INÉRCIA: a deslocação do passo aproxima-se da alvo (natação +
     // corrente) com peso 1/(1 + inércia × massa relativa). vel guarda a
     // velocidade do passo anterior. Sem inércia (0) é a de sempre.
-    let mass = body_mass(slot, a.body_len);
     let dt_s = max(params.dt, 1e-6);
     let want = sv + flow_w;
     var step = want;
