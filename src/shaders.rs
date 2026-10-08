@@ -36,6 +36,7 @@ pub const WORLD: ModuleDef = ModuleDef {
         "common/rng.wgsl",
         "common/terrain.wgsl",
         "common/chem.wgsl",
+        "common/track.wgsl",
         "world/fluid.wgsl",
         "world/multigrid.wgsl",
         "world/light.wgsl",

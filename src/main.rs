@@ -121,6 +121,8 @@ fn test_scenario(world: &mut World) {
 const DEFAULT_TERRAIN: &str = "assets/terreno.png";
 
 /// Pasta das cenas gravadas e do autosave.
+/// Genomas ao acaso semeados ao entrar na pista.
+const TRACK_SEEDS: u32 = 20_000;
 const SAVES_DIR: &str = "saves";
 
 /// O autosave deste modo (o laboratório tem outro tamanho de mundo).
@@ -764,8 +766,51 @@ impl Running {
     }
 
     /// Carregar / gravar / repor o terreno (botões do painel "Terreno").
+    /// Na pista, as sementes nascem dentro do corredor (ao acaso ao longo
+    /// da volta e da largura) em vez de espalhadas pelo mundo, que é rocha.
+    fn onto_track(&mut self, reqs: &mut [ribossome::params::SpawnRequest]) {
+        if self.world.params.track_mode == 0 {
+            return;
+        }
+        let sim = self.world.cfg.sim_size();
+        for r in reqs {
+            let p = ribossome::track::point(sim, self.seed_rng.f32(), self.seed_rng.f32() * 2.0 - 1.0);
+            r.pos_x = p[0];
+            r.pos_y = p[1];
+        }
+    }
+
+    /// PISTA DE CORRIDAS: terreno do circuito, parâmetros do ensaio (só a
+    /// energia do avanço conta) e recomeço do zero.
+    fn start_track(&mut self) {
+        let (gamma, heat) = ribossome::track::terrain(&self.world.cfg);
+        self.world.apply_terrain_live(&self.gpu, gamma, heat, None);
+        self.world.settings.fluid_enabled = false;
+        self.world.settings.contact_enabled = false;
+        // Sopa toda ativada e sempre a reativar-se: há sempre bases para copiar.
+        self.world.seed_active = 1.0;
+        ribossome::track::preset(&mut self.world.params);
+        // Recomeço já aqui (e não pela marca de "recomeçar"), para poder
+        // semear logo a seguir: genomas ao acaso espalhados pela pista.
+        self.seed += 1;
+        self.ui.baseline = self.world.restart_keeping_terrain(&self.gpu, self.seed);
+        self.ui.ledger = None;
+        self.ui.history = ribossome::stats::History::default();
+        self.lineages = ribossome::lineage::Lineages::default();
+        self.last_autosave = 0;
+        let mut reqs = ribossome::life::seed_requests(TRACK_SEEDS, self.ui.seed_len, self.ui.seed_aug, self.world.cfg.sim_size(), &mut self.seed_rng);
+        self.onto_track(&mut reqs);
+        self.world.request_seeds(&reqs);
+        self.ui.terrain_msg = "pista de corridas: energia só do avanço; paredes luminosas e que magoam; filhos iguais ao pai".into();
+        log::info!("{}", self.ui.terrain_msg);
+    }
+
     fn terrain_action(&mut self, action: ribossome::ui::TerrainAction) {
         use ribossome::ui::TerrainAction;
+        if action == TerrainAction::Track {
+            self.start_track();
+            return;
+        }
         // Janela de ficheiros do sistema, a começar no último caminho usado.
         let last = std::path::PathBuf::from(self.ui.terrain_path.trim());
         let dir = last
@@ -779,7 +824,7 @@ impl Running {
         let chosen = match action {
             TerrainAction::Load => dialog.set_title("Carregar terreno").pick_file(),
             TerrainAction::Save => dialog.set_title("Gravar terreno").set_file_name(&name).save_file(),
-            TerrainAction::Generated | TerrainAction::Empty => Some(last.clone()),
+            TerrainAction::Generated | TerrainAction::Empty | TerrainAction::Track => Some(last.clone()),
         };
         let Some(path) = chosen else {
             self.ui.terrain_msg = "cancelado".into();
@@ -816,8 +861,12 @@ impl Running {
                 self.ui.terrain_msg = "mundo vazio (só água); semeado de novo".into();
                 true
             }
+            TerrainAction::Track => false,
         };
         if resow {
+            // Sair da pista: as regras dela desligam-se com o terreno.
+            self.world.params.track_mode = 0;
+            self.world.params.copy_same = 0;
             // Mesma semente: só o terreno muda.
             self.seed -= 1;
             self.ui.reseed = true;
@@ -969,13 +1018,14 @@ impl Running {
         self.ui.stats.update(self.world.params.epoch, self.world.last_counters, self.world.cfg.max_agents);
         if self.ui.seed_now {
             self.ui.seed_now = false;
-            let reqs = ribossome::life::seed_requests(
+            let mut reqs = ribossome::life::seed_requests(
                 self.ui.seed_count,
                 self.ui.seed_len,
                 self.ui.seed_aug,
                 self.world.cfg.sim_size(),
                 &mut self.seed_rng,
             );
+            self.onto_track(&mut reqs);
             self.world.request_seeds(&reqs);
         }
         if std::mem::take(&mut self.ui.activate_now) {

@@ -127,6 +127,8 @@ pub enum TerrainAction {
     Load,
     /// Mundo vazio (só água, sem fumarolas), semeado de novo: para pintar.
     Empty,
+    /// Pista de corridas: terreno do circuito, parâmetros do ensaio e recomeço.
+    Track,
     /// Escolhe onde gravar (janela) e grava o terreno atual em PNG.
     Save,
     /// Volta ao terreno gerado e semeia de novo.
@@ -644,6 +646,13 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
             st.terrain_action = Some(TerrainAction::Empty);
         }
     });
+    if ui
+        .button("pista de corridas (ensaio de natação)")
+        .on_hover_text("troca o mundo por um circuito fechado com curvas para os dois lados e recomeça do zero. Não há comida, luz do sol, fumarolas nem corrente: a única energia é AVANÇAR na pista (no sentido contrário ao dos ponteiros do relógio); tocar nas paredes tira energia; as paredes dão luz, para os sensores de luz as verem. Os filhos são cópias iguais ao pai. Muda vários parâmetros (aparecem em 'mudados'); para voltar, 'terreno gerado' e repõe os valores por omissão")
+        .clicked()
+    {
+        st.terrain_action = Some(TerrainAction::Track);
+    }
     ui.separator();
     ui.strong("Pincel");
     ui.checkbox(&mut st.paint_on, "pintar com o botão esquerdo (o direito continua a arrastar a vista)");
@@ -758,6 +767,17 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
         .on_hover_text("como os sinais α/β andam pela cadeia e dobram as juntas. 0: condução e sensibilidade de cada aminoácido (v3). 1: difusão igual para os dois lados e todas as juntas respondem igual (α dobra para um lado, β para o outro). 2: o sinal só anda do lado N para o C, mesma resposta. 3: anda do N para o C e cada junta responde conforme o seu aminoácido (o corpo decide para que lado vira). 4: transporte da tabela (condução de cada aminoácido e órgão, como no 0) mas todas as juntas respondem igual");
     ui.add(egui::Slider::new(&mut p.signal_crosstalk, 0.0..=0.5).text("resíduo nos outros canais"))
         .on_hover_text("um órgão que emite num canal deixa escapar esta fração da emissão para cada um dos outros três (especificidade imperfeita): um sensor de α também põe um pouco em β, γ e δ. Os relés não têm resíduo (servem para separar canais). 0 = emissão limpa");
+    if p.track_mode != 0 {
+        ui.strong("Pista de corridas");
+        ui.add(egui::Slider::new(&mut p.track_gain, 0.0..=1.0).logarithmic(true).text("energia por unidade avançada"))
+            .on_hover_text("energia que um agente ganha por cada unidade do mundo de avanço LÍQUIDO na pista (só rende passar do ponto mais avançado a que já chegou; recuar não custa, mas também não rende). Um agente de 20 resíduos gasta ~0,04 por passo só a manter-se");
+        ui.add(egui::Slider::new(&mut p.wall_damage, 0.0..=1.0).logarithmic(true).text("dano das paredes"))
+            .on_hover_text("energia perdida por passo com o centro do agente em cima de uma parede (proporcional a quanto o seu raio entra nela)");
+        let mut same = p.copy_same != 0;
+        if ui.checkbox(&mut same, "filhos iguais ao pai").on_hover_text("o filho é uma cópia do genoma do pai em vez do complemento reverso (uma só forma por linhagem)").changed() {
+            p.copy_same = same as u32;
+        }
+    }
     ui.add(egui::Slider::new(&mut p.clock_mute, 0.0..=1.0).text("silenciar relógios"))
         .on_hover_text("experiência: tira amplitude a todos os relógios (1 = mudos). O órgão continua no corpo e continua a pagar o custo; serve para ver se os agentes se mexem sem ele (sensores, emissão por contacto)");
     ui.small(match p.signal_mode.round() as i32 {

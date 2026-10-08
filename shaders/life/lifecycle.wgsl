@@ -245,7 +245,7 @@ fn agent_matter(slot: u32) -> vec4<u32> {
     for (var i = 0u; i < a.gene_len; i++) {
         let b = genome_get(slot, i);
         m[b] += 1u;
-        if (i < a.pair_count) { m[b ^ 1u] += 1u; }
+        if (i < a.pair_count) { m[pair_base(b)] += 1u; }
     }
     return m;
 }
@@ -266,7 +266,7 @@ fn die(slot: u32, a_in: Agent) {
 fn die_release(slot: u32, a_in: Agent, budget_in: u32) {
     var a = a_in;
     var m_act = vec4<u32>(0u);
-    for (var i = 0u; i < min(a.pair_count, a.gene_len); i++) { m_act[genome_get(slot, i) ^ 1u] += 1u; }
+    for (var i = 0u; i < min(a.pair_count, a.gene_len); i++) { m_act[pair_base(genome_get(slot, i))] += 1u; }
     var m_spent = agent_matter(slot) - m_act;
     var budget = budget_in;
     for (var i = 0u; i < 512u; i++) {
@@ -328,9 +328,15 @@ const CAP_VOLUME_REF: f32 = 141.26;
 fn recharge_copy(slot: u32, cell: u32, pair_count: u32, gene_len: u32) -> bool {
     var done = false;
     if (params.salvage > 0.0 && pair_count < gene_len) {
-        done = chem_take_state_one(cell * 4u + (genome_get(slot, pair_count) ^ 1u), true);
+        done = chem_take_state_one(cell * 4u + pair_base(genome_get(slot, pair_count)), true);
     }
     return done;
+}
+
+// Base que o molde `b` captura ao copiar-se: o complemento de Watson-Crick
+// ou, com params.copy_same, a MESMA base (o filho sai igual ao pai).
+fn pair_base(b: u32) -> u32 {
+    return b ^ select(1u, 0u, params.copy_same != 0u);
 }
 
 fn energy_capacity(slot: u32, a: Agent) -> f32 {
@@ -354,6 +360,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // ---- SINAIS INTERNOS (sensores, relógio, relé) e custo dos músculos ----
     // Capacidade de energia: depende só dos órgãos; calcula-se uma vez.
     let cap = energy_capacity(slot, a);
+    // Onde estava ao entrar no passo (para o avanço na pista).
+    let track_p0 = vec2<f32>(a.pos_x, a.pos_y);
     a.energy -= signals_step(slot, a, cap);
 
     // ---- JUNTAS: dobragem ao nascer, depois agitação térmica e músculos ----
@@ -680,6 +688,30 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         a.pos_y = p.y;
     }
 
+    // ---- PISTA: avançar dá energia, tocar nas paredes tira ----
+    // Só conta o avanço LÍQUIDO: cada agente guarda quanto está atrás do
+    // ponto mais avançado a que já chegou (um valor <= 0) e só ganha quando
+    // o ultrapassa. Um nadador vai e vem a cada braçada; se cada vaivém
+    // pagasse e cobrasse, quem oscila arruinava-se (ou, sem cobrar, ganhava
+    // parado). Recuar não custa nada, só não rende. O avanço é o deste passo
+    // dentro deste kernel (nadar, agitação); os empurrões do contacto não
+    // contam. A memória é a posição 63 de sensor_mem (livre em corpos com
+    // menos de 64 resíduos; os de 64 ganham por cada avanço).
+    if (params.track_mode != 0u) {
+        let now = vec2<f32>(a.pos_x, a.pos_y);
+        let ti = slot * MAX_BODY + MAX_BODY - 1u;
+        let has_mem = a.body_len < MAX_BODY;
+        var ahead = track_advance(track_p0, now);
+        if (has_mem) { ahead += sensor_mem[ti]; }
+        if (ahead > 0.0) {
+            a.energy = min(a.energy + params.track_gain * ahead, cap);
+            ahead = 0.0;
+        }
+        if (has_mem) { sensor_mem[ti] = ahead; }
+        let reach = max(a.radius, 1.0);
+        a.energy -= params.wall_damage * clamp((reach - track_wall_dist(now)) / reach, 0.0, 1.0);
+    }
+
     // ---- MORTE (v3): base ÷ energia × temperatura + risco UV ----
     let cell_here = world_to_cell(p);
     let light = uv_light_at_cell(cell_here % GRID_SIZE, cell_here / GRID_SIZE);
@@ -739,7 +771,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             let ang = q.y * 6.2831853;
             site += vec2<f32>(cos(ang), sin(ang)) * q.z * PAIRING_REACH;
-            let comp = genome_get(slot, a.pair_count) ^ 1u;
+            let comp = pair_base(genome_get(slot, a.pair_count));
             if (a.energy < 1.0 + params.pairing_cost) { break; }
             // Tentativas independentes: uma falha (não havia o complemento
             // ali) não impede as outras deste passo, noutros sítios.
@@ -789,7 +821,8 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     let m = clamp(params.mutation_rate / (1.0 + protect), 0.0, 1.0);
     var g = array<u32, 16>(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
     for (var i = 0u; i < L; i++) {
-        gset(&g, i, genome_get(slot, L - 1u - i) ^ 1u);
+        // Complemento reverso; com copy_same, a mesma sequência pela mesma ordem.
+        gset(&g, i, pair_base(genome_get(slot, select(L - 1u - i, i, params.copy_same != 0u))));
     }
     var n = L;
     let mr = rng_f4(a.id, params.epoch, S_BIRTH);

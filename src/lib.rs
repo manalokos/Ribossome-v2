@@ -13,6 +13,7 @@ pub mod runlog;
 pub mod species;
 pub mod shaders;
 pub mod stats;
+pub mod track;
 pub mod tree_view;
 pub mod ui;
 pub mod world;
