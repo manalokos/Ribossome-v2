@@ -19,6 +19,15 @@ fn main() {
     let utr = std::env::var("UTR").is_ok();
     let (lead, trail) = if utr { ("GCC GCA GCC GCA GCC ", " GCU CGC UCG CUC GCU CGC UCG CUC GCU CGC") } else { ("", "") };
     let genome = bases(&format!("{lead}AUG CAU CUU GAA {} UAA{trail}", "GGU ".repeat(tail)));
+    // GENOME="AUG ... UAA ... AUG ... UAA": um genoma à escolha (por exemplo com dois genes).
+    let genome = std::env::var("GENOME").map(|g| bases(&g)).unwrap_or(genome);
+    {
+        let w0 = World::new(&gpu, cfg, 3);
+        let code = ribossome::life::table::code_to_gpu(&w0.organ_code);
+        let body = ribossome::life::organs::translate_organs(&genome, true, &code);
+        let txt: String = body.iter().map(|r| r.organ.map_or(ribossome::life::amino::AA_LETTERS[r.aa as usize], |(t, _, _)| ribossome::life::organs::ORGAN_SYMBOLS[t as usize])).collect();
+        println!("tradução no CPU: {} resíduos: {txt}", body.len());
+    }
     for mode in [0.0f32, 2.0] {
         let mut w = World::new(&gpu, cfg, 3);
         w.custom_terrain = Some((vec![0; cfg.cells() as usize], vec![0.0; cfg.cells() as usize]));

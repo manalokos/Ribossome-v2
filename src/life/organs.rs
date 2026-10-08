@@ -36,7 +36,7 @@
 
 use super::amino::{STOP, codon};
 
-pub const ORGAN_TYPES: usize = 20;
+pub const ORGAN_TYPES: usize = 21;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -60,6 +60,8 @@ pub enum Organ {
     AgeBias = 17,
     Holdfast = 18,
     Chiral = 19,
+    /// Não vem do código dos órgãos: é o tradutor que o põe entre dois genes.
+    Linker = 20,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -85,10 +87,11 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "bias de idade",
     "ventosa (fixa-se ao terreno)",
     "quiral (inverte o lado das dobras)",
+    "fio (liga dois genes)",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q', '~'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -189,6 +192,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("larga", "−1 = agarra sempre; 2 = larga com sinal γ positivo; 3 = larga com sinal δ positivo"),
         pd("emite", "canal do sinal que emite enquanto está agarrada (2 = γ, 3 = δ; −1 = nenhum)"),
     ],
+    &[],
     &[],
 ];
 
@@ -342,6 +346,9 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
     }
 }
 
+/// Aminoácido do resíduo de fio entre dois genes (glicina).
+pub const LINKER_AA: u8 = 5;
+
 /// Índice de intensidade por omissão (ganho 1).
 pub const GAIN_DEFAULT: u8 = 32;
 
@@ -382,7 +389,21 @@ pub fn translate_organs(genome: &[u8], require_start: bool, code: &[u32]) -> Vec
     while i + 3 <= genome.len() && body.len() < super::amino::MAX_BODY {
         let aa = codon(genome[i], genome[i + 1], genome[i + 2]);
         if aa == STOP {
-            break;
+            // SEGUNDO GENE: se houver outro AUG depois do stop, a leitura
+            // recomeça aí e os dois corpos ficam ligados por UM resíduo de
+            // fio (órgão LINKER: comprido conforme o intervalo, mole, sem
+            // ângulo de repouso e sem conduzir sinal). Como no shader.
+            let from = i + 3;
+            let next = (from..genome.len().saturating_sub(2)).find(|&j| genome[j..j + 3] == [0, 1, 2]);
+            match next {
+                Some(j) if body.len() + 1 < super::amino::MAX_BODY => {
+                    let variant = (((j - from) / 9) as u8).min(5);
+                    body.push(Residue { aa: LINKER_AA, organ: Some((20, variant, GAIN_DEFAULT)) });
+                    i = j;
+                    continue;
+                }
+                _ => break,
+            }
         }
         // Promotor + modificador com entrada na tabela: órgão.
         if i + 6 <= genome.len() {
@@ -431,6 +452,7 @@ pub fn wgsl() -> String {
         "AGE_BIAS",
         "HOLDFAST",
         "CHIRAL",
+        "LINKER",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");

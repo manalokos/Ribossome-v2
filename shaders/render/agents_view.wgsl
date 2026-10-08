@@ -343,6 +343,11 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         if (oc != 0u) {
             organ = (oc & 0x1Fu) - 1u;
             r_world *= ORGAN_SCALE;
+            // FIO entre dois genes: um tubo fino e cinzento, sem desenho de órgão.
+            if (organ == ORGAN_LINKER) {
+                r_world = 0.9;
+                col = vec3<f32>(0.55, 0.6, 0.7);
+            }
             if (organ == ORGAN_PROTEASE) {
                 col = vec3<f32>(0.9, 0.2, 0.2);
                 // ESPIGÕES: do comprimento do alcance da variante, abertos
@@ -461,7 +466,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         o.organ = organ;
         return o;
     }
-    if (glyph && !naked && organ == NO_ORGAN) {
+    if (glyph && !naked && (organ == NO_ORGAN || organ == ORGAN_LINKER)) {
         // Resíduo estrutural: só o tubo.
         o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         return o;

@@ -55,6 +55,9 @@ fn residue_bend(aa: u32) -> f32 {
 // Traduz o genoma do slot, escreve bodies e body_pos e devolve o nº de
 // resíduos. Em `span` escreve a zona traduzida: início (AUG) | (primeira
 // base depois do stop) << 16.
+// Aminoácido do resíduo de fio entre dois genes (glicina).
+const LINKER_AA: u32 = 5u;
+
 fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
     // Sem AUG obrigatório (por omissão), lê-se a partir da primeira base.
     var start = select(0xFFFFFFFFu, 0u, params.require_start == 0u);
@@ -79,7 +82,22 @@ fn translate_agent(slot: u32, gene_len: u32, span: ptr<function, u32>) -> u32 {
         let aa = CODON_TABLE[c];
         if (aa == AA_STOP) {
             i += 3u; // o stop faz parte da zona lida
-            break;
+            // SEGUNDO GENE: se houver outro AUG depois do stop, a leitura
+            // recomeça aí e os dois corpos ficam ligados por UM resíduo de
+            // fio (órgão LINKER, numa glicina): comprido conforme o
+            // intervalo entre os genes (variante = bases / 9, até 5), mole,
+            // sem ângulo de repouso e sem conduzir sinal (tabela dos órgãos).
+            var nxt = 0xFFFFFFFFu;
+            for (var j = i; j + 2u < gene_len && nxt == 0xFFFFFFFFu; j++) {
+                if (genome_get(slot, j) == 0u && genome_get(slot, j + 1u) == 1u && genome_get(slot, j + 2u) == 2u) { nxt = j; }
+            }
+            if (nxt == 0xFFFFFFFFu || n + 1u >= MAX_BODY) { break; }
+            let link = (ORGAN_LINKER + 1u) | (min((nxt - i) / 9u, 5u) << 5u) | (32u << 8u);
+            bodies[slot * 16u + n / 4u] |= LINKER_AA << ((n % 4u) * 8u);
+            organs[slot * 32u + n / 2u] |= link << ((n % 2u) * 16u);
+            n += 1u;
+            i = nxt;
+            continue;
         }
         bodies[slot * 16u + n / 4u] |= aa << ((n % 4u) * 8u);
         // ÓRGÃO: promotor + modificador (aminoácidos) com entrada no código
