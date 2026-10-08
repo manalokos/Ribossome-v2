@@ -53,6 +53,9 @@ pub struct UiState {
     pub open_editor: bool,
     /// Separador ativo do painel.
     pub tab: Tab,
+    /// Pesquisa de controlos: com texto, o painel ignora os separadores e
+    /// mostra só os controlos cujo nome (ou secção) o contém.
+    pub search: String,
     /// Velocidade e população (atualizadas ~2×/s em `update_stats`).
     pub stats: Stats,
     /// Estatísticas ao longo do tempo (gráficos e logs/estatisticas.csv).
@@ -118,25 +121,23 @@ const MARK_BONDED: u32 = 255;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Vista,
-    Materia,
-    Luz,
-    Agua,
-    Terreno,
-    Vida,
-    Movimento,
+    Mundo,
+    Sopa,
+    Energia,
+    Ciclo,
+    Corpo,
     Cena,
     Graficos,
     Info,
 }
 
-const TABS: [(Tab, &str); 10] = [
+const TABS: [(Tab, &str); 9] = [
     (Tab::Vista, "View"),
-    (Tab::Materia, "Matter"),
-    (Tab::Luz, "Light"),
-    (Tab::Agua, "Water and vents"),
-    (Tab::Terreno, "Terrain"),
-    (Tab::Vida, "Life"),
-    (Tab::Movimento, "Body"),
+    (Tab::Mundo, "World"),
+    (Tab::Sopa, "Soup"),
+    (Tab::Energia, "Energy"),
+    (Tab::Ciclo, "Life cycle"),
+    (Tab::Corpo, "Body"),
     (Tab::Cena, "Scene"),
     (Tab::Graficos, "Charts"),
     (Tab::Info, "Info"),
@@ -256,6 +257,7 @@ impl UiState {
             terrain_msg: String::new(),
             open_editor: false,
             tab: Tab::Vista,
+            search: String::new(),
             seed_count: 500,
             seed_len: [12, 120],
             seed_aug: true,
@@ -298,6 +300,103 @@ fn slider<'a, N: egui::emath::Numeric>(value: &'a mut N, range: std::ops::RangeI
 
 fn drag<'a, N: egui::emath::Numeric>(value: &'a mut N) -> egui::DragValue<'a> {
     egui::DragValue::new(value).update_while_editing(false)
+}
+
+/// Pesquisa de controlos: o texto procurado (em minúsculas; vazio = sem
+/// filtro, separadores normais) e quantos controlos apareceram neste frame.
+struct Busca {
+    q: String,
+    hits: std::cell::Cell<u32>,
+}
+
+/// Onde se criam os controlos de uma secção. Com pesquisa ativa, só aparecem
+/// os controlos cujo nome (ou o título da secção) contém o texto procurado, e
+/// o título da secção só é desenhado antes do primeiro que aparece.
+struct Ctl<'a> {
+    ui: &'a mut egui::Ui,
+    b: &'a Busca,
+    /// Título a desenhar antes do primeiro controlo (só na pesquisa).
+    head: String,
+    /// O título da secção contém o texto procurado: aparece tudo.
+    sec_match: bool,
+    head_done: bool,
+}
+
+impl Ctl<'_> {
+    /// Este controlo aparece? (Na pesquisa, desenha o título da secção antes
+    /// do primeiro.) Um nome vazio só aparece no separador ou quando o título
+    /// da secção corresponde: serve para botões de ação e notas.
+    fn ok(&mut self, label: &str) -> bool {
+        if self.b.q.is_empty() {
+            return true;
+        }
+        if !self.sec_match && (label.is_empty() || !label.to_lowercase().contains(&self.b.q)) {
+            return false;
+        }
+        if !self.head_done {
+            self.head_done = true;
+            if self.b.hits.get() > 0 {
+                self.ui.add_space(8.0);
+            }
+            self.ui.label(egui::RichText::new(&self.head).strong());
+        }
+        self.b.hits.set(self.b.hits.get() + 1);
+        true
+    }
+
+    /// Deslizador com o nome `label` (criado com `slider(...)`).
+    fn slider(&mut self, label: &str, s: egui::Slider<'_>) -> Option<egui::Response> {
+        if !self.ok(label) {
+            return None;
+        }
+        Some(self.ui.add(s.text(label)))
+    }
+
+    fn check(&mut self, label: &str, value: &mut bool) -> Option<egui::Response> {
+        if !self.ok(label) {
+            return None;
+        }
+        Some(self.ui.checkbox(value, label))
+    }
+
+    /// Bloco livre (caixa de escolha, linha com vários controlos, nota),
+    /// procurado pelas palavras de `label`.
+    fn row<R>(&mut self, label: &str, f: impl FnOnce(&mut egui::Ui) -> R) -> Option<R> {
+        if !self.ok(label) {
+            return None;
+        }
+        Some(f(self.ui))
+    }
+}
+
+/// Texto de ajuda num controlo que pode não ter sido desenhado (pesquisa).
+trait Dica {
+    fn tip(self, text: &str) -> Self;
+}
+
+impl Dica for Option<egui::Response> {
+    fn tip(self, text: &str) -> Self {
+        self.map(|r| r.on_hover_text(text))
+    }
+}
+
+/// Uma secção de um separador: cabeçalho que se recolhe (aberto por omissão;
+/// o egui lembra-se do estado pelo id). Na pesquisa não há cabeçalho que se
+/// recolha: o título aparece por cima dos controlos encontrados. Um título
+/// vazio dá um separador sem secções (a Vista).
+fn section(ui: &mut egui::Ui, b: &Busca, tab: &str, title: &str, body: impl FnOnce(&mut Ctl)) {
+    if !b.q.is_empty() {
+        let (head, name) = if title.is_empty() { (tab.to_string(), tab) } else { (format!("{tab} / {title}"), title) };
+        let sec_match = name.to_lowercase().contains(&b.q);
+        body(&mut Ctl { ui, b, head, sec_match, head_done: false });
+    } else if title.is_empty() {
+        body(&mut Ctl { ui, b, head: String::new(), sec_match: true, head_done: true });
+    } else {
+        egui::CollapsingHeader::new(egui::RichText::new(title).strong())
+            .id_salt(("seccao", tab, title))
+            .default_open(true)
+            .show(ui, |ui| body(&mut Ctl { ui, b, head: String::new(), sec_match: true, head_done: true }));
+    }
 }
 
 /// Desenha a interface em BARRAS FIXAS: controlos à esquerda, inspetor à
@@ -365,25 +464,54 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
         }
     });
 
-    // ---- Separadores ----
+    // ---- Pesquisa e separadores ----
     ui.separator();
+    ui.horizontal(|ui| {
+        let clear = ui
+            .add_enabled(!st.search.is_empty(), egui::Button::new("clear"))
+            .on_hover_text("clear the search and go back to the tabs")
+            .clicked();
+        ui.add(egui::TextEdit::singleline(&mut st.search).hint_text("search controls…").desired_width(f32::INFINITY));
+        if clear {
+            st.search.clear();
+        }
+    });
+    let b = Busca { q: st.search.trim().to_lowercase(), hits: std::cell::Cell::new(0) };
     ui.horizontal_wrapped(|ui| {
         for (t, name) in TABS {
-            ui.selectable_value(&mut st.tab, t, name);
+            // Escolher um separador sai da pesquisa.
+            if ui.selectable_label(b.q.is_empty() && st.tab == t, name).clicked() {
+                st.tab = t;
+                st.search.clear();
+            }
         }
     });
     ui.separator();
-    egui::ScrollArea::vertical().show(ui, |ui| match st.tab {
-        Tab::Vista => tab_view(ui, st),
-        Tab::Materia => tab_matter(ui, st, world),
-        Tab::Luz => tab_light(ui, world),
-        Tab::Agua => tab_water(ui, world),
-        Tab::Terreno => tab_terrain(ui, st, world),
-        Tab::Vida => tab_life(ui, st, world),
-        Tab::Movimento => tab_motion(ui, world),
-        Tab::Cena => tab_scene(ui, st, world),
-        Tab::Graficos => crate::stats::controls(ui, &mut st.history),
-        Tab::Info => tab_info(ui, st, prof),
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        if !b.q.is_empty() {
+            // Pesquisa: todos os separadores de parâmetros de seguida, filtrados.
+            tab_view(ui, &b, st);
+            tab_world(ui, &b, st, world);
+            tab_soup(ui, &b, st, world);
+            tab_energy(ui, &b, world);
+            tab_cycle(ui, &b, st, world);
+            tab_body(ui, &b, world);
+            if b.hits.get() == 0 {
+                ui.weak(format!("no control matches \"{}\"", b.q));
+            }
+            return;
+        }
+        match st.tab {
+            Tab::Vista => tab_view(ui, &b, st),
+            Tab::Mundo => tab_world(ui, &b, st, world),
+            Tab::Sopa => tab_soup(ui, &b, st, world),
+            Tab::Energia => tab_energy(ui, &b, world),
+            Tab::Ciclo => tab_cycle(ui, &b, st, world),
+            Tab::Corpo => tab_body(ui, &b, world),
+            Tab::Cena => tab_scene(ui, st, world),
+            Tab::Graficos => crate::stats::controls(ui, &mut st.history),
+            Tab::Info => tab_info(ui, st, prof),
+        }
     });
 }
 
@@ -522,404 +650,482 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     }
 }
 
-fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
-    egui::ComboBox::from_label("view").selected_text(VIEW_NAMES[st.view_mode as usize]).show_ui(ui, |ui| {
-        for (i, n) in VIEW_NAMES.iter().enumerate() {
-            ui.selectable_value(&mut st.view_mode, i as u32, *n);
-        }
-    });
-    ui.add(slider(&mut st.monomer_brightness, 0.0..=1.0).text("monomer brightness"));
-    ui.add(slider(&mut st.coc_radius, 0.0..=1.0).text("monomer circle of confusion (cells)"))
-        .on_hover_text("up close, each monomer is drawn as a soft disc of this radius, at its own position inside the cell (drawing only: the simulation counts monomers per cell). Small = loose molecules; large = continuous haze; 0 = squares, one color per cell");
-    const SIGNAL_VIEWS: [&str; 6] = [
-        "chemistry",
-        "α signal",
-        "β signal",
-        "α (red) + β (green)",
-        "kinship with the selected one",
-        "γ (red) + δ (green)",
-    ];
-    egui::ComboBox::from_label("agent color").selected_text(SIGNAL_VIEWS[st.signal_view as usize]).show_ui(
-        ui,
-        |ui| {
-            for (i, n) in SIGNAL_VIEWS.iter().enumerate() {
-                ui.selectable_value(&mut st.signal_view, i as u32, *n);
+fn tab_view(ui: &mut egui::Ui, b: &Busca, st: &mut UiState) {
+    // Sem título: no separador fica como sempre, sem cabeçalho.
+    section(ui, b, "View", "", |c| {
+        c.row("view", |ui| {
+            egui::ComboBox::from_label("view").selected_text(VIEW_NAMES[st.view_mode as usize]).show_ui(ui, |ui| {
+                for (i, n) in VIEW_NAMES.iter().enumerate() {
+                    ui.selectable_value(&mut st.view_mode, i as u32, *n);
+                }
+            });
+        });
+        c.slider("monomer brightness", slider(&mut st.monomer_brightness, 0.0..=1.0));
+        c.slider("monomer circle of confusion (cells)", slider(&mut st.coc_radius, 0.0..=1.0))
+            .tip("up close, each monomer is drawn as a soft disc of this radius, at its own position inside the cell (drawing only: the simulation counts monomers per cell). Small = loose molecules; large = continuous haze; 0 = squares, one color per cell");
+        const SIGNAL_VIEWS: [&str; 6] = [
+            "chemistry",
+            "α signal",
+            "β signal",
+            "α (red) + β (green)",
+            "kinship with the selected one",
+            "γ (red) + δ (green)",
+        ];
+        c.row("agent color", |ui| {
+            egui::ComboBox::from_label("agent color").selected_text(SIGNAL_VIEWS[st.signal_view as usize]).show_ui(
+                ui,
+                |ui| {
+                    for (i, n) in SIGNAL_VIEWS.iter().enumerate() {
+                        ui.selectable_value(&mut st.signal_view, i as u32, *n);
+                    }
+                },
+            );
+            if st.signal_view == 4 {
+                ui.label("click an organism: green ball = close genome, yellow = intermediate, red = distant (shared 8-mers; the child counts as kin)");
             }
-        },
-    );
-    if st.signal_view == 4 {
-        ui.label("click an organism: green ball = close genome, yellow = intermediate, red = distant (shared 8-mers; the child counts as kin)");
-    }
-    let names = crate::life::organs::ORGAN_NAMES_EN;
-    let current = match st.mark_organ {
-        0 => "none",
-        MARK_BONDED => "bonded by anchor",
-        m => names[(m as usize - 1).min(names.len() - 1)],
-    };
-    egui::ComboBox::from_label("mark who has the organ").selected_text(current).show_ui(ui, |ui| {
-        ui.selectable_value(&mut st.mark_organ, 0, "none");
-        ui.selectable_value(&mut st.mark_organ, MARK_BONDED, "bonded by anchor");
-        for (i, n) in names.iter().enumerate() {
-            ui.selectable_value(&mut st.mark_organ, i as u32 + 1, *n);
-        }
+        });
+        c.row("mark who has the organ", |ui| {
+            let names = crate::life::organs::ORGAN_NAMES_EN;
+            let current = match st.mark_organ {
+                0 => "none",
+                MARK_BONDED => "bonded by anchor",
+                m => names[(m as usize - 1).min(names.len() - 1)],
+            };
+            egui::ComboBox::from_label("mark who has the organ").selected_text(current).show_ui(ui, |ui| {
+                ui.selectable_value(&mut st.mark_organ, 0, "none");
+                ui.selectable_value(&mut st.mark_organ, MARK_BONDED, "bonded by anchor");
+                for (i, n) in names.iter().enumerate() {
+                    ui.selectable_value(&mut st.mark_organ, i as u32 + 1, *n);
+                }
+            });
+            if st.mark_organ == MARK_BONDED {
+                ui.small("golden ball = agent with a live bond to another. Up close, the bond is a thread: light blue = from birth (parent and child), golden = made on touching");
+            } else if st.mark_organ != 0 {
+                ui.small("cyan ball = agent with this organ (the same size on screen at any zoom)");
+            }
+        });
+        // Botão de ação: só no separador.
+        c.row("", |ui| {
+            ui.separator();
+            if ui
+                .button("amino acid and organ editor (browser)")
+                .on_hover_text("http://127.0.0.1:8787 — changes applied live")
+                .clicked()
+            {
+                st.open_editor = true;
+            }
+        });
     });
-    if st.mark_organ == MARK_BONDED {
-        ui.small("golden ball = agent with a live bond to another. Up close, the bond is a thread: light blue = from birth (parent and child), golden = made on touching");
-    } else if st.mark_organ != 0 {
-        ui.small("cyan ball = agent with this organ (the same size on screen at any zoom)");
-    }
-    ui.separator();
-    if ui
-        .button("amino acid and organ editor (browser)")
-        .on_hover_text("http://127.0.0.1:8787 — changes applied live")
-        .clicked()
-    {
-        st.open_editor = true;
-    }
 }
 
-fn tab_matter(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
-    let p = &mut world.params;
-    ui.strong("Initial soup and activation");
-    ui.add(slider(&mut world.seed_density, 0.05..=1.0).text("initial density (on the next seed)"));
-    ui.add(slider(&mut world.seed_active, 0.0..=1.0).text("initial activated fraction (on the next seed)"))
-        .on_hover_text("fraction of the monomers that are born activated when a new world is seeded (0.5 = half)");
-    ui.horizontal(|ui| {
-        ui.add(slider(&mut st.activate_frac, 0.0..=1.0).text("activate now"));
-        if ui.button("activate").on_hover_text("activates this fraction of the free spent monomers now (matter does not change)").clicked() {
-            st.activate_now = true;
+/// MUNDO: o ambiente, não as criaturas (luz e dia, fluido, fumarolas, terreno).
+fn tab_world(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) {
+    const T: &str = "World";
+    let mut light_changed = false;
+    section(ui, b, T, "Sun and day cycle", |c| {
+        let p = &mut world.params;
+        c.slider("UV strength (sun)", slider(&mut p.uv_strength, 0.0..=10.0));
+        c.slider("solar heating", slider(&mut p.sun_heat, 0.0..=5.0))
+            .tip("the sun heats the surface (infrared absorbed by the water) and whatever absorbs light (rock, agents, monomers). It follows day and night");
+        c.slider("day and night: period (epochs; 0 = always day)", slider(&mut p.day_period, 0.0..=200_000.0))
+            .tip("during the day the sun rises and sets as a half sine (dawn and dusk); for the rest of the cycle it is night");
+        if p.day_period >= 1.0 {
+            c.slider("fraction of the cycle that is day", slider(&mut p.day_fraction, 0.05..=1.0))
+                .tip("0.5 = equal day and night; 0.75 = day lasts 3/4 of the cycle; 1 = no night (but the sun still rises and sets)");
+            c.slider("sun: maximum angle at sunrise/sunset (degrees)", slider(&mut p.sun_angle, 0.0..=85.0))
+                .tip("0 = always overhead; 85 = almost grazing light in the morning and evening (long shadows)");
+            let d = p.daylight(p.epoch);
+            c.row("day and night: period", |ui| {
+                ui.label(format!("  now: {} ({:.0}% of the sun)", if d > 0.0 { "day" } else { "night" }, d * 100.0));
+            });
         }
+        light_changed = c
+            .slider("UV attenuation by water", slider(&mut p.uv_depth, 0.0..=30.0))
+            .is_some_and(|r| r.changed());
+        c.slider("UV absorption by monomers", slider(&mut p.monomer_uv_absorb, 0.0..=5.0));
+        c.slider("speed of light (rows/step; 0 = sweep)", slider(&mut world.settings.light_rows_per_step, 0..=16))
+            .tip("light and shadows descend N rows per step; 0 = a full sweep every N steps");
     });
-    ui.add(
-        slider(&mut p.activation_decay, 0.0..=0.002)
-            .logarithmic(true)
-            .text("activation decay (per step)"),
-    );
-    // Reativação uniforme: probabilidade por passo de um gasto voltar a
-    // ativado; escala logarítmica para afinar valores pequenos.
-    ui.add(
-        slider(&mut p.reactivation_rate, 0.0..=0.02)
-            .logarithmic(true)
-            .smallest_positive(1e-5)
-            .text("reactivation of spent monomers"),
-    );
-    if p.reactivation_rate > 0.0 {
-        ui.label(format!("  mean fallow time of a spent monomer: {:.0} steps", 1.0 / p.reactivation_rate));
-    }
-    ui.strong("Abiotic activation (without life)");
-    ui.add(slider(&mut p.direct_photoactivation, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("by the sun (photoactivation of spent monomers)"))
-        .on_hover_text("light reactivates spent monomers on its own (it follows day and night and the shadows). 1 = ~1.8% of the spent ones per step in full sun; 0.02 = a trickle. 0 = photosystems only");
-    ui.add(slider(&mut p.thermal_activation, 0.0..=2.0).logarithmic(true).smallest_positive(0.01).text("by heat (above T = 2)"))
-        .on_hover_text("heat reactivates spent monomers on its own, only in water above T = 2 (vents). 0 = only chemosynthesizers make use of the vents");
-    ui.separator();
-    ui.strong("Monomer transport");
-    ui.add(slider(&mut p.diffusion, 0.0..=50.0).text("diffusion ×"));
-    ui.add(slider(&mut p.transport_every, 1..=4).text("transport every N steps"))
-        .on_hover_text("monomer transport (current, diffusion, aggregation, reactions) is the most expensive part of each step. With 2, it runs every other step, with twice the displacement each time: the simulation gets ~15% faster and the monomers move in larger, less frequent jumps. Agents eat on every step. The maximum possible diffusion drops in the same proportion. 1 = as always");
-    ui.add(slider(&mut p.monomer_pressure, 0.0..=20.0).text("monomer pressure"))
-        .on_hover_text("diffusion pushes from full areas to empty ones");
-    ui.add(slider(&mut p.cohesion, 0.0..=2.0).text("cohesion of activated monomers of the same type"))
-        .on_hover_text("an activated monomer leaves a cell less readily when the neighbors hold activated monomers of the same type: it gathers each type into patches");
-    ui.add(
-        slider(&mut p.aggregation, 0.0..=1.0).logarithmic(true).smallest_positive(0.01).text("aggregation of activated monomers"),
-    )
-        .on_hover_text("binding energy between neighboring activated monomers (÷ temperature): they form clumps that the current carries whole; heat dissolves them");
-    ui.separator();
-    ui.strong("Gravity");
-    ui.add(slider(&mut p.settle, 0.0..=100.0).logarithmic(true).smallest_positive(0.1).text("gravity on MONOMERS ×"))
-        .on_hover_text("probability per step of a monomer dropping one cell = 0.002 × this (10 = 0.02 cells/step)");
-    ui.add(slider(&mut p.sediment_settle, 0.0..=5.0).text("gravity on rubble GRAINS ×"))
-        .on_hover_text("fall speed (×0.5 fluid cells/s): a loose grain moves with the current minus the fall — it rises where the upward current is stronger (suspension) and settles where it slows down. 0 = they float");
-    ui.add(slider(&mut p.sedimentation, 0.0..=0.5).text("gravity on AGENTS × (∝ √n)"))
-        .on_hover_text("agents sink ∝ √(number of residues): large ones go down faster. 0 = they do not sink");
-}
-
-fn tab_light(ui: &mut egui::Ui, world: &mut World) {
-    let p = &mut world.params;
-    ui.add(slider(&mut p.uv_strength, 0.0..=10.0).text("UV strength (sun)"));
-    ui.add(slider(&mut p.sun_heat, 0.0..=5.0).text("solar heating"))
-        .on_hover_text("the sun heats the surface (infrared absorbed by the water) and whatever absorbs light (rock, agents, monomers). It follows day and night");
-    ui.add(slider(&mut p.day_period, 0.0..=200_000.0).text("day and night: period (epochs; 0 = always day)"))
-        .on_hover_text("during the day the sun rises and sets as a half sine (dawn and dusk); for the rest of the cycle it is night");
-    if p.day_period >= 1.0 {
-        ui.add(slider(&mut p.day_fraction, 0.05..=1.0).text("fraction of the cycle that is day"))
-            .on_hover_text("0.5 = equal day and night; 0.75 = day lasts 3/4 of the cycle; 1 = no night (but the sun still rises and sets)");
-        ui.add(slider(&mut p.sun_angle, 0.0..=85.0).text("sun: maximum angle at sunrise/sunset (degrees)"))
-            .on_hover_text("0 = always overhead; 85 = almost grazing light in the morning and evening (long shadows)");
-        let d = p.daylight(p.epoch);
-        ui.label(format!("  now: {} ({:.0}% of the sun)", if d > 0.0 { "day" } else { "night" }, d * 100.0));
-    }
-    let light_changed =
-        ui.add(slider(&mut p.uv_depth, 0.0..=30.0).text("UV attenuation by water")).changed();
-    ui.add(slider(&mut p.monomer_uv_absorb, 0.0..=5.0).text("UV absorption by monomers"));
-    ui.add(slider(&mut p.photo_yield, 0.0..=0.5).logarithmic(true).smallest_positive(0.005).text("photosynthetic yield"))
-        .on_hover_text("energy per unit of light absorbed by a photosystem (the recycler converts the same energy into activated monomers)");
-    ui.add(slider(&mut p.uv_damage, 1.0..=50.0).text("UV damage"))
-        .on_hover_text("risk of death per step in the light = base mortality × (this − 1) × light × 0.01, and it falls with the fraction of aromatic amino acids in the body (tryptophan, tyrosine: the sunscreen). 30 in full sun with no protection gives about 140 steps of life; 1 = no damage");
-    ui.add(
-        slider(&mut world.settings.light_rows_per_step, 0..=16)
-            .text("speed of light (rows/step; 0 = sweep)"),
-    )
-    .on_hover_text("light and shadows descend N rows per step; 0 = a full sweep every N steps");
     if light_changed {
         world.invalidate_light();
     }
-}
-
-fn tab_water(ui: &mut egui::Ui, world: &mut World) {
-    let p = &mut world.params;
-    let st = &mut world.settings;
-    ui.strong("Fluid");
-    ui.checkbox(&mut st.fluid_enabled, "fluid on");
-    ui.checkbox(&mut st.multigrid, "pressure by multigrid (otherwise Jacobi)");
-    if st.multigrid {
-        ui.add(slider(&mut st.mg_cycles, 1..=4).text("V cycles"));
-    } else {
-        ui.add(slider(&mut st.jacobi_iters, 2..=256).text("Jacobi iterations"));
-    }
-    ui.add(slider(&mut st.fluid_substep, 1..=4).text("solve every N steps"));
-    ui.add(slider(&mut p.fluid_vorticity, 0.0..=10.0).text("vorticity"));
-    ui.add(slider(&mut p.fluid_viscosity, 0.0..=5.0).text("viscosity"));
-    ui.add(slider(&mut p.fluid_decay, 0.9..=1.0).text("decay per frame"));
-    ui.separator();
-    ui.strong("Vents");
-    ui.add(slider(&mut world.fumarole_gain, 0.0..=5.0).text("vent strength ×"));
-    if world.heat_image.is_some() {
-        ui.small("+ heat from the red pixels of the loaded terrain");
-    }
-    ui.add(slider(&mut p.chemo_take, 0.0..=0.2).logarithmic(true).smallest_positive(0.0005).text("chemosynthesis uptake"))
-        .on_hover_text("fraction of the reductant in its fluid cell that each chemosynthesis organ takes per step (× metabolism × intensity × efficiency). The fractions of all the organs in a cell add up: high, and the first agents next to a vent use it all up; low, and the reductant travels further and feeds more agents, each one more slowly. With hunger regulation on, an agent that is full takes only what it has room for");
-    ui.add(slider(&mut p.chemo_yield, 0.0..=5.0).text("chemosynthesis yield"))
-        .on_hover_text("energy per unit of reductant consumed");
-    ui.add(slider(&mut p.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("reductant oxidation (1/s)"))
-        .on_hover_text("the slower, the farther the reductant reaches ('vent reductant' view)");
-    for (i, f) in world.fumaroles.iter_mut().enumerate() {
-        ui.push_id(i, |ui| {
-            let mut on = f.enabled != 0;
-            ui.checkbox(&mut on, format!("vent {i}"));
-            f.enabled = on as u32;
-            ui.add(slider(&mut f.x_frac, 0.0..=1.0).text("x"));
-            ui.add(slider(&mut f.y_frac, 0.0..=1.0).text("y"));
-            ui.add(slider(&mut f.strength, 0.0..=20000.0).text("strength"));
-            ui.add(slider(&mut f.spread, 60.0..=4000.0).text("radius (world)"));
+    section(ui, b, T, "Fluid", |c| {
+        let p = &mut world.params;
+        let cfg = &mut world.settings;
+        c.check("fluid on", &mut cfg.fluid_enabled);
+        c.check("pressure by multigrid (otherwise Jacobi)", &mut cfg.multigrid);
+        if cfg.multigrid {
+            c.slider("V cycles", slider(&mut cfg.mg_cycles, 1..=4));
+        } else {
+            c.slider("Jacobi iterations", slider(&mut cfg.jacobi_iters, 2..=256));
+        }
+        c.slider("solve every N steps", slider(&mut cfg.fluid_substep, 1..=4));
+        c.slider("vorticity", slider(&mut p.fluid_vorticity, 0.0..=10.0));
+        c.slider("viscosity", slider(&mut p.fluid_viscosity, 0.0..=5.0));
+        c.slider("decay per frame", slider(&mut p.fluid_decay, 0.9..=1.0));
+    });
+    section(ui, b, T, "Vents", |c| {
+        c.slider("vent strength ×", slider(&mut world.fumarole_gain, 0.0..=5.0));
+        if world.heat_image.is_some() {
+            c.row("vent strength ×", |ui| {
+                ui.small("+ heat from the red pixels of the loaded terrain");
+            });
+        }
+        c.slider(
+            "reductant oxidation (1/s)",
+            slider(&mut world.params.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001),
+        )
+        .tip("the slower, the farther the reductant reaches ('vent reductant' view)");
+    });
+    if !world.fumaroles.is_empty() {
+        section(ui, b, T, "Individual vents", |c| {
+            for (i, f) in world.fumaroles.iter_mut().enumerate() {
+                // Cada fumarola é um bloco: procura-se por "vent 0", "strength", "radius"…
+                c.row(&format!("vent {i} x y strength radius (world)"), |ui| {
+                    ui.push_id(i, |ui| {
+                        let mut on = f.enabled != 0;
+                        ui.checkbox(&mut on, format!("vent {i}"));
+                        f.enabled = on as u32;
+                        ui.add(slider(&mut f.x_frac, 0.0..=1.0).text("x"));
+                        ui.add(slider(&mut f.y_frac, 0.0..=1.0).text("y"));
+                        ui.add(slider(&mut f.strength, 0.0..=20000.0).text("strength"));
+                        ui.add(slider(&mut f.spread, 60.0..=4000.0).text("radius (world)"));
+                    });
+                });
+            }
         });
     }
+    section(ui, b, T, "Terrain", |c| {
+        c.check("terrain physics on", &mut world.settings.terrain_enabled);
+        // Ficheiro e botões de ação: só no separador (ou procurando "terrain").
+        c.row("", |ui| {
+            ui.small("PNG: BLUE = terrain (0 water, weak rubble, strong rock, 255 solid rock); RED = heat and GREEN = chemistry (reductant) of the vents, per pixel and independent (green without red = cold seep). With no green in the image, the chemistry follows the heat. Grays (r = g = b) give terrain only.");
+            ui.horizontal(|ui| {
+                ui.label("file");
+                ui.text_edit_singleline(&mut st.terrain_path);
+            });
+            ui.horizontal(|ui| {
+                if ui
+                    .button("load…")
+                    .on_hover_text("choose a PNG; the terrain changes in the running world (agents and monomers stay; whatever no longer fits moves aside). To start from scratch with it, seed again")
+                    .clicked()
+                {
+                    st.terrain_action = Some(TerrainAction::Load);
+                }
+                if ui.button("save…").on_hover_text("saves the current terrain (and the heat) to a PNG").clicked() {
+                    st.terrain_action = Some(TerrainAction::Save);
+                }
+                if ui.button("generated terrain").clicked() {
+                    st.terrain_action = Some(TerrainAction::Generated);
+                }
+                if ui.button("empty world").on_hover_text("water only, no vents, seeded again: for painting by hand").clicked() {
+                    st.terrain_action = Some(TerrainAction::Empty);
+                }
+            });
+        });
+    });
+    section(ui, b, T, "Brush", |c| {
+        c.check("paint with the left button (the right one still drags the view)", &mut st.paint_on);
+        c.row("material", |ui| {
+            egui::ComboBox::from_label("material")
+                .selected_text(PAINT_MATERIALS[st.paint_material.min(PAINT_MATERIALS.len() - 1)])
+                .show_ui(ui, |ui| {
+                    for (i, name) in PAINT_MATERIALS.iter().enumerate() {
+                        ui.selectable_value(&mut st.paint_material, i, *name);
+                    }
+                });
+        });
+        c.slider("radius (cells)", slider(&mut st.paint_radius, 1.0..=200.0).logarithmic(true));
+        if st.paint_material == 4 || st.paint_material == 5 {
+            c.slider("vent strength", slider(&mut st.paint_strength, 0.05..=1.0));
+        }
+        c.row("", |ui| {
+            ui.small("you can also paint while paused; monomers move aside when rock is placed (matter is conserved)");
+            if !st.terrain_msg.is_empty() {
+                ui.label(&st.terrain_msg);
+            }
+        });
+    });
+    section(ui, b, T, "Sediments (loose rubble)", |c| {
+        let p = &mut world.params;
+        c.slider("drag by the current ×", slider(&mut p.sediment_transport, 0.0..=5.0))
+            .tip("how much the current carries loose rubble (1 = as in v3)");
+        c.slider("critical entrainment velocity", slider(&mut p.sediment_threshold, 0.0..=5.0))
+            .tip("Shields criterion: below this velocity (fluid cells/s) the current does not lift grains; above it, it lifts them ∝ to the excess");
+        c.slider("gravity on rubble GRAINS ×", slider(&mut p.sediment_settle, 0.0..=5.0))
+            .tip("fall speed (×0.5 fluid cells/s): a loose grain moves with the current minus the fall — it rises where the upward current is stronger (suspension) and settles where it slows down. 0 = they float");
+        c.slider("bioturbation (pushing rubble)", slider(&mut p.bioturbation, 0.0..=0.5));
+    });
 }
 
-fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
-    ui.small("PNG: BLUE = terrain (0 water, weak rubble, strong rock, 255 solid rock); RED = heat and GREEN = chemistry (reductant) of the vents, per pixel and independent (green without red = cold seep). With no green in the image, the chemistry follows the heat. Grays (r = g = b) give terrain only.");
-    ui.horizontal(|ui| {
-        ui.label("file");
-        ui.text_edit_singleline(&mut st.terrain_path);
+/// SOPA: os monómeros (densidade, ativação, transporte, agregação).
+fn tab_soup(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) {
+    const T: &str = "Soup";
+    section(ui, b, T, "Initial soup and activation", |c| {
+        let p = &mut world.params;
+        c.slider("initial density (on the next seed)", slider(&mut world.seed_density, 0.05..=1.0));
+        c.slider("initial activated fraction (on the next seed)", slider(&mut world.seed_active, 0.0..=1.0))
+            .tip("fraction of the monomers that are born activated when a new world is seeded (0.5 = half)");
+        c.row("activate now", |ui| {
+            ui.horizontal(|ui| {
+                ui.add(slider(&mut st.activate_frac, 0.0..=1.0).text("activate now"));
+                if ui.button("activate").on_hover_text("activates this fraction of the free spent monomers now (matter does not change)").clicked() {
+                    st.activate_now = true;
+                }
+            });
+        });
+        c.slider("activation decay (per step)", slider(&mut p.activation_decay, 0.0..=0.002).logarithmic(true));
+        // Reativação uniforme: probabilidade por passo de um gasto voltar a
+        // ativado; escala logarítmica para afinar valores pequenos.
+        c.slider(
+            "reactivation of spent monomers",
+            slider(&mut p.reactivation_rate, 0.0..=0.02).logarithmic(true).smallest_positive(1e-5),
+        );
+        if p.reactivation_rate > 0.0 {
+            let rate = p.reactivation_rate;
+            c.row("reactivation of spent monomers", |ui| {
+                ui.label(format!("  mean fallow time of a spent monomer: {:.0} steps", 1.0 / rate));
+            });
+        }
     });
-    ui.horizontal(|ui| {
-        if ui
-            .button("load…")
-            .on_hover_text("choose a PNG; the terrain changes in the running world (agents and monomers stay; whatever no longer fits moves aside). To start from scratch with it, seed again")
-            .clicked()
+    section(ui, b, T, "Abiotic activation (without life)", |c| {
+        let p = &mut world.params;
+        c.slider(
+            "by the sun (photoactivation of spent monomers)",
+            slider(&mut p.direct_photoactivation, 0.0..=1.0).logarithmic(true).smallest_positive(0.001),
+        )
+        .tip("light reactivates spent monomers on its own (it follows day and night and the shadows). 1 = ~1.8% of the spent ones per step in full sun; 0.02 = a trickle. 0 = photosystems only");
+        c.slider("by heat (above T = 2)", slider(&mut p.thermal_activation, 0.0..=2.0).logarithmic(true).smallest_positive(0.01))
+            .tip("heat reactivates spent monomers on its own, only in water above T = 2 (vents). 0 = only chemosynthesizers make use of the vents");
+    });
+    section(ui, b, T, "Monomer transport and settling", |c| {
+        let p = &mut world.params;
+        c.slider("diffusion ×", slider(&mut p.diffusion, 0.0..=50.0));
+        c.slider("transport every N steps", slider(&mut p.transport_every, 1..=4))
+            .tip("monomer transport (current, diffusion, aggregation, reactions) is the most expensive part of each step. With 2, it runs every other step, with twice the displacement each time: the simulation gets ~15% faster and the monomers move in larger, less frequent jumps. Agents eat on every step. The maximum possible diffusion drops in the same proportion. 1 = as always");
+        c.slider("gravity on MONOMERS ×", slider(&mut p.settle, 0.0..=100.0).logarithmic(true).smallest_positive(0.1))
+            .tip("probability per step of a monomer dropping one cell = 0.002 × this (10 = 0.02 cells/step)");
+    });
+    section(ui, b, T, "Pressure, cohesion and aggregation", |c| {
+        let p = &mut world.params;
+        c.slider("monomer pressure", slider(&mut p.monomer_pressure, 0.0..=20.0))
+            .tip("diffusion pushes from full areas to empty ones");
+        c.slider("cohesion of activated monomers of the same type", slider(&mut p.cohesion, 0.0..=2.0))
+            .tip("an activated monomer leaves a cell less readily when the neighbors hold activated monomers of the same type: it gathers each type into patches");
+        c.slider("aggregation of activated monomers", slider(&mut p.aggregation, 0.0..=1.0).logarithmic(true).smallest_positive(0.01))
+            .tip("binding energy between neighboring activated monomers (÷ temperature): they form clumps that the current carries whole; heat dissolves them");
+    });
+}
+
+/// ENERGIA: as quatro fontes (comer, luz, química, predação) e os custos.
+fn tab_energy(ui: &mut egui::Ui, b: &Busca, world: &mut World) {
+    const T: &str = "Energy";
+    let p = &mut world.params;
+    section(ui, b, T, "Eating", |c| {
+        c.slider("energy per monomer", slider(&mut p.food_power, 0.0..=20.0));
+        c.slider("hydrolysis rate", slider(&mut p.uptake_rate, 0.0..=0.01).logarithmic(true).smallest_positive(1e-5))
+            .tip("how much the agents eat; at 0 nobody eats");
+        c.slider("uptake without a mouth ×", slider(&mut p.skin_uptake, 0.0..=5.0))
+            .tip("how much residues without a mouth absorb (× the amino acid's catalysis; a mouth is worth 20 to 80×). 0.2 = a 30-residue body without a mouth eats about one tenth of a weak mouth; 0 = only mouths eat");
+        let mut hunger = p.hunger_regulation != 0;
+        c.check("regulation by energy charge (a full agent does not eat)", &mut hunger);
+        p.hunger_regulation = hunger as u32;
+    });
+    section(ui, b, T, "Photosynthesis", |c| {
+        c.slider("photosynthetic yield", slider(&mut p.photo_yield, 0.0..=0.5).logarithmic(true).smallest_positive(0.005))
+            .tip("energy per unit of light absorbed by a photosystem (the recycler converts the same energy into activated monomers)");
+    });
+    section(ui, b, T, "Chemosynthesis", |c| {
+        c.slider("chemosynthesis uptake", slider(&mut p.chemo_take, 0.0..=0.2).logarithmic(true).smallest_positive(0.0005))
+            .tip("fraction of the reductant in its fluid cell that each chemosynthesis organ takes per step (× metabolism × intensity × efficiency). The fractions of all the organs in a cell add up: high, and the first agents next to a vent use it all up; low, and the reductant travels further and feeds more agents, each one more slowly. With hunger regulation on, an agent that is full takes only what it has room for");
+        c.slider("chemosynthesis yield", slider(&mut p.chemo_yield, 0.0..=5.0))
+            .tip("energy per unit of reductant consumed");
+    });
+    section(ui, b, T, "Predation", |c| {
+        c.slider("protease strength ×", slider(&mut p.protease_power, 0.0..=30.0).logarithmic(true).smallest_positive(0.1))
+            .tip("multiplies the energy that proteases take from the victim per step of contact (base: 0.2 × strength × intensity for a victim with 10% target residues). When the victim's energy reaches zero, it dies. Each family cuts certain amino acids and proline defends. 0 = no predation");
+        c.slider("direct fraction to the predator", slider(&mut p.protease_direct, 0.0..=1.0))
+            .tip("share of the energy taken that goes straight into the attacker. The rest goes to the medium (see the next slider). 0 = the predator has to eat the remains; 1 = it sucks up everything");
+        c.slider("yield of the remains", slider(&mut p.lysis_yield, 0.0..=1.0))
+            .tip("of the energy that does not go straight to the predator, the fraction that stays in the medium as activated monomers next to the victim (one for each 'energy per monomer'); the rest is lost");
+    });
+    section(ui, b, T, "Costs", |c| {
+        c.slider("maintenance per residue", slider(&mut p.maintenance_cost, 0.0..=0.01));
+        c.slider("base leak (body without a mouth) ×", slider(&mut p.leak_base, 0.0..=1.0))
+            .tip("maintenance is multiplied by this + the leak of the mouths. 0.1 = a body without a mouth pays one tenth; 1 with the leak per mouth at 0 = as it was before");
+        c.slider("leak per open mouth ×", slider(&mut p.mouth_leak, 0.0..=2.0))
+            .tip("what lets things in also lets them out: each open standard mouth adds this to the maintenance multiplier (stronger mouths add more; a closed mouth adds nothing). With 0.3, a body with three mouths pays the same as before");
+        c.slider("movement cost", slider(&mut p.motion_cost, 0.0..=2.0).logarithmic(true).smallest_positive(0.001))
+            .tip("energy spent moving the body: dissipation in the water (this × Σ √drag·dθ² of the joints: beating fast costs quadratically) and the bending of the joints by the signals, which follows the same value. 0.02 = swimming costs about one third of the maintenance of a body without a mouth; 0.1 = the old value (swimming cost more than being alive)");
+        c.slider("cost per base copied", slider(&mut p.pairing_cost, 0.0..=2.0))
+            .tip("energy spent for each base of the genome that is copied");
+        c.slider("cost per grain pushed", slider(&mut p.bioturbation_cost, 0.0..=1.0));
+    });
+    section(ui, b, T, "Metabolism and temperature", |c| {
+        c.slider("metabolism: Q10", slider(&mut p.metabolic_q10, 1.0..=4.0))
+            .tip("how much the chemistry of life speeds up for each temperature 'span' (1 = does not depend on temperature). It multiplies maintenance, eating, chemosynthesis and pairing; not light");
+        c.slider("metabolism: span (T units per Q10)", slider(&mut p.metabolic_span, 0.5..=12.0));
+        c.slider("metabolism: reference temperature (m = 1)", slider(&mut p.metabolic_ref, 0.0..=8.0));
+    });
+}
+
+/// CICLO DE VIDA: semear, agentes guardados, reprodução, mutação, morte.
+fn tab_cycle(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) {
+    const T: &str = "Life cycle";
+    section(ui, b, T, "Seed", |c| {
+        c.slider("seeds", slider(&mut st.seed_count, 1..=20000));
+        c.row("bases to (seed length)", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("bases");
+                ui.add(drag(&mut st.seed_len[0]).range(3..=256));
+                ui.label("to");
+                ui.add(drag(&mut st.seed_len[1]).range(3..=256));
+            });
+        });
+        c.check("start with AUG (taken from the soup)", &mut st.seed_aug);
+        // Botão de ação: só no separador (ou procurando "seed").
+        c.row("", |ui| {
+            if ui.button("seed (generation 0, assembled from the soup)").clicked() {
+                st.seed_now = true;
+            }
+        });
+    });
+    section(ui, b, T, "Saved agents", |c| {
+        c.row("", |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("save the selected one…").on_hover_text("saves the genome of the selected agent to a text file (letters A, U, G, C) in saves/agentes/").clicked() {
+                    st.agent_action = Some(AgentAction::Save);
+                }
+                if ui.button("load…").on_hover_text("loads a saved genome; you can then spread it or place it with the mouse").clicked() {
+                    st.agent_action = Some(AgentAction::Load);
+                }
+            });
+        });
+        if !st.agent_info.is_empty() {
+            c.row("", |ui| {
+                ui.small(&st.agent_info);
+            });
+            c.row("spread copies", |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("spread").on_hover_text("puts this number of copies at random places in the world (each one assembled from bases in the surrounding soup; where there are no bases, it is not born)").clicked() {
+                        st.agent_action = Some(AgentAction::Spread);
+                    }
+                    ui.add(drag(&mut st.agent_copies).range(1..=20000).suffix(" copies"));
+                });
+            });
+            c.check("place with the mouse", &mut st.place_agent)
+                .tip("when on, a click in the view places a copy of the loaded agent there (instead of selecting whatever is there)");
+        }
+    });
+    let p = &mut world.params;
+    section(ui, b, T, "Reproduction", |c| {
+        c.slider("initial energy", slider(&mut p.spawn_energy, 0.1..=50.0));
+        c.slider("pairing (bases/step)", slider(&mut p.pairing_rate, 0.0..=8.0));
+        let mut salvage = p.salvage > 0.0;
+        c.check("recharge: producers copy themselves with spent monomers", &mut salvage)
+            .tip("the energy that overflows from a photosystem or a chemosynthesis organ first charges a spent monomer for the copy of its own genome (building with raw material); only what is of no use for that goes on to reactivate monomers in the medium. Off = all the overflow goes to the medium (as it was)");
+        p.salvage = salvage as u32 as f32;
+    });
+    section(ui, b, T, "Mutation and translation", |c| {
+        c.slider("mutation rate", slider(&mut p.mutation_rate, 0.0..=0.05));
+        let mut aug = p.require_start != 0;
+        c.check("translation starts at AUG (new births)", &mut aug);
+        p.require_start = aug as u32;
+    });
+    section(ui, b, T, "Death", |c| {
+        c.slider("base mortality", slider(&mut p.death_probability, 0.0..=0.2));
+        c.slider("mortality follows the pace of life", slider(&mut p.death_metab, 0.0..=1.0))
+            .tip("1 = base mortality is multiplied by the agent's pace (metabolism × leak): dormancy, closed mouths, bodies without a mouth and cold water make it live longer (cysts, spores). 0 = mortality does not depend on the pace");
+        c.slider("cap on the protection by energy", slider(&mut p.death_energy_cap, 0.0..=200.0))
+            .tip("base mortality is ÷ energy only up to this value (a reserve protects, hoarding more does not); 0 = no cap (v3)");
+        c.slider("UV damage", slider(&mut p.uv_damage, 1.0..=50.0))
+            .tip("risk of death per step in the light = base mortality × (this − 1) × light × 0.01, and it falls with the fraction of aromatic amino acids in the body (tryptophan, tyrosine: the sunscreen). 30 in full sun with no protection gives about 140 steps of life; 1 = no damage");
+        c.slider("denaturation temperature", slider(&mut p.denature_temp, 0.0..=12.0))
+            .tip("above this, heat kills (view 7 = temperature; the core of the vents reaches 12)");
+        c.slider("denaturation by heat", slider(&mut p.heat_kill, 0.0..=1.0).logarithmic(true).smallest_positive(0.001))
+            .tip("risk of dying in hot water (above the vent threshold), × (1 − thermostability of the body; a column of the amino acid table)");
+    });
+}
+
+/// CORPO: sinais internos, natação, corpo na corrente, articulações, ligações.
+fn tab_body(ui: &mut egui::Ui, b: &Busca, world: &mut World) {
+    const T: &str = "Body";
+    let p = &mut world.params;
+    section(ui, b, T, "Internal signals", |c| {
+        c.slider("signal mode", slider(&mut p.signal_mode, 0.0..=4.0).step_by(1.0))
+            .tip("how the α/β signals travel along the chain and bend the joints. 0: conduction and sensitivity of each amino acid (v3). 1: equal diffusion to both sides and all joints respond alike (α bends one way, β the other). 2: the signal only travels from the N side to the C side, same response. 3: it travels from N to C and each joint responds according to its amino acid (the body decides which way it turns). 4: transport from the table (conduction of each amino acid and organ, as in 0) but all joints respond alike");
+        c.slider("leakage into the other channels", slider(&mut p.signal_crosstalk, 0.0..=0.5))
+            .tip("an organ that emits on one channel lets this fraction of the emission leak into each of the other three (imperfect specificity): an α sensor also puts a little into β, γ and δ. Relays have no leakage (they serve to separate channels). 0 = clean emission");
+        c.slider("mute clocks", slider(&mut p.clock_mute, 0.0..=1.0))
+            .tip("experiment: removes amplitude from all clocks (1 = mute). The organ stays in the body and keeps paying its cost; it is for seeing whether the agents move without it (sensors, emission by contact)");
+        let mode = p.signal_mode.round() as i32;
+        c.row("signal mode", |ui| {
+            ui.small(match mode {
+                0 => "  0 = per amino acid (each joint responds in its own way)",
+                1 => "  1 = isotropic (diffusion to both sides, equal response)",
+                2 => "  2 = directional (from the N side to the C side, equal response)",
+                3 => "  3 = directional, response of each amino acid (the body decides)",
+                _ => "  4 = transport from the table (amino acids and organs), equal response",
+            });
+        });
+    });
+    section(ui, b, T, "Swimming", |c| {
+        let mut rft = p.rft_enabled != 0;
+        c.check("swimming (RFT)", &mut rft);
+        p.rft_enabled = rft as u32;
+        c.slider("swimming grip (2 = water)", slider(&mut p.swim_grip, 1.0..=30.0).logarithmic(true))
+            .tip("how much more the medium resists a segment moving sideways than lengthwise. 2 = water, the physical limit for a thin body. More = a medium that grips sideways (gel, mucus): each stroke yields more advance, IMMEDIATELY; when the body stops beating, it stops. 5 gives about 6 times the advance of water for an undulating swimmer");
+        c.slider("swimming gain (with memory; 1 = off)", slider(&mut p.swim_gain, 0.0..=50.0))
+            .tip("multiplies the AVERAGE of the advance over the last steps (see the memory, next): above 1 the agents keep gliding in the old direction after stopping or turning (it is not physical). 1 = just the physics of the strokes");
+        c.slider("gain memory (steps)", slider(&mut p.swim_memory, 1.0..=200.0).logarithmic(true))
+            .tip("how many steps the gliding lasts when the gain is greater than 1. 20 = as in v3 (speed lost 5% per step); 100 = what v4 had until now. With the gain at 1 it does nothing");
+        c.slider("swimming sway", slider(&mut p.swim_wobble, 0.0..=1.0))
+            .tip("1 = physical sway of each stroke; 0 = only the mean advance");
+        c.slider("inertia of heavy bodies (non-physical)", slider(&mut p.inertia, 0.0..=10.0))
+            .tip("0 = physical: at the molecular scale water damps everything, a body that stops beating stops at once. Above 0 the velocity approaches the requested one with weight 1/(1 + this × mass/mass of an average body): heavy ones glide and accelerate slowly, like large swimmers");
+        let mut fso = p.fluid_swim_only != 0;
+        if c
+            .check("experiment: swimming through the fluid only", &mut fso)
+            .tip("without RFT: the shape pushes the water and the water carries the agent")
+            .is_some_and(|r| r.changed())
         {
-            st.terrain_action = Some(TerrainAction::Load);
-        }
-        if ui.button("save…").on_hover_text("saves the current terrain (and the heat) to a PNG").clicked() {
-            st.terrain_action = Some(TerrainAction::Save);
-        }
-        if ui.button("generated terrain").clicked() {
-            st.terrain_action = Some(TerrainAction::Generated);
-        }
-        if ui.button("empty world").on_hover_text("water only, no vents, seeded again: for painting by hand").clicked() {
-            st.terrain_action = Some(TerrainAction::Empty);
+            p.fluid_swim_only = fso as u32;
         }
     });
-    ui.separator();
-    ui.strong("Brush");
-    ui.checkbox(&mut st.paint_on, "paint with the left button (the right one still drags the view)");
-    egui::ComboBox::from_label("material")
-        .selected_text(PAINT_MATERIALS[st.paint_material.min(PAINT_MATERIALS.len() - 1)])
-        .show_ui(ui, |ui| {
-            for (i, name) in PAINT_MATERIALS.iter().enumerate() {
-                ui.selectable_value(&mut st.paint_material, i, *name);
-            }
-        });
-    ui.add(slider(&mut st.paint_radius, 1.0..=200.0).logarithmic(true).text("radius (cells)"));
-    if st.paint_material == 4 || st.paint_material == 5 {
-        ui.add(slider(&mut st.paint_strength, 0.05..=1.0).text("vent strength"));
-    }
-    ui.small("you can also paint while paused; monomers move aside when rock is placed (matter is conserved)");
-    if !st.terrain_msg.is_empty() {
-        ui.label(&st.terrain_msg);
-    }
-    ui.separator();
-    ui.checkbox(&mut world.settings.terrain_enabled, "terrain physics on");
-    ui.strong("Sediments (loose rubble)");
-    ui.add(slider(&mut world.params.sediment_transport, 0.0..=5.0).text("drag by the current ×"))
-        .on_hover_text("how much the current carries loose rubble (1 = as in v3)");
-    ui.add(slider(&mut world.params.sediment_threshold, 0.0..=5.0).text("critical entrainment velocity"))
-        .on_hover_text("Shields criterion: below this velocity (fluid cells/s) the current does not lift grains; above it, it lifts them ∝ to the excess");
-    ui.add(slider(&mut world.params.bioturbation, 0.0..=0.5).text("bioturbation (pushing rubble)"));
-    ui.add(slider(&mut world.params.bioturbation_cost, 0.0..=1.0).text("cost per grain pushed"));
-}
-
-fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
-    ui.strong("Seed");
-    ui.add(slider(&mut st.seed_count, 1..=20000).text("seeds"));
-    ui.horizontal(|ui| {
-        ui.label("bases");
-        ui.add(drag(&mut st.seed_len[0]).range(3..=256));
-        ui.label("to");
-        ui.add(drag(&mut st.seed_len[1]).range(3..=256));
+    section(ui, b, T, "Body in the current and gravity", |c| {
+        c.slider("drag by the current", slider(&mut p.flow_coupling, 0.0..=1.0))
+            .tip("1 = physical (a free body follows the water); less = experiment: currents carry them less and they also push the water less");
+        c.slider("heavy bodies follow the current less", slider(&mut p.flow_mass, 0.0..=4.0))
+            .tip("each agent's drag by the current is divided by 1 + this value × (mean mass per residue ÷ that of a normal residue − 1): a body with heavy organs (stores, proteases with reach) is carried less by the water. Density counts, not length. 0 = all follow the water equally");
+        c.slider("agents push the water", slider(&mut p.agent_fluid_push, -1.0..=1.0))
+            .tip("each residue gives its drag back to the fluid (only in the world with fluid)");
+        c.slider("gravity on AGENTS × (∝ √n)", slider(&mut p.sedimentation, 0.0..=0.5))
+            .tip("agents sink ∝ √(number of residues): large ones go down faster. 0 = they do not sink");
     });
-    ui.checkbox(&mut st.seed_aug, "start with AUG (taken from the soup)");
-    if ui.button("seed (generation 0, assembled from the soup)").clicked() {
-        st.seed_now = true;
-    }
-    ui.separator();
-    ui.strong("Saved agents");
-    ui.horizontal(|ui| {
-        if ui.button("save the selected one…").on_hover_text("saves the genome of the selected agent to a text file (letters A, U, G, C) in saves/agentes/").clicked() {
-            st.agent_action = Some(AgentAction::Save);
-        }
-        if ui.button("load…").on_hover_text("loads a saved genome; you can then spread it or place it with the mouse").clicked() {
-            st.agent_action = Some(AgentAction::Load);
-        }
+    section(ui, b, T, "Joints and contact", |c| {
+        c.slider("joint stiffness", slider(&mut p.chain_stiffness, 1.0..=100.0));
+        c.slider("joint load (rotational drag)", slider(&mut p.joint_load, 0.0..=5.0))
+            .tip("how much the water resists the bending of each joint. Each joint rotates the two sides of the body in opposite directions, and what resists it is the drag of the side that rotates more easily (segment length × organ drag × distance²). The tips bend fast, the trunk of a long body bends slowly and a bulky organ at a tip makes that tip slow. 0 = all joints at the same pace; 1 = the middle joint of an average body bends at half speed");
+        c.slider("× rest angles", slider(&mut p.rest_angle_mult, 0.0..=6.0))
+            .tip("multiplies the rest angle of all joints (amino acids and organs). 1 = those in the table (almost straight bodies); 3–4 gives bends of 50–90° as in a real protein: coiled bodies, with more contacts between residues");
+        c.slider("thermal agitation (kT)", slider(&mut p.thermal_kt, 0.0..=5.0));
+        c.slider("motor stroke (rad)", slider(&mut p.motor_amplitude, 0.0..=1.0));
+        c.slider("coupling between joints", slider(&mut p.joint_coupling, 0.0..=0.95));
+        c.slider("Brownian motion", slider(&mut p.brownian, 0.0..=20.0));
+        c.slider("Brownian rotation", slider(&mut p.brownian_rot, 0.0..=5.0))
+            .tip("thermal agitation also rotates bodies at random: 0.15 rad per step ÷ radius^1.5 (the radius is counted in residues, √n), times this. A naked RNA rotates a lot; a 16-residue body, ~0.02 rad per step. 1 = the usual value; 0 = they only rotate by swimming, by the water or by contact");
+        c.slider("diffusiophoresis", slider(&mut p.phoretic_gain, 0.0..=500.0));
+        c.check("repulsion between agents", &mut world.settings.contact_enabled);
     });
-    if !st.agent_info.is_empty() {
-        ui.small(&st.agent_info);
-        ui.horizontal(|ui| {
-            if ui.button("spread").on_hover_text("puts this number of copies at random places in the world (each one assembled from bases in the surrounding soup; where there are no bases, it is not born)").clicked() {
-                st.agent_action = Some(AgentAction::Spread);
-            }
-            ui.add(drag(&mut st.agent_copies).range(1..=20000).suffix(" copies"));
-        });
-        ui.checkbox(&mut st.place_agent, "place with the mouse").on_hover_text("when on, a click in the view places a copy of the loaded agent there (instead of selecting whatever is there)");
-    }
-    ui.separator();
-    ui.strong("Metabolism");
-    let p = &mut world.params;
-    ui.add(slider(&mut p.food_power, 0.0..=20.0).text("energy per monomer"));
-    ui.add(
-        slider(&mut p.uptake_rate, 0.0..=0.01).logarithmic(true).smallest_positive(1e-5).text("hydrolysis rate"),
-    )
-    .on_hover_text("how much the agents eat; at 0 nobody eats");
-    let mut hunger = p.hunger_regulation != 0;
-    ui.checkbox(&mut hunger, "regulation by energy charge (a full agent does not eat)");
-    p.hunger_regulation = hunger as u32;
-    ui.add(slider(&mut p.maintenance_cost, 0.0..=0.01).text("maintenance per residue"));
-    ui.add(slider(&mut p.leak_base, 0.0..=1.0).text("base leak (body without a mouth) ×"))
-        .on_hover_text("maintenance is multiplied by this + the leak of the mouths. 0.1 = a body without a mouth pays one tenth; 1 with the leak per mouth at 0 = as it was before");
-    ui.add(slider(&mut p.mouth_leak, 0.0..=2.0).text("leak per open mouth ×"))
-        .on_hover_text("what lets things in also lets them out: each open standard mouth adds this to the maintenance multiplier (stronger mouths add more; a closed mouth adds nothing). With 0.3, a body with three mouths pays the same as before");
-    ui.add(slider(&mut p.skin_uptake, 0.0..=5.0).text("uptake without a mouth ×"))
-        .on_hover_text("how much residues without a mouth absorb (× the amino acid's catalysis; a mouth is worth 20 to 80×). 0.2 = a 30-residue body without a mouth eats about one tenth of a weak mouth; 0 = only mouths eat");
-    ui.add(slider(&mut p.metabolic_q10, 1.0..=4.0).text("metabolism: Q10"))
-        .on_hover_text("how much the chemistry of life speeds up for each temperature 'span' (1 = does not depend on temperature). It multiplies maintenance, eating, chemosynthesis and pairing; not light");
-    ui.add(slider(&mut p.metabolic_span, 0.5..=12.0).text("metabolism: span (T units per Q10)"));
-    ui.add(slider(&mut p.metabolic_ref, 0.0..=8.0).text("metabolism: reference temperature (m = 1)"));
-    ui.separator();
-    ui.strong("Reproduction");
-    ui.add(slider(&mut p.spawn_energy, 0.1..=50.0).text("initial energy"));
-    ui.add(slider(&mut p.pairing_rate, 0.0..=8.0).text("pairing (bases/step)"));
-    ui.add(slider(&mut p.pairing_cost, 0.0..=2.0).text("cost per base copied"))
-        .on_hover_text("energy spent for each base of the genome that is copied");
-    let mut salvage = p.salvage > 0.0;
-    ui.checkbox(&mut salvage, "recharge: producers copy themselves with spent monomers")
-        .on_hover_text("the energy that overflows from a photosystem or a chemosynthesis organ first charges a spent monomer for the copy of its own genome (building with raw material); only what is of no use for that goes on to reactivate monomers in the medium. Off = all the overflow goes to the medium (as it was)");
-    p.salvage = salvage as u32 as f32;
-    ui.add(slider(&mut p.mutation_rate, 0.0..=0.05).text("mutation rate"));
-    let mut aug = p.require_start != 0;
-    ui.checkbox(&mut aug, "translation starts at AUG (new births)");
-    p.require_start = aug as u32;
-    ui.separator();
-    ui.strong("Death");
-    ui.add(slider(&mut p.death_probability, 0.0..=0.2).text("base mortality"));
-    ui.add(slider(&mut p.death_metab, 0.0..=1.0).text("mortality follows the pace of life"))
-        .on_hover_text("1 = base mortality is multiplied by the agent's pace (metabolism × leak): dormancy, closed mouths, bodies without a mouth and cold water make it live longer (cysts, spores). 0 = mortality does not depend on the pace");
-    ui.add(slider(&mut p.death_energy_cap, 0.0..=200.0).text("cap on the protection by energy"))
-        .on_hover_text("base mortality is ÷ energy only up to this value (a reserve protects, hoarding more does not); 0 = no cap (v3)");
-    ui.add(slider(&mut p.denature_temp, 0.0..=12.0).text("denaturation temperature"))
-        .on_hover_text("above this, heat kills (view 7 = temperature; the core of the vents reaches 12)");
-    ui.add(slider(&mut p.heat_kill, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("denaturation by heat"))
-        .on_hover_text("risk of dying in hot water (above the vent threshold), × (1 − thermostability of the body; a column of the amino acid table)");
-    ui.separator();
-    ui.strong("Predation");
-    ui.add(slider(&mut p.protease_power, 0.0..=30.0).logarithmic(true).smallest_positive(0.1).text("protease strength ×"))
-        .on_hover_text("multiplies the energy that proteases take from the victim per step of contact (base: 0.2 × strength × intensity for a victim with 10% target residues). When the victim's energy reaches zero, it dies. Each family cuts certain amino acids and proline defends. 0 = no predation");
-    ui.add(slider(&mut p.protease_direct, 0.0..=1.0).text("direct fraction to the predator"))
-        .on_hover_text("share of the energy taken that goes straight into the attacker. The rest goes to the medium (see the next slider). 0 = the predator has to eat the remains; 1 = it sucks up everything");
-    ui.add(slider(&mut p.lysis_yield, 0.0..=1.0).text("yield of the remains"))
-        .on_hover_text("of the energy that does not go straight to the predator, the fraction that stays in the medium as activated monomers next to the victim (one for each 'energy per monomer'); the rest is lost");
-    ui.separator();
-    ui.strong("Bonds between agents (anchor organ: + binds to −)");
-    ui.add(slider(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formation"))
-        .on_hover_text("probability per step of an agent with a free anchor trying to bind to an opposite anchor of a neighbor; the duration comes from the anchor's variant (editor)");
-    ui.add(slider(&mut p.bond_energy_share, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("energy diffusion through the bond"))
-        .on_hover_text("energy flows through the bond from the fuller agent (energy ÷ capacity) to the emptier one, until both are equally full. It is the fraction of the difference that passes per step: 0.1 = the difference halves in ~7 steps; 0.01 = in ~70 (the old value)");
-    ui.add(slider(&mut p.bond_matter_share, 0.0..=1.0).text("matter sharing through the bond"))
-        .on_hover_text("probability per step of a bonded agent receiving from its partner a complement the partner has already captured, from the one whose genome copy is further ahead to the one that is further behind (a leaf feeding the root). It only passes when the base is useful to the receiver, one time in four on average. 0 = they do not share matter");
-    ui.add(slider(&mut p.bond_signal, 0.0..=1.0).text("signals through the bond"));
-}
-
-fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
-    let p = &mut world.params;
-    ui.strong("Internal signals");
-    ui.add(slider(&mut p.signal_mode, 0.0..=4.0).step_by(1.0).text("signal mode"))
-        .on_hover_text("how the α/β signals travel along the chain and bend the joints. 0: conduction and sensitivity of each amino acid (v3). 1: equal diffusion to both sides and all joints respond alike (α bends one way, β the other). 2: the signal only travels from the N side to the C side, same response. 3: it travels from N to C and each joint responds according to its amino acid (the body decides which way it turns). 4: transport from the table (conduction of each amino acid and organ, as in 0) but all joints respond alike");
-    ui.add(slider(&mut p.signal_crosstalk, 0.0..=0.5).text("leakage into the other channels"))
-        .on_hover_text("an organ that emits on one channel lets this fraction of the emission leak into each of the other three (imperfect specificity): an α sensor also puts a little into β, γ and δ. Relays have no leakage (they serve to separate channels). 0 = clean emission");
-    ui.add(slider(&mut p.clock_mute, 0.0..=1.0).text("mute clocks"))
-        .on_hover_text("experiment: removes amplitude from all clocks (1 = mute). The organ stays in the body and keeps paying its cost; it is for seeing whether the agents move without it (sensors, emission by contact)");
-    ui.small(match p.signal_mode.round() as i32 {
-        0 => "  0 = per amino acid (each joint responds in its own way)",
-        1 => "  1 = isotropic (diffusion to both sides, equal response)",
-        2 => "  2 = directional (from the N side to the C side, equal response)",
-        3 => "  3 = directional, response of each amino acid (the body decides)",
-        _ => "  4 = transport from the table (amino acids and organs), equal response",
+    section(ui, b, T, "Bonds between agents (anchor organ: + binds to −)", |c| {
+        c.slider("formation", slider(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3))
+            .tip("probability per step of an agent with a free anchor trying to bind to an opposite anchor of a neighbor; the duration comes from the anchor's variant (editor)");
+        c.slider("energy diffusion through the bond", slider(&mut p.bond_energy_share, 0.0..=0.5).logarithmic(true).smallest_positive(0.001))
+            .tip("energy flows through the bond from the fuller agent (energy ÷ capacity) to the emptier one, until both are equally full. It is the fraction of the difference that passes per step: 0.1 = the difference halves in ~7 steps; 0.01 = in ~70 (the old value)");
+        c.slider("matter sharing through the bond", slider(&mut p.bond_matter_share, 0.0..=1.0))
+            .tip("probability per step of a bonded agent receiving from its partner a complement the partner has already captured, from the one whose genome copy is further ahead to the one that is further behind (a leaf feeding the root). It only passes when the base is useful to the receiver, one time in four on average. 0 = they do not share matter");
+        c.slider("signals through the bond", slider(&mut p.bond_signal, 0.0..=1.0));
     });
-    ui.separator();
-    ui.strong("Swimming");
-    let mut rft = p.rft_enabled != 0;
-    ui.checkbox(&mut rft, "swimming (RFT)");
-    p.rft_enabled = rft as u32;
-    ui.add(slider(&mut p.swim_grip, 1.0..=30.0).logarithmic(true).text("swimming grip (2 = water)"))
-        .on_hover_text("how much more the medium resists a segment moving sideways than lengthwise. 2 = water, the physical limit for a thin body. More = a medium that grips sideways (gel, mucus): each stroke yields more advance, IMMEDIATELY; when the body stops beating, it stops. 5 gives about 6 times the advance of water for an undulating swimmer");
-    ui.add(slider(&mut p.swim_gain, 0.0..=50.0).text("swimming gain (with memory; 1 = off)"))
-        .on_hover_text("multiplies the AVERAGE of the advance over the last steps (see the memory, next): above 1 the agents keep gliding in the old direction after stopping or turning (it is not physical). 1 = just the physics of the strokes");
-    ui.add(slider(&mut p.swim_memory, 1.0..=200.0).logarithmic(true).text("gain memory (steps)"))
-        .on_hover_text("how many steps the gliding lasts when the gain is greater than 1. 20 = as in v3 (speed lost 5% per step); 100 = what v4 had until now. With the gain at 1 it does nothing");
-    ui.add(slider(&mut p.swim_wobble, 0.0..=1.0).text("swimming sway"))
-        .on_hover_text("1 = physical sway of each stroke; 0 = only the mean advance");
-    ui.add(slider(&mut p.motion_cost, 0.0..=2.0).logarithmic(true).smallest_positive(0.001).text("movement cost"))
-        .on_hover_text("energy spent moving the body: dissipation in the water (this × Σ √drag·dθ² of the joints: beating fast costs quadratically) and the bending of the joints by the signals, which follows the same value. 0.02 = swimming costs about one third of the maintenance of a body without a mouth; 0.1 = the old value (swimming cost more than being alive)");
-    ui.add(slider(&mut p.inertia, 0.0..=10.0).text("inertia of heavy bodies (non-physical)"))
-        .on_hover_text("0 = physical: at the molecular scale water damps everything, a body that stops beating stops at once. Above 0 the velocity approaches the requested one with weight 1/(1 + this × mass/mass of an average body): heavy ones glide and accelerate slowly, like large swimmers");
-    ui.add(slider(&mut p.flow_coupling, 0.0..=1.0).text("drag by the current"))
-        .on_hover_text("1 = physical (a free body follows the water); less = experiment: currents carry them less and they also push the water less");
-    ui.add(slider(&mut p.flow_mass, 0.0..=4.0).text("heavy bodies follow the current less"))
-        .on_hover_text("each agent's drag by the current is divided by 1 + this value × (mean mass per residue ÷ that of a normal residue − 1): a body with heavy organs (stores, proteases with reach) is carried less by the water. Density counts, not length. 0 = all follow the water equally");
-    ui.add(slider(&mut p.agent_fluid_push, -1.0..=1.0).text("agents push the water"))
-        .on_hover_text("each residue gives its drag back to the fluid (only in the world with fluid)");
-    let mut fso = p.fluid_swim_only != 0;
-    if ui
-        .checkbox(&mut fso, "experiment: swimming through the fluid only")
-        .on_hover_text("without RFT: the shape pushes the water and the water carries the agent")
-        .changed()
-    {
-        p.fluid_swim_only = fso as u32;
-    }
-    ui.separator();
-    ui.strong("Joints and contact");
-    ui.add(slider(&mut p.chain_stiffness, 1.0..=100.0).text("joint stiffness"));
-    ui.add(slider(&mut p.joint_load, 0.0..=5.0).text("joint load (rotational drag)"))
-        .on_hover_text("how much the water resists the bending of each joint. Each joint rotates the two sides of the body in opposite directions, and what resists it is the drag of the side that rotates more easily (segment length × organ drag × distance²). The tips bend fast, the trunk of a long body bends slowly and a bulky organ at a tip makes that tip slow. 0 = all joints at the same pace; 1 = the middle joint of an average body bends at half speed");
-    ui.add(slider(&mut p.rest_angle_mult, 0.0..=6.0).text("× rest angles"))
-        .on_hover_text("multiplies the rest angle of all joints (amino acids and organs). 1 = those in the table (almost straight bodies); 3–4 gives bends of 50–90° as in a real protein: coiled bodies, with more contacts between residues");
-    ui.add(slider(&mut p.thermal_kt, 0.0..=5.0).text("thermal agitation (kT)"));
-    ui.add(slider(&mut p.motor_amplitude, 0.0..=1.0).text("motor stroke (rad)"));
-    ui.add(slider(&mut p.joint_coupling, 0.0..=0.95).text("coupling between joints"));
-    ui.add(slider(&mut p.brownian, 0.0..=20.0).text("Brownian motion"));
-    ui.add(slider(&mut p.brownian_rot, 0.0..=5.0).text("Brownian rotation"))
-        .on_hover_text("thermal agitation also rotates bodies at random: 0.15 rad per step ÷ radius^1.5 (the radius is counted in residues, √n), times this. A naked RNA rotates a lot; a 16-residue body, ~0.02 rad per step. 1 = the usual value; 0 = they only rotate by swimming, by the water or by contact");
-    ui.add(slider(&mut p.phoretic_gain, 0.0..=500.0).text("diffusiophoresis"));
-    ui.checkbox(&mut world.settings.contact_enabled, "repulsion between agents");
 }
 
 fn tab_info(ui: &mut egui::Ui, st: &mut UiState, prof: &mut Profiler) {
