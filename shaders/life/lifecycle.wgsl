@@ -971,7 +971,10 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Energia: reparte-se em proporção da CAPACIDADE de cada um (um filho
     // com o dobro da pilha do pai fica com dois terços), sem passar da
     // capacidade do filho. O filho nasce primeiro com 0 para se saber a sua.
-    new_agent(child, cp, mr.w * 6.2831853, 0.0, n, a.generation + 1u, a.id);
+    // Orientação ao acaso; na PISTA o filho nasce virado como o pai (é igual
+    // a ele: se nascesse virado para trás, um bom nadador perdia metade dos
+    // filhos só por azar).
+    new_agent(child, cp, select(mr.w * 6.2831853, a.rot, params.track_mode != 0u), 0.0, n, a.generation + 1u, a.id);
     var born = agents[child];
     let cap_child = energy_capacity(child, born);
     let cap_parent = energy_capacity(slot, a);

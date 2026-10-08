@@ -15,7 +15,8 @@ fn main() {
     let steps: u32 = std::env::var("STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(640);
     let gpu = Gpu::new_headless().unwrap();
     let cfg = WorldConfig::DEFAULT;
-    let gly = |n: usize| "GGU ".repeat(n);
+    let tail: usize = std::env::var("TAIL").ok().and_then(|v| v.parse().ok()).unwrap_or(15);
+    let gly = |n: usize| "GGU ".repeat(if n == 15 { tail } else { n });
     let cases: Vec<(&str, Vec<u8>)> = vec![
         ("nadador (relógio + 15 glicinas)", bases(&format!("AUG CAU CUU GAA {} UAA", gly(15)))),
         ("+ armazenamento grande na ponta C", bases(&format!("AUG CAU CUU GAA {} UGG UGG GAA UAA", gly(15)))),
