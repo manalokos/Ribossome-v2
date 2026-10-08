@@ -78,11 +78,13 @@ pub fn preset(p: &mut crate::params::SimParams) {
     p.maintenance_cost = 0.0005;
     p.track_gain = 0.3;
     p.track_lifespan = 5000;
-    // COPIAR CUSTA CARO: 1,5 de energia por base (um genoma de 33 bases =
-    // 50 de energia = 165 unidades de avanço). Com a cópia barata, qualquer
-    // nadador medíocre enchia o depósito e ficava à espera de vaga: com a
-    // pista cheia todos estavam prontos e as vagas iam ao acaso, sem
-    // seleção. Assim quem avança mais depressa fica pronto mais vezes.
+    // UM FILHO CUSTA CARO, seja qual for o comprimento do genoma: 1,5 por
+    // base de um genoma de 33 bases = 50 de energia = 165 unidades de avanço
+    // (um genoma mais comprido paga menos por base, o mesmo total). Com a
+    // cópia barata, qualquer nadador medíocre enchia o depósito e ficava à
+    // espera de vaga: com a pista cheia todos estavam prontos e as vagas iam
+    // ao acaso, sem seleção. Assim quem avança mais depressa fica pronto
+    // mais vezes.
     p.pairing_cost = 1.5;
 }
 

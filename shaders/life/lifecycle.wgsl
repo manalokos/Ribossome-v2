@@ -798,7 +798,14 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // ---- EMPARELHAMENTO (v3): captura complementos ATIVADOS da vizinhança ----
     // O molde é o genoma; a captura é na célula de um resíduo ao acaso (ou
     // do próprio agente, se for RNA nu). Base a base, pela ordem do genoma.
-    if (a.pair_count < a.gene_len && a.energy > 1.0 + params.pairing_cost) {
+    // Custo por base copiada. Na PISTA o que se paga é o FILHO, não o
+    // comprimento: params.pairing_cost é o custo por base de um genoma de
+    // TRACK_REF_BASES, e um genoma mais comprido paga menos por base (o
+    // mesmo total). Senão um corpo complexo, que precisa de mais genoma para
+    // se orientar, saía sempre a perder contra um curto.
+    var pair_cost = params.pairing_cost;
+    if (params.track_mode != 0u) { pair_cost *= TRACK_REF_BASES / f32(max(a.gene_len, 1u)); }
+    if (a.pair_count < a.gene_len && a.energy > 1.0 + pair_cost) {
         let rr = rng_f4(a.id, params.epoch, S_PAIR);
         let pr = params.pairing_rate * metab;
         var attempts = u32(pr);
@@ -813,13 +820,13 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let ang = q.y * 6.2831853;
             site += vec2<f32>(cos(ang), sin(ang)) * q.z * PAIRING_REACH;
             let comp = pair_base(genome_get(slot, a.pair_count));
-            if (a.energy < 1.0 + params.pairing_cost) { break; }
+            if (a.energy < 1.0 + pair_cost) { break; }
             // Tentativas independentes: uma falha (não havia o complemento
             // ali) não impede as outras deste passo, noutros sítios.
             // (Na pista copia-se sem monómeros.)
             if (params.track_mode == 0u && !chem_take_state_one(world_to_cell(site) * 4u + comp, false)) { continue; }
             a.pair_count += 1u;
-            a.energy -= params.pairing_cost;
+            a.energy -= pair_cost;
         }
     }
     agents[slot] = a;

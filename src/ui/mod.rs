@@ -721,7 +721,8 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.strong("Reprodução");
     ui.add(egui::Slider::new(&mut p.spawn_energy, 0.1..=50.0).text("energia inicial"));
     ui.add(egui::Slider::new(&mut p.pairing_rate, 0.0..=8.0).text("emparelhamento (bases/passo)"));
-    ui.add(egui::Slider::new(&mut p.pairing_cost, 0.0..=2.0).text("custo por base copiada"));
+    ui.add(egui::Slider::new(&mut p.pairing_cost, 0.0..=2.0).text("custo por base copiada"))
+        .on_hover_text("energia gasta por cada base do genoma que se copia. Na pista de corridas é o custo de um FILHO que conta: este valor vale para um genoma de 33 bases, e um genoma mais comprido paga menos por base (o mesmo total), para não castigar os corpos complexos");
     let mut salvage = p.salvage > 0.0;
     ui.checkbox(&mut salvage, "recarga: os produtores copiam-se com monómeros gastos")
         .on_hover_text("a energia que transborda de um fotossistema ou de uma quimiossíntese carrega primeiro um monómero gasto para a cópia do próprio genoma (construir com matéria-prima); só o que não servir para isso vai reativar monómeros no meio. Desligado = o transbordo vai todo para o meio (como era)");

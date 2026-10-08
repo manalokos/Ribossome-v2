@@ -14,6 +14,8 @@ const TRACK_HALF: f32 = 0.022;
 const TRACK_HALF_WAVE: f32 = 0.3;
 // Recuo (unidades do mundo) que não se paga: o vaivém de nadar.
 const TRACK_SLACK: f32 = 150.0;
+// Genoma de referência do custo de um filho (ver o emparelhamento).
+const TRACK_REF_BASES: f32 = 33.0;
 
 fn track_axis_r(theta: f32) -> f32 {
     return SIM_SIZE * TRACK_R0 * (1.0 + TRACK_WAVE * sin(TRACK_LOBES * theta));
