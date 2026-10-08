@@ -475,6 +475,12 @@ impl World {
                 notes.push("scene without anchor bonds (saved before they existed): agents are unbonded".into());
                 continue;
             }
+            if b.name == "rna_tails4" && !scene.blocks.contains_key("rna_tails4") {
+                // Cena de antes dos fios com 3 pontos: é só desenho, os fios
+                // recomeçam a direito (clear_agents já pôs o buffer a zero e
+                // o shader estica-os no primeiro passo).
+                continue;
+            }
             if b.name == "signals4" && !scene.blocks.contains_key("signals4") {
                 // Cena de antes dos 4 canais: os sinais internos recomeçam a zero.
                 notes.push("scene with 2-channel signals (before γ and δ): the internal signals restart at zero".into());
