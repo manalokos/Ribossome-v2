@@ -80,11 +80,17 @@ fn protease_family(slot: u32, k: u32, n: u32) -> u32 {
     return f;
 }
 
-fn family_weights(f: u32) -> vec3<f32> {
-    var w = vec3<f32>(1.0 / 3.0);
-    if (f == 1u) { w = vec3<f32>(1.0, 0.0, 0.0); }
-    if (f == 2u) { w = vec3<f32>(0.0, 1.0, 0.0); }
-    if (f == 3u) { w = vec3<f32>(0.0, 0.0, 1.0); }
+// Pesos (família 1, 2, 3, GENERALISTA). Uma especialista corta só os alvos
+// da sua família, com força inteira. A generalista (sem vizinho que defina o
+// bolso) é de largo espectro: corta QUALQUER resíduo, a um terço da força.
+// Assim nenhum corpo é imune por composição, por mais pequeno que seja; a
+// defesa geral que resta é a prolina.
+const GENERALIST_STRENGTH: f32 = 1.0 / 3.0;
+fn family_weights(f: u32) -> vec4<f32> {
+    var w = vec4<f32>(0.0, 0.0, 0.0, GENERALIST_STRENGTH);
+    if (f == 1u) { w = vec4<f32>(1.0, 0.0, 0.0, 0.0); }
+    if (f == 2u) { w = vec4<f32>(0.0, 1.0, 0.0, 0.0); }
+    if (f == 3u) { w = vec4<f32>(0.0, 0.0, 1.0, 0.0); }
     return w;
 }
 
@@ -108,18 +114,18 @@ fn protease_drive(slot: u32, k: u32, v: OrganVariant) -> f32 {
 const PROTEASE_MID_FROM: f32 = 10.0;
 const PROTEASE_FAR_FROM: f32 = 70.0;
 struct ProteaseArms {
-    near: vec3<f32>,
-    mid: vec3<f32>,
-    far: vec3<f32>,
+    near: vec4<f32>,
+    mid: vec4<f32>,
+    far: vec4<f32>,
     r_mid: f32,
     r_far: f32,
 }
 
 fn protease_arms(slot: u32, n: u32) -> ProteaseArms {
     var arms: ProteaseArms;
-    arms.near = vec3<f32>(0.0);
-    arms.mid = vec3<f32>(0.0);
-    arms.far = vec3<f32>(0.0);
+    arms.near = vec4<f32>(0.0);
+    arms.mid = vec4<f32>(0.0);
+    arms.far = vec4<f32>(0.0);
     arms.r_mid = 0.0;
     arms.r_far = 0.0;
     for (var k = 0u; k < n; k++) {
@@ -167,14 +173,15 @@ fn protease_active(slot: u32, n: u32) -> f32 {
 // iguais de se desfazerem um ao outro ao mesmo tempo. Devolve, por família,
 // quanto do alvo fica exposto (1 = tudo, 1 − PROTEASE_IMMUNITY = protegido).
 const PROTEASE_IMMUNITY: f32 = 0.9;
-fn protease_exposed(slot: u32, n: u32) -> vec3<f32> {
-    var own = vec3<f32>(0.0);
+fn protease_exposed(slot: u32, n: u32) -> vec4<f32> {
+    var own = vec4<f32>(0.0);
     for (var k = 0u; k < n; k++) {
         if (organ_type(organ_get(slot, k)) == ORGAN_PROTEASE) {
-            own = max(own, family_weights(protease_family(slot, k, n)));
+            // Tem (1) ou não tem (0) protease de cada tipo, incluindo a generalista.
+            own = max(own, sign(family_weights(protease_family(slot, k, n))));
         }
     }
-    return vec3<f32>(1.0) - PROTEASE_IMMUNITY * own;
+    return vec4<f32>(1.0) - PROTEASE_IMMUNITY * own;
 }
 
 // Fração dos resíduos do corpo que cada família corta.
@@ -190,16 +197,25 @@ fn protease_targets(slot: u32, n: u32) -> vec3<f32> {
     return t / f32(n);
 }
 
-// (alvo fam. 1, alvo fam. 2, alvo fam. 3, prolina), cada um 0..1 em 6 bits.
+// DEFESA de um corpo, num só número (cabe exato num f32): alvo exposto das
+// famílias 1, 2 e 3 e fração de prolina, cada um 0..1 em 5 bits, e no bit 20
+// se tem uma protease generalista (fica imune às generalistas dos outros).
 fn pack_defence(slot: u32, n: u32) -> f32 {
-    let t = protease_targets(slot, n) * protease_exposed(slot, n);
-    let q = vec4<u32>(round(clamp(vec4<f32>(t, proline_fraction(slot, n)), vec4<f32>(0.0), vec4<f32>(1.0)) * 63.0));
-    return f32(q.x | (q.y << 6u) | (q.z << 12u) | (q.w << 18u));
+    let ex = protease_exposed(slot, n);
+    let t = protease_targets(slot, n) * ex.xyz;
+    let q = vec4<u32>(round(clamp(vec4<f32>(t, proline_fraction(slot, n)), vec4<f32>(0.0), vec4<f32>(1.0)) * 31.0));
+    return f32(q.x | (q.y << 5u) | (q.z << 10u) | (q.w << 15u) | (select(0u, 1u, ex.w < 1.0) << 20u));
 }
 
-fn unpack_defence(w: f32) -> vec4<f32> {
+// (alvo exposto das famílias 1, 2, 3; de TODOS os resíduos para a generalista).
+fn unpack_targets(w: f32) -> vec4<f32> {
     let u = u32(max(w, 0.0));
-    return vec4<f32>(f32(u & 63u), f32((u >> 6u) & 63u), f32((u >> 12u) & 63u), f32((u >> 18u) & 63u)) / 63.0;
+    let gen = select(1.0, 1.0 - PROTEASE_IMMUNITY, ((u >> 20u) & 1u) != 0u);
+    return vec4<f32>(f32(u & 31u) / 31.0, f32((u >> 5u) & 31u) / 31.0, f32((u >> 10u) & 31u) / 31.0, gen);
+}
+
+fn unpack_proline(w: f32) -> f32 {
+    return f32((u32(max(w, 0.0)) >> 15u) & 31u) / 31.0;
 }
 
 fn proline_fraction(slot: u32, n: u32) -> f32 {
@@ -222,7 +238,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     var push = vec2<f32>(0.0);
     let arms = protease_arms(slot, a.body_len);
     let total = arms.near + arms.mid + arms.far;
-    let armed = total.x + total.y + total.z > 0.0;
+    let armed = total.x + total.y + total.z + total.w > 0.0;
     // As células de contacto têm 120 unidades: com proteases de alcance é
     // preciso olhar duas células em vez de uma (raios 60 + 60 + alcance).
     let span = select(1, 2, arms.r_mid > 0.0 || arms.r_far > 0.0);
@@ -251,14 +267,13 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     }
                     // Ataque: as proteases de contacto só a tocar; as de
                     // alcance também a essa distância para lá do contacto.
-                    var sites = vec3<f32>(0.0);
+                    var sites = vec4<f32>(0.0);
                     if (overlap > 0.0) { sites += arms.near; }
                     if (-overlap < arms.r_mid) { sites += arms.mid; }
                     if (-overlap < arms.r_far) { sites += arms.far; }
-                    if (armed && sites.x + sites.y + sites.z > 0.0 && b.energy > 0.0) {
-                        let def = unpack_defence(contact_disp[e].w);
-                        let power = dot(sites, def.xyz) * PRED_SITE_SCALE;
-                        let resist = 1.0 - PRED_PROLINE_DEFENSE * def.w;
+                    if (armed && sites.x + sites.y + sites.z + sites.w > 0.0 && b.energy > 0.0) {
+                        let power = dot(sites, unpack_targets(contact_disp[e].w)) * PRED_SITE_SCALE;
+                        let resist = 1.0 - PRED_PROLINE_DEFENSE * unpack_proline(contact_disp[e].w);
                         let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist, b.energy);
                         if (bite > 0.0) {
                             atomicAdd(&bitten[e], u32(bite * BITE_SCALE));

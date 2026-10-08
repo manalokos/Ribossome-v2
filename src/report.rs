@@ -74,13 +74,14 @@ fn pocket_family(aa: u8) -> usize {
     }
 }
 
-/// Pesos por família de uma protease no resíduo k (o vizinho decide; sem
-/// vizinho próprio corta as três a um terço).
-fn family_weights(body: &[Residue], k: usize) -> [f32; 3] {
+/// Pesos de uma protease no resíduo k: famílias 1, 2, 3 e GENERALISTA (o
+/// vizinho decide; sem vizinho próprio é generalista: corta qualquer resíduo
+/// a um terço da força). Como family_weights em contact.wgsl.
+fn family_weights(body: &[Residue], k: usize) -> [f32; 4] {
     match body.get(k + 1).map_or(0, |r| pocket_family(r.aa)) {
-        0 => [1.0 / 3.0; 3],
+        0 => [0.0, 0.0, 0.0, 1.0 / 3.0],
         f => {
-            let mut w = [0.0; 3];
+            let mut w = [0.0; 4];
             w[f - 1] = 1.0;
             w
         }
@@ -88,8 +89,8 @@ fn family_weights(body: &[Residue], k: usize) -> [f32; 3] {
 }
 
 /// Força das proteases por família, todas ligadas e a tocar (o melhor caso).
-fn protease_force(body: &[Residue], w: &World) -> [f32; 3] {
-    let mut f = [0.0; 3];
+fn protease_force(body: &[Residue], w: &World) -> [f32; 4] {
+    let mut f = [0.0; 4];
     for (k, r) in body.iter().enumerate() {
         if let Some((t, p, g)) = r.organ
             && t == PROTEASE
@@ -106,14 +107,15 @@ fn protease_force(body: &[Residue], w: &World) -> [f32; 3] {
 
 /// (fração de resíduos-alvo de cada família já com a imunidade de quem tem
 /// protease dessa família, fração de prolina).
-fn defence(body: &[Residue], w: &World) -> ([f32; 3], f32) {
+fn defence(body: &[Residue], w: &World) -> ([f32; 4], f32) {
     let n = body.len().max(1) as f32;
-    let mut t = [0.0; 3];
+    // O quarto "alvo" são todos os resíduos (o que a generalista corta).
+    let mut t = [0.0, 0.0, 0.0, 1.0];
     let mut pro = 0.0;
-    let mut own = [0.0f32; 3];
+    let mut own = [0.0f32; 4];
     for (k, r) in body.iter().enumerate() {
         let m = w.amino.get(r.aa as usize).map_or(0, |a| (a.protease_alvo.max(0.0) + 0.5) as u32);
-        for (f, v) in t.iter_mut().enumerate() {
+        for (f, v) in t.iter_mut().take(3).enumerate() {
             if m & (1 << f) != 0 {
                 *v += 1.0 / n;
             }
@@ -123,7 +125,7 @@ fn defence(body: &[Residue], w: &World) -> ([f32; 3], f32) {
         }
         if r.organ.is_some_and(|o| o.0 == PROTEASE) {
             for (x, wt) in own.iter_mut().zip(family_weights(body, k)) {
-                *x = x.max(wt);
+                *x = x.max(if wt > 0.0 { 1.0 } else { 0.0 });
             }
         }
     }
@@ -138,7 +140,7 @@ fn defence(body: &[Residue], w: &World) -> ([f32; 3], f32) {
 fn drain(att: &[Residue], vic: &[Residue], w: &World) -> f32 {
     let f = protease_force(att, w);
     let (t, pro) = defence(vic, w);
-    0.2 * w.params.protease_power * (f[0] * t[0] + f[1] * t[1] + f[2] * t[2]) * 10.0 * (1.0 - 0.9 * pro)
+    0.2 * w.params.protease_power * (f[0] * t[0] + f[1] * t[1] + f[2] * t[2] + f[3] * t[3]) * 10.0 * (1.0 - 0.9 * pro)
 }
 
 /// Retrato de um agente sozinho, enquadrado pelo corpo.

@@ -23,12 +23,16 @@ fn main() {
     // sempre), G = 2 (alcance 40, sempre), D = 5 (alcance 100, por δ).
     let hunter = |variant: &str, antenna: &str| bases(&format!("AUG UGG {variant} GAA {antenna} GGU GGU GGU GGU UAA"));
     let lys = bases(&format!("AUG {} UAA", "AAA ".repeat(10)));
-    let cases: [(&str, Vec<u8>, Vec<u8>); 5] = [
+    let gly = bases(&format!("AUG {} UAA", "GGU ".repeat(10)));
+    let cases: [(&str, Vec<u8>, Vec<u8>); 8] = [
         ("contacto, corta lisina / presa de lisina", hunter("CGU", "GAA"), lys.clone()),
         ("alcance 40, corta lisina / presa de lisina", hunter("GGU", "GAA"), lys.clone()),
         ("alcance 100 por δ (sem sinal) / presa de lisina", hunter("GAU", "GAA"), lys.clone()),
         ("contacto, corta aspartato / presa de lisina", hunter("CGU", "AAA"), lys.clone()),
         ("contacto, corta lisina / outro caçador igual", hunter("CGU", "GAA"), hunter("CGU", "GAA")),
+        ("contacto, corta lisina / presa de glicina", hunter("CGU", "GAA"), gly.clone()),
+        ("contacto, GENERALISTA / presa de glicina", hunter("CGU", "GGU"), gly.clone()),
+        ("contacto, GENERALISTA / presa de lisina", hunter("CGU", "GGU"), lys.clone()),
     ];
     let gaps = [-10.0f32, 25.0, 75.0, 135.0];
     let reps = 16;
