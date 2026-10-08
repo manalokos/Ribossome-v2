@@ -25,7 +25,7 @@ struct Running {
     /// janela; refeito quando ela muda). Resolve para a imagem da janela.
     msaa: Option<wgpu::Texture>,
     /// Parâmetros que estavam antes de entrar na pista (repostos ao sair).
-    pre_track: Option<ribossome::params::SimParams>,
+    pre_track: Option<(ribossome::params::SimParams, f32)>,
     cam: Camera,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -124,7 +124,7 @@ const DEFAULT_TERRAIN: &str = "assets/terreno.png";
 
 /// Pasta das cenas gravadas e do autosave.
 /// Genomas ao acaso semeados ao entrar na pista.
-const TRACK_SEEDS: u32 = 20_000;
+const TRACK_SEEDS: u32 = 3_000;
 const SAVES_DIR: &str = "saves";
 
 /// O autosave deste modo (o laboratório tem outro tamanho de mundo).
@@ -790,16 +790,14 @@ impl Running {
         self.world.apply_terrain_live(&self.gpu, gamma, heat, None);
         self.world.settings.fluid_enabled = false;
         self.world.settings.contact_enabled = false;
-        // Sopa toda ativada e sempre a reativar-se: há sempre bases para copiar.
-        self.world.seed_active = 1.0;
         // Guarda os parâmetros do mundo normal (só da primeira vez) e passa
         // aos do ensaio; ao sair da pista voltam.
         if self.world.params.track_mode == 0 {
-            self.pre_track = Some(self.world.params);
+            self.pre_track = Some((self.world.params, self.world.seed_density));
         }
+        // Sem monómeros nenhuns na pista.
+        self.world.seed_density = 0.0;
         ribossome::track::preset(&mut self.world.params);
-        // Os monómeros não interessam aqui: escondem-se (o brilho volta no deslizador).
-        self.ui.monomer_brightness = 0.0;
         // Recomeço já aqui (e não pela marca de "recomeçar"), para poder
         // semear logo a seguir: genomas ao acaso espalhados pela pista.
         self.seed += 1;
@@ -875,9 +873,10 @@ impl Running {
         };
         if resow {
             // Sair da pista: voltam os parâmetros que estavam antes de entrar.
-            if let Some(old) = self.pre_track.take() {
+            if let Some((old, density)) = self.pre_track.take() {
                 let epoch = self.world.params.epoch;
                 self.world.params = old;
+                self.world.seed_density = density;
                 self.world.params.epoch = epoch;
                 self.world.settings.fluid_enabled = true;
                 self.world.settings.contact_enabled = true;

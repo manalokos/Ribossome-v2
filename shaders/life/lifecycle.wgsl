@@ -166,9 +166,30 @@ fn spawn_seeds(@builtin(global_invocation_id) gid: vec3<u32>) {
     var n = 0u;
     var ok = true;
 
+    // PISTA (params.track_mode): não há monómeros. As bases vêm do pedido
+    // (genoma escolhido), do AUG inicial ou do acaso, sem tirar nada da
+    // sopa. É a única situação em que a matéria não é exata: o ensaio só
+    // mede natação.
+    let free = params.track_mode != 0u;
+    if (free) {
+        var words = array<u32, 16>(req.genome0, req.genome1, req.genome2, req.genome3, req.genome4, req.genome5,
+            req.genome6, req.genome7, req.genome8, req.genome9, req.genome10, req.genome11, req.genome12,
+            req.genome13, req.genome14, req.genome15);
+        for (var i = 0u; i < want; i++) {
+            var b = min(u32(rng_f4(ri, params.epoch, (S_SPAWN << 16u) + i).x * 4.0), 3u);
+            if ((req.flags & 2u) != 0u) {
+                b = (words[i / 16u] >> ((i % 16u) * 2u)) & 3u;
+            } else if ((req.flags & 3u) == 1u && i < 3u) {
+                b = i;
+            }
+            gset(&g, i, b);
+        }
+        n = want;
+    }
+
     // GENOMA ESCOLHIDO: cada base, por ordem, é tirada da sopa (a mais
     // próxima do tipo pedido). Matéria exata como nas outras sementes.
-    if ((req.flags & 2u) != 0u) {
+    if (!free && (req.flags & 2u) != 0u) {
         var words = array<u32, 16>(req.genome0, req.genome1, req.genome2, req.genome3, req.genome4, req.genome5,
             req.genome6, req.genome7, req.genome8, req.genome9, req.genome10, req.genome11, req.genome12,
             req.genome13, req.genome14, req.genome15);
@@ -182,7 +203,7 @@ fn spawn_seeds(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     // Opção: começar por AUG, com A, U e G também tirados da vizinhança.
-    if ((req.flags & 3u) == 1u) {
+    if (!free && (req.flags & 3u) == 1u) {
         for (var b = 0u; b < 3u; b++) {
             if (!take_nearest(cx, cy, b)) { ok = false; break; }
             gset(&g, n, b);
@@ -269,6 +290,12 @@ fn die_release(slot: u32, a_in: Agent, budget_in: u32) {
     for (var i = 0u; i < min(a.pair_count, a.gene_len); i++) { m_act[pair_base(genome_get(slot, i))] += 1u; }
     var m_spent = agent_matter(slot) - m_act;
     var budget = budget_in;
+    // Pista: sem monómeros, a morte não devolve nada à água.
+    if (params.track_mode != 0u) {
+        m_act = vec4<u32>(0u);
+        m_spent = vec4<u32>(0u);
+        budget = 0u;
+    }
     for (var i = 0u; i < 512u; i++) {
         if (budget == 0u || m_spent.x + m_spent.y + m_spent.z + m_spent.w == 0u) { break; }
         let ch = i % 4u;
@@ -782,7 +809,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             if (a.energy < 1.0 + params.pairing_cost) { break; }
             // Tentativas independentes: uma falha (não havia o complemento
             // ali) não impede as outras deste passo, noutros sítios.
-            if (!chem_take_state_one(world_to_cell(site) * 4u + comp, false)) { continue; }
+            // (Na pista copia-se sem monómeros.)
+            if (params.track_mode == 0u && !chem_take_state_one(world_to_cell(site) * 4u + comp, false)) { continue; }
             a.pair_count += 1u;
             a.energy -= params.pairing_cost;
         }

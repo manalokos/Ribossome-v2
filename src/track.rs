@@ -46,8 +46,8 @@ pub fn terrain(cfg: &WorldConfig) -> (Vec<u32>, Vec<f32>) {
 }
 
 /// Parâmetros do ensaio: só a energia do avanço conta (sem comer, sem luz
-/// do sol, sem afundar), a sopa reativa-se sozinha para haver sempre bases
-/// para copiar, e os filhos são cópias iguais ao pai.
+/// do sol, sem afundar) e os filhos são cópias iguais ao pai. Não há
+/// monómeros: na pista os genomas nascem e copiam-se sem matéria.
 pub fn preset(p: &mut crate::params::SimParams) {
     // Parte-se SEMPRE dos valores por omissão (menos os que o passo escreve
     // sozinho: epoch, semente, pincel...): o ensaio não herda afinações do
@@ -65,10 +65,6 @@ pub fn preset(p: &mut crate::params::SimParams) {
     p.photo_yield = 0.0;
     p.uv_damage = 1.0;
     p.sedimentation = 0.0;
-    p.reactivation_rate = 0.002;
-    // Os monómeros só servem para haver bases para copiar: movem-se de 16
-    // em 16 passos (o transporte é o kernel mais caro).
-    p.transport_every = 16;
     // Nasce-se com pouca energia: senão quem tem um órgão de armazenamento
     // guarda a energia inicial toda e sobrevive muito mais tempo sem avançar.
     p.spawn_energy = 3.0;

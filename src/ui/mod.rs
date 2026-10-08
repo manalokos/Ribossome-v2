@@ -648,7 +648,7 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     });
     if ui
         .button("pista de corridas (ensaio de natação)")
-        .on_hover_text("troca o mundo por um circuito fechado com curvas para os dois lados e recomeça do zero. Não há comida, luz do sol, fumarolas nem corrente: a única energia é AVANÇAR na pista (no sentido contrário ao dos ponteiros do relógio); tocar nas paredes tira energia; as paredes dão luz, para os sensores de luz as verem. Os filhos são cópias iguais ao pai. Todos os parâmetros passam aos do ensaio (valores por omissão + os da pista), para os resultados serem comparáveis; os que tinhas voltam quando saíres com 'terreno gerado' ou 'mundo vazio'")
+        .on_hover_text("troca o mundo por um circuito fechado com curvas para os dois lados e recomeça do zero. Não há monómeros, comida, luz do sol, fumarolas nem corrente (os genomas nascem e copiam-se sem matéria): a única energia é AVANÇAR na pista (no sentido contrário ao dos ponteiros do relógio); tocar nas paredes tira energia; as paredes dão luz, para os sensores de luz as verem. Os filhos são cópias iguais ao pai. Todos os parâmetros passam aos do ensaio (valores por omissão + os da pista), para os resultados serem comparáveis; os que tinhas voltam quando saíres com 'terreno gerado' ou 'mundo vazio'")
         .clicked()
     {
         st.terrain_action = Some(TerrainAction::Track);

@@ -27,7 +27,7 @@ fn main() {
     let mut w = World::new(&gpu, cfg, 3);
     w.custom_terrain = Some(ribossome::track::terrain(&cfg));
     w.fumaroles.clear();
-    w.seed_active = 1.0;
+    w.seed_density = 0.0;
     w.seed_matter(&gpu, 3);
     w.settings.fluid_enabled = false;
     w.settings.contact_enabled = false;
@@ -108,7 +108,7 @@ fn main() {
         }
     }
     let after = w.ledger_blocking(&gpu);
-    println!("matéria por canal antes {:?}\n                 depois {:?}  {}", per(&before), per(&after), if per(&before) == per(&after) { "(igual)" } else { "(DIFERENTE!)" });
+    println!("matéria por canal antes {:?}\n                 depois {:?}  {}", per(&before), per(&after), "(na pista não há monómeros: só conta a matéria dos genomas, que nasce e morre com eles)");
     if let Ok(out) = std::env::var("OUT") {
         let cap = ribossome::render::capture::Capture::new(&gpu, &w, 1024);
         let rgba = cap.render(&gpu, &w, &ribossome::render::Camera { center: [0.5 * sim, 0.5 * sim], zoom: 1024.0 / sim }, 0, 0.5);
