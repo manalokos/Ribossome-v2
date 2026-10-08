@@ -117,7 +117,7 @@ const PROTEASE_FAR_FROM: f32 = 70.0;
 // tocar morde com a força inteira; daí até ao fim do alcance cai em linha
 // reta até REACH_EDGE da força. Quem tem alcance morde primeiro mas fraco;
 // quem aguenta a aproximação e chega perto morde forte.
-const REACH_EDGE: f32 = 0.2;
+const REACH_EDGE: f32 = 0.5;
 fn reach_falloff(dist: f32, reach: f32) -> f32 {
     return 1.0 - (1.0 - REACH_EDGE) * clamp(dist / max(reach, 1.0), 0.0, 1.0);
 }
@@ -183,7 +183,7 @@ fn protease_active(slot: u32, n: u32) -> f32 {
 // resiste às dessa família vindas de outros. É o que impede dois caçadores
 // iguais de se desfazerem um ao outro ao mesmo tempo. Devolve, por família,
 // quanto do alvo fica exposto (1 = tudo, 1 − PROTEASE_IMMUNITY = protegido).
-const PROTEASE_IMMUNITY: f32 = 0.5;
+const PROTEASE_IMMUNITY: f32 = 0.9;
 fn protease_exposed(slot: u32, n: u32) -> vec4<f32> {
     var own = vec4<f32>(0.0);
     for (var k = 0u; k < n; k++) {
