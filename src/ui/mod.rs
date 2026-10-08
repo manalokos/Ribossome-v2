@@ -648,7 +648,7 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     });
     if ui
         .button("pista de corridas (ensaio de natação)")
-        .on_hover_text("troca o mundo por um circuito fechado com curvas para os dois lados e recomeça do zero. Não há comida, luz do sol, fumarolas nem corrente: a única energia é AVANÇAR na pista (no sentido contrário ao dos ponteiros do relógio); tocar nas paredes tira energia; as paredes dão luz, para os sensores de luz as verem. Os filhos são cópias iguais ao pai. Muda vários parâmetros (aparecem em 'mudados'); para voltar, 'terreno gerado' e repõe os valores por omissão")
+        .on_hover_text("troca o mundo por um circuito fechado com curvas para os dois lados e recomeça do zero. Não há comida, luz do sol, fumarolas nem corrente: a única energia é AVANÇAR na pista (no sentido contrário ao dos ponteiros do relógio); tocar nas paredes tira energia; as paredes dão luz, para os sensores de luz as verem. Os filhos são cópias iguais ao pai. Todos os parâmetros passam aos do ensaio (valores por omissão + os da pista), para os resultados serem comparáveis; os que tinhas voltam quando saíres com 'terreno gerado' ou 'mundo vazio'")
         .clicked()
     {
         st.terrain_action = Some(TerrainAction::Track);
@@ -770,7 +770,7 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
     if p.track_mode != 0 {
         ui.strong("Pista de corridas");
         ui.add(egui::Slider::new(&mut p.track_gain, 0.0..=1.0).logarithmic(true).text("energia por unidade avançada"))
-            .on_hover_text("energia que um agente ganha por cada unidade do mundo de avanço LÍQUIDO na pista (só rende passar do ponto mais avançado a que já chegou; recuar não custa, mas também não rende). Um agente de 20 resíduos gasta ~0,04 por passo só a manter-se");
+            .on_hover_text("energia que um agente ganha por cada unidade do mundo de avanço LÍQUIDO na pista (só rende passar do ponto mais avançado a que já chegou). Quem recua mais de 150 unidades paga o excesso ao mesmo preço. Um agente de 20 resíduos gasta ~0,04 por passo só a manter-se");
         ui.add(egui::Slider::new(&mut p.wall_damage, 0.0..=1.0).logarithmic(true).text("dano das paredes"))
             .on_hover_text("energia perdida por passo com o centro do agente em cima de uma parede (proporcional a quanto o seu raio entra nela)");
         let mut same = p.copy_same != 0;

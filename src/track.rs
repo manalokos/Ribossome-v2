@@ -49,6 +49,15 @@ pub fn terrain(cfg: &WorldConfig) -> (Vec<u32>, Vec<f32>) {
 /// do sol, sem afundar), a sopa reativa-se sozinha para haver sempre bases
 /// para copiar, e os filhos são cópias iguais ao pai.
 pub fn preset(p: &mut crate::params::SimParams) {
+    // Parte-se SEMPRE dos valores por omissão (menos os que o passo escreve
+    // sozinho: epoch, semente, pincel...): o ensaio não herda afinações do
+    // mundo que estava a correr, para os resultados serem comparáveis.
+    const KEEP: [&str; 11] = ["epoch", "seed", "fluid_dt", "fluid_enabled", "max_agents", "fumarole_count", "spawn_count", "paint_x", "paint_y", "paint_radius", "paint_grains"];
+    for (name, v) in crate::params::SimParams::default().to_named() {
+        if !KEEP.contains(&name) && !name.starts_with('_') {
+            p.set_named(name, v);
+        }
+    }
     p.track_mode = 1;
     p.copy_same = 1;
     p.uptake_rate = 0.0;
@@ -57,6 +66,12 @@ pub fn preset(p: &mut crate::params::SimParams) {
     p.uv_damage = 1.0;
     p.sedimentation = 0.0;
     p.reactivation_rate = 0.002;
+    // Os monómeros só servem para haver bases para copiar: movem-se de 16
+    // em 16 passos (o transporte é o kernel mais caro).
+    p.transport_every = 16;
+    // Nasce-se com pouca energia: senão quem tem um órgão de armazenamento
+    // guarda a energia inicial toda e sobrevive muito mais tempo sem avançar.
+    p.spawn_energy = 3.0;
 }
 
 /// Um ponto do eixo da pista (para semear agentes): `t` em 0..1 dá a volta,

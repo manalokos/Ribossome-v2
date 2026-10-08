@@ -24,6 +24,8 @@ struct Running {
     /// Alvo com várias amostras onde o mundo é desenhado (do tamanho da
     /// janela; refeito quando ela muda). Resolve para a imagem da janela.
     msaa: Option<wgpu::Texture>,
+    /// Parâmetros que estavam antes de entrar na pista (repostos ao sair).
+    pre_track: Option<ribossome::params::SimParams>,
     cam: Camera,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -294,6 +296,7 @@ impl Running {
             cam,
             egui_state,
             msaa: None,
+            pre_track: None,
             egui_renderer,
             profiler: Profiler::from_env(),
             ui: UiState::new(baseline),
@@ -789,7 +792,14 @@ impl Running {
         self.world.settings.contact_enabled = false;
         // Sopa toda ativada e sempre a reativar-se: há sempre bases para copiar.
         self.world.seed_active = 1.0;
+        // Guarda os parâmetros do mundo normal (só da primeira vez) e passa
+        // aos do ensaio; ao sair da pista voltam.
+        if self.world.params.track_mode == 0 {
+            self.pre_track = Some(self.world.params);
+        }
         ribossome::track::preset(&mut self.world.params);
+        // Os monómeros não interessam aqui: escondem-se (o brilho volta no deslizador).
+        self.ui.monomer_brightness = 0.0;
         // Recomeço já aqui (e não pela marca de "recomeçar"), para poder
         // semear logo a seguir: genomas ao acaso espalhados pela pista.
         self.seed += 1;
@@ -864,7 +874,14 @@ impl Running {
             TerrainAction::Track => false,
         };
         if resow {
-            // Sair da pista: as regras dela desligam-se com o terreno.
+            // Sair da pista: voltam os parâmetros que estavam antes de entrar.
+            if let Some(old) = self.pre_track.take() {
+                let epoch = self.world.params.epoch;
+                self.world.params = old;
+                self.world.params.epoch = epoch;
+                self.world.settings.fluid_enabled = true;
+                self.world.settings.contact_enabled = true;
+            }
             self.world.params.track_mode = 0;
             self.world.params.copy_same = 0;
             // Mesma semente: só o terreno muda.

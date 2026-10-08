@@ -693,7 +693,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // ponto mais avançado a que já chegou (um valor <= 0) e só ganha quando
     // o ultrapassa. Um nadador vai e vem a cada braçada; se cada vaivém
     // pagasse e cobrasse, quem oscila arruinava-se (ou, sem cobrar, ganhava
-    // parado). Recuar não custa nada, só não rende. O avanço é o deste passo
+    // parado). Recuar um pouco não custa, só não rende. O avanço é o deste passo
     // dentro deste kernel (nadar, agitação); os empurrões do contacto não
     // contam. A memória é a posição 63 de sensor_mem (livre em corpos com
     // menos de 64 resíduos; os de 64 ganham por cada avanço).
@@ -706,6 +706,13 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (ahead > 0.0) {
             a.energy = min(a.energy + params.track_gain * ahead, cap);
             ahead = 0.0;
+        }
+        // SENTIDO CONTRÁRIO: quem fica mais de TRACK_SLACK para trás do seu
+        // ponto mais avançado paga o excesso ao mesmo preço a que ganharia.
+        // A folga deixa de fora o vaivém das braçadas.
+        if (ahead < -TRACK_SLACK) {
+            a.energy -= params.track_gain * (-TRACK_SLACK - ahead);
+            ahead = -TRACK_SLACK;
         }
         if (has_mem) { sensor_mem[ti] = ahead; }
         let reach = max(a.radius, 1.0);
