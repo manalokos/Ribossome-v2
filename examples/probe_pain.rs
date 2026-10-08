@@ -67,7 +67,7 @@ fn main() {
     let agents = w.read_agents_blocking(&gpu);
     let sig: Vec<[f32; 4]> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.signals_buf)).to_vec();
     println!("sinal no resíduo de cada sensor ao fim de {steps} passos (média de {reps}); corpo da presa com 12+ resíduos");
-    println!("{:55} {:>10} {:>10} {:>8}", "caso", "energia/dor", "corpos", "energia");
+    println!("{:55} {:>10} {:>10} {:>8}", "caso", "dor (γ+δ)", "cheiro (α+β)", "energia");
     for (ci, (name, _, _)) in cases.iter().enumerate() {
         let (mut s1, mut s3, mut e, mut n) = (0.0f32, 0.0f32, 0.0f32, 0);
         for &(c, x, y) in &posts {
@@ -78,7 +78,7 @@ fn main() {
             let found = agents.iter().enumerate().filter(|(_, a)| a.alive != 0 && a.body_len >= 12 && (a.pos_x - x).abs() < 300.0 && (a.pos_y - y).abs() < 300.0).min_by(|a, b| (a.1.pos_x - x).abs().total_cmp(&(b.1.pos_x - x).abs()));
             if let Some((slot, a)) = found {
                 // Os sensores emitem no seu resíduo; soma dos dois canais α e β.
-                s1 += sig[slot * 64 + 1][0] + sig[slot * 64 + 1][1];
+                s1 += sig[slot * 64 + 1][2] + sig[slot * 64 + 1][3];
                 s3 += sig[slot * 64 + 3][0] + sig[slot * 64 + 3][1];
                 e += a.energy;
                 n += 1;

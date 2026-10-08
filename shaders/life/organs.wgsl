@@ -484,6 +484,7 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
         // (memória por resíduo; é assim que as bactérias fazem quimiotaxia).
         var sensed = 0.0;
         var is_sensor = true;
+        var pain = false;
         switch t {
             case ORGAN_FOOD_SENSOR, ORGAN_LIGHT_SENSOR, ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: {
                 var what = select(0u, 1u, t == ORGAN_LIGHT_SENSOR || t == ORGAN_LIGHT_SENSOR_DIR);
@@ -531,7 +532,12 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 // vez da energia que tem. Zero enquanto ninguém o morde.
                 if (k + 1u < n && body_get(slot, k + 1u) == AA_PROLINE) {
                     let lost = max(contact_disp[slot].x, 0.0);
+                    // Sai nos canais de CONTROLO (variante de α -> γ, de β ->
+                    // δ): não dobra o corpo, mas chega direto às proteases e
+                    // ventosas (um reflexo: mordido, abre as suas). Para
+                    // fugir é preciso um relé.
                     sensed = 2.0 * lost / (lost + PAIN_K);
+                    pain = true;
                 }
             }
             default: { is_sensor = false; }
@@ -562,7 +568,13 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             }
             v *= ov.p1 * organ_gain(o);
             if (t == ORGAN_FOOD_SENSOR_DIR || t == ORGAN_LIGHT_SENSOR_DIR) { v *= chir; }
-            if (ov.p0 < 0.5) { emit[k].x = v; } else { emit[k].y = v; }
+            if (pain) {
+                if (ov.p0 < 0.5) { emit[k].z = v; } else { emit[k].w = v; }
+            } else if (ov.p0 < 0.5) {
+                emit[k].x = v;
+            } else {
+                emit[k].y = v;
+            }
             continue;
         }
         switch t {
