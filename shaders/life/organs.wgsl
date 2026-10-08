@@ -655,10 +655,43 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                     // GATE que fecha: entrada alta trava o canal de saída aqui.
                     if (abs(x) > th) { gate[k][cout] = 0.0; }
                 } else if (f == 4u) {
-                    // GATE que abre: a saída só passa com a entrada alta.
-                    if (abs(x) <= th) { gate[k][cout] = 0.0; }
+                    // CONDENSADOR (membrana excitável): acumula devagar o
+                    // sinal de entrada (p3 por passo e por unidade de sinal;
+                    // um sinal negativo descarrega) e vai perdendo um décimo
+                    // disso por passo. Ao chegar ao limiar DISPARA: emite a
+                    // força inteira na saída enquanto se esvazia (p4 por
+                    // passo), e só depois volta a carregar. Transforma um
+                    // sinal fraco e contínuo em pulsos; com um bias à
+                    // entrada é um relógio lento.
+                    // sensor_mem = carga; sensor_avg = 1 enquanto dispara.
+                    let mi = base + k;
+                    var q = sensor_mem[mi];
+                    var firing = sensor_avg[mi] > 0.5;
+                    if (firing) {
+                        q -= max(ov.p4, 1e-4);
+                        emit[k][cout] = mag;
+                        if (q <= 0.0) {
+                            q = 0.0;
+                            firing = false;
+                        }
+                    } else {
+                        q = max(q + x * ov.p3 - q * 0.1 * ov.p3, 0.0);
+                        if (q >= max(th, 1e-3)) { firing = true; }
+                    }
+                    sensor_mem[mi] = q;
+                    sensor_avg[mi] = select(0.0, 1.0, firing);
                 } else {
-                    emit[k][cout] = mag * sign(x) * max(abs(x) - th, 0.0);
+                    // DIFERENCIADOR ("transístor", adaptação): guarda uma
+                    // média recente da entrada (segue-a a p3 por passo) e
+                    // emite na saída a diferença entre o sinal de agora e
+                    // essa média, amplificada. Responde a MUDANÇAS e cala-se
+                    // quando o sinal fica constante.
+                    // sensor_mem = média; sensor_avg marca "já tem média".
+                    let mi = base + k;
+                    let b = select(sensor_mem[mi], x, sensor_avg[mi] < -1e20);
+                    emit[k][cout] = mag * (x - b);
+                    sensor_mem[mi] = mix(b, x, clamp(ov.p3, 0.0, 1.0));
+                    sensor_avg[mi] = 0.0;
                 }
             }
             default: {}

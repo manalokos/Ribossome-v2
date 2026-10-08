@@ -150,9 +150,11 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("mod_beta", "o mesmo com β"),
     ],
     &[
-        pd("funcao", "0 = SWITCH (passa o sinal do canal de entrada para o de saída e trava a entrada aqui), 1 = cópia (emite na saída, a entrada segue), 2 = inversor (emite o simétrico), 3 = GATE que fecha (entrada acima do limiar: o canal de saída não passa aqui), 4 = GATE que abre (o canal de saída só passa aqui com a entrada acima do limiar), 5 = limiar (emite só a parte da entrada acima do limiar)"),
-        pd("ganho", "multiplica o que emite (× a força do 3.º codão)"),
-        pd("limiar", "limiar das portas e do modo 5 (módulo do sinal de entrada)"),
+        pd("funcao", "0 = SWITCH (passa o sinal do canal de entrada para o de saída e trava a entrada aqui), 1 = cópia (emite na saída, a entrada segue), 2 = inversor (emite o simétrico), 3 = GATE que fecha (entrada acima do limiar: o canal de saída não passa aqui), 4 = CONDENSADOR (acumula a entrada devagar; ao chegar ao limiar dispara e emite na saída enquanto se esvazia), 5 = DIFERENCIADOR (emite na saída a diferença entre a entrada de agora e a sua média recente, amplificada)"),
+        pd("ganho", "multiplica o que emite (× a força do 3.º codão); no condensador é a altura do pulso"),
+        pd("limiar", "limiar da porta (módulo do sinal de entrada) ou carga a que o condensador dispara"),
+        pd("carga", "condensador: quanto carrega por passo e por unidade de sinal (perde um décimo disto por passo); diferenciador: a que velocidade a média segue a entrada (0..1 por passo)"),
+        pd("descarga", "condensador: quanto se esvazia por passo enquanto dispara (limiar ÷ descarga = duração do pulso em passos)"),
     ],
     &[pd("capacidade", "energia que este órgão acrescenta à capacidade do corpo (× a intensidade); o corpo sozinho guarda 0,5 por resíduo de volume médio")],
     FOOD_SENSOR_PROPS,
@@ -277,8 +279,13 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
                 1 => format!("relé cópia [losango]: lê {cin} e emite em {cout} (×{mag:.2})"),
                 2 => format!("relé inversor [losango]: lê {cin} e emite −{cin} em {cout} (×{mag:.2})"),
                 3 => format!("relé GATE [losango]: com |{cin}| > {:.2}, {cout} não passa aqui", v("limiar")),
-                4 => format!("relé GATE [losango]: {cout} só passa aqui com |{cin}| > {:.2}", v("limiar")),
-                _ => format!("relé limiar [losango]: emite em {cout} a parte de {cin} acima de {:.2} (×{mag:.2})", v("limiar")),
+                4 => format!(
+                    "CONDENSADOR [losango]: acumula {cin} (cheio em ~{:.0} passos de sinal 1); ao chegar a {:.2} dispara {mag:+.2} em {cout} durante ~{:.0} passos",
+                    v("limiar") / v("carga").max(1e-4),
+                    v("limiar"),
+                    v("limiar") / v("descarga").max(1e-4)
+                ),
+                _ => format!("DIFERENCIADOR [losango]: emite em {cout} a mudança de {cin} em relação à média recente (×{mag:.2}; a média segue a {:.0}% por passo)", v("carga") * 100.0),
             }
         }
         15 => format!("revisão [escudo]: taxa de mutação das cópias ÷ (1 + {:.1})", v("protecao") * g),
