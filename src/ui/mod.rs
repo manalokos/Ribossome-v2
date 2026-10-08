@@ -773,6 +773,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
             .on_hover_text("energia que um agente ganha por cada unidade do mundo de avanço LÍQUIDO na pista (só rende passar do ponto mais avançado a que já chegou). Quem recua mais de 150 unidades paga o excesso ao mesmo preço. Um agente de 20 resíduos gasta ~0,04 por passo só a manter-se");
         ui.add(egui::Slider::new(&mut p.wall_damage, 0.0..=1.0).logarithmic(true).text("dano das paredes"))
             .on_hover_text("energia perdida por passo com o centro do agente em cima de uma parede (proporcional a quanto o seu raio entra nela)");
+        ui.add(egui::Slider::new(&mut p.track_pop, 20..=20000).logarithmic(true).text("teto da população"))
+            .on_hover_text("número máximo de agentes na pista: cheia, ninguém nasce. Enquanto houver menos de metade, entram genomas ao acaso (imigração), para nunca se extinguir; a outra metade é para os filhos de quem avança");
         let mut same = p.copy_same != 0;
         if ui.checkbox(&mut same, "filhos iguais ao pai").on_hover_text("o filho é uma cópia do genoma do pai em vez do complemento reverso (uma só forma por linhagem)").changed() {
             p.copy_same = same as u32;

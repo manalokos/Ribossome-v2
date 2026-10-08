@@ -125,8 +125,6 @@ fn test_scenario(world: &mut World) {
 const DEFAULT_TERRAIN: &str = "assets/terreno.png";
 
 /// Pasta das cenas gravadas e do autosave.
-/// Genomas ao acaso semeados ao entrar na pista.
-const TRACK_SEEDS: u32 = 3_000;
 const SAVES_DIR: &str = "saves";
 
 /// O autosave deste modo (o laboratório tem outro tamanho de mundo).
@@ -811,7 +809,7 @@ impl Running {
         self.ui.history = ribossome::stats::History::default();
         self.lineages = ribossome::lineage::Lineages::default();
         self.last_autosave = 0;
-        let mut reqs = ribossome::life::seed_requests(TRACK_SEEDS, self.ui.seed_len, self.ui.seed_aug, self.world.cfg.sim_size(), &mut self.seed_rng);
+        let mut reqs = ribossome::life::seed_requests(self.world.params.track_pop / 2, self.ui.seed_len, self.ui.seed_aug, self.world.cfg.sim_size(), &mut self.seed_rng);
         self.onto_track(&mut reqs);
         self.world.request_seeds(&reqs);
         self.track_next_seed = 0;
@@ -1039,7 +1037,7 @@ impl Running {
             self.ui.ledger_epoch = self.world.params.epoch;
         }
         self.ui.stats.update(self.world.params.epoch, self.world.last_counters, self.world.cfg.max_agents);
-        // PISTA: imigração. Enquanto houver menos de TRACK_SEEDS vivos,
+        // PISTA: imigração. Enquanto houver menos de metade do teto vivos,
         // entram genomas ao acaso na pista (até 200 de cada vez): a
         // população nunca se extingue e há sempre candidatos novos até
         // aparecer quem consiga avançar e copiar-se.
@@ -1048,8 +1046,10 @@ impl Running {
             && let Some(c) = self.world.last_counters
         {
             let alive = c.alive(self.world.cfg.max_agents);
-            if alive < TRACK_SEEDS {
-                let mut reqs = ribossome::life::seed_requests((TRACK_SEEDS - alive).min(200), self.ui.seed_len, self.ui.seed_aug, self.world.cfg.sim_size(), &mut self.seed_rng);
+            // Só até METADE do teto: a outra metade é para os filhos de quem avança.
+            let target = self.world.params.track_pop / 2;
+            if alive < target {
+                let mut reqs = ribossome::life::seed_requests((target - alive).min(200), self.ui.seed_len, self.ui.seed_aug, self.world.cfg.sim_size(), &mut self.seed_rng);
                 self.onto_track(&mut reqs);
                 self.world.request_seeds(&reqs);
             }

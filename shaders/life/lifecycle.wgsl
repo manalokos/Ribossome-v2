@@ -843,6 +843,8 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (slot >= params.max_agents) { return; }
     var a = agents[slot];
     if (a.alive == 0u || a.gene_len == 0u || a.pair_count < a.gene_len) { return; }
+    // PISTA: teto da população. Cheia, ninguém nasce (fica à espera de vaga).
+    if (params.track_mode != 0u && params.max_agents - min(atomicLoad(&life_counters[LC_FREE_TOP]), params.max_agents) >= params.track_pop) { return; }
 
     let L = a.gene_len;
     let cell = chem_open_cell(world_to_cell(vec2<f32>(a.pos_x, a.pos_y)));

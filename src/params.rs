@@ -396,6 +396,13 @@ gpu_struct! {
         /// Pista: energia perdida por passo a tocar numa parede (inteira
         /// com o centro em cima dela).
         pub wall_damage: f32,
+        /// Pista: TETO da população. Com este número de vivos não nasce
+        /// mais ninguém (quem já copiou o genoma espera por um lugar). A
+        /// imigração de genomas ao acaso só enche até metade.
+        pub track_pop: u32,
+        pub _pad_track0: u32,
+        pub _pad_track1: u32,
+        pub _pad_track2: u32,
     }
 }
 
@@ -580,6 +587,10 @@ impl Default for SimParams {
             copy_same: 0,
             track_gain: 0.1,
             wall_damage: 0.05,
+            track_pop: 400,
+            _pad_track0: 0,
+            _pad_track1: 0,
+            _pad_track2: 0,
         }
     }
 }
