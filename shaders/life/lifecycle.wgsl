@@ -36,7 +36,6 @@ const S_PHOTOSYS: u32 = 7u << 16u;   // + índice do resíduo
 const S_CHEMO: u32 = 9u << 16u;      // + índice do resíduo
 // Quimiossíntese: fração do redutor da célula do fluido que cada órgão
 // consome por passo (× ganho × eficiência).
-const CHEMO_TAKE: f32 = 0.02;
 // Fotossistema: o rendimento (energia por unidade de luz absorvida) é
 // params.photo_yield. Um fotossistema sozinho absorve 1 − e^−0,15 ≈ 14% da
 // luz que lhe chega. O modo reciclador reativa com probabilidade
@@ -582,7 +581,14 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (organ_type(oc) == ORGAN_CHEMO && params.fluid_enabled != 0u) {
             let fi = fluid_index_at_world(rw);
             let cv = organ_var(oc);
-            let take = min(CHEMO_TAKE * metab, 1.0) * redox_in[fi] * organ_gain(oc) * max(cv.p1, 0.0);
+            // SACIEDADE: a parte que vai para ENERGIA só apanha na medida em
+            // que o agente tem lugar para ela (com a regulação pela fome
+            // ligada). Um agente cheio deixa passar o redutor para os de
+            // trás, em vez de o gastar a encher a sopa. A parte que recicla
+            // (rec) trabalha sempre.
+            let rec0 = clamp(cv.p0, 0.0, 1.0);
+            let room = select(1.0, clamp(1.0 - a.energy / max(cap, 1e-3), 0.0, 1.0), params.hunger_regulation != 0u);
+            let take = min(max(params.chemo_take, 0.0) * metab, 1.0) * redox_in[fi] * organ_gain(oc) * max(cv.p1, 0.0) * mix(room, 1.0, rec0);
             if (take > 0.0) {
                 atomicAdd(&redox_eaten[fi], u32(take * REDOX_FP));
                 let rec = clamp(cv.p0, 0.0, 1.0);

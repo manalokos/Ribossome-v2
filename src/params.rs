@@ -386,7 +386,12 @@ gpu_struct! {
         /// cada agente divide-se por 1 + isto × (massa média por resíduo ÷ a
         /// de um resíduo normal − 1). 0 = todos seguem a água por igual.
         pub flow_mass: f32,
-        pub _pad_s0: u32,
+        /// QUIMIOSSÍNTESE: fração do redutor da célula do fluido que cada
+        /// órgão apanha por passo (× metabolismo × intensidade × eficiência).
+        /// Com muitos órgãos na mesma célula as frações somam-se: alto, e os
+        /// primeiros agentes junto à fumarola esgotam o redutor e não passa
+        /// nada para os de trás.
+        pub chemo_take: f32,
         pub _pad_s1: u32,
         pub _pad_s2: u32,
     }
@@ -570,7 +575,7 @@ impl Default for SimParams {
             transport_every: 1,
             signal_crosstalk: 0.1,
             flow_mass: 1.0,
-            _pad_s0: 0,
+            chemo_take: 0.02,
             _pad_s1: 0,
             _pad_s2: 0,
         }

@@ -687,6 +687,8 @@ fn tab_water(ui: &mut egui::Ui, world: &mut World) {
     if world.heat_image.is_some() {
         ui.small("+ heat from the red pixels of the loaded terrain");
     }
+    ui.add(slider(&mut p.chemo_take, 0.0..=0.2).logarithmic(true).smallest_positive(0.0005).text("chemosynthesis uptake"))
+        .on_hover_text("fraction of the reductant in its fluid cell that each chemosynthesis organ takes per step (× metabolism × intensity × efficiency). The fractions of all the organs in a cell add up: high, and the first agents next to a vent use it all up; low, and the reductant travels further and feeds more agents, each one more slowly. With hunger regulation on, an agent that is full takes only what it has room for");
     ui.add(slider(&mut p.chemo_yield, 0.0..=5.0).text("chemosynthesis yield"))
         .on_hover_text("energy per unit of reductant consumed");
     ui.add(slider(&mut p.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("reductant oxidation (1/s)"))
