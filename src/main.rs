@@ -28,6 +28,8 @@ struct Running {
     pre_track: Option<(ribossome::params::SimParams, f32)>,
     /// Pista: epoch da próxima leva de imigrantes.
     track_next_seed: u32,
+    /// Genoma carregado de um ficheiro (bases 0..3 = A, U, G, C).
+    loaded_agent: Option<Vec<u8>>,
     /// MODO FOTO/VÍDEO: alvo de captura (refeito se o tamanho mudar), pasta
     /// e contagem das imagens da gravação em curso.
     shot_cap: Option<ribossome::render::capture::Capture>,
@@ -304,6 +306,7 @@ impl Running {
             msaa: None,
             pre_track: None,
             track_next_seed: 0,
+            loaded_agent: None,
             shot_cap: None,
             rec_dir: None,
             rec_frames: 0,
@@ -780,6 +783,59 @@ impl Running {
     }
 
     /// Carregar / gravar / repor o terreno (botões do painel "Terreno").
+    /// AGENTES GUARDADOS: grava o genoma do selecionado num ficheiro de
+    /// texto (A, U, G, C), carrega um, ou espalha cópias do carregado.
+    fn agent_action(&mut self, action: ribossome::ui::AgentAction) {
+        use ribossome::ui::AgentAction;
+        const LETTERS: [char; 4] = ['A', 'U', 'G', 'C'];
+        let dir = std::path::Path::new(SAVES_DIR).join("agentes");
+        let _ = std::fs::create_dir_all(&dir);
+        let dialog = rfd::FileDialog::new().add_filter("genoma", &["rna", "txt"]).set_directory(dir.canonicalize().unwrap_or(dir.clone()));
+        match action {
+            AgentAction::Save => {
+                let Some(d) = self.inspector.data.as_ref() else {
+                    self.ui.scene_msg = "gravar agente: não há nenhum selecionado".into();
+                    return;
+                };
+                let name = format!("agente_{}_{}bases.rna", d.agent.id, d.genome.len());
+                if let Some(path) = dialog.set_title("Gravar agente").set_file_name(&name).save_file() {
+                    let text: String = d.genome.iter().map(|&b| LETTERS[(b & 3) as usize]).collect();
+                    self.ui.scene_msg = match std::fs::write(&path, text + "\n") {
+                        Ok(()) => format!("agente gravado em {}", path.display()),
+                        Err(e) => format!("gravar agente: {e}"),
+                    };
+                }
+            }
+            AgentAction::Load => {
+                if let Some(path) = dialog.set_title("Carregar agente").pick_file() {
+                    match std::fs::read_to_string(&path) {
+                        Ok(text) => {
+                            // Aceita T por U e ignora tudo o que não for base (espaços, linhas).
+                            let g: Vec<u8> = text.chars().filter_map(|c| match c.to_ascii_uppercase() { 'A' => Some(0), 'U' | 'T' => Some(1), 'G' => Some(2), 'C' => Some(3), _ => None }).take(256).collect();
+                            if g.len() < 3 {
+                                self.ui.scene_msg = format!("{}: não tem um genoma (letras A, U, G, C)", path.display());
+                            } else {
+                                self.ui.agent_info = format!("{} ({} bases)", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), g.len());
+                                self.loaded_agent = Some(g);
+                            }
+                        }
+                        Err(e) => self.ui.scene_msg = format!("carregar agente: {e}"),
+                    }
+                }
+            }
+            AgentAction::Spread => {
+                if let Some(g) = &self.loaded_agent {
+                    let s = self.world.cfg.sim_size();
+                    let reqs: Vec<ribossome::params::SpawnRequest> =
+                        (0..self.ui.agent_copies).map(|_| ribossome::params::SpawnRequest::with_genome(self.seed_rng.f32() * s, self.seed_rng.f32() * s, g)).collect();
+                    self.world.request_seeds(&reqs);
+                    self.ui.scene_msg = format!("{} cópias pedidas (nascem onde houver bases na sopa)", reqs.len());
+                }
+            }
+        }
+        log::info!("{}", self.ui.scene_msg);
+    }
+
     /// MODO FOTO/VÍDEO: fotografa o enquadramento da mira (o quadrado ao
     /// centro da vista, 90% do lado menor) e, a gravar, guarda uma imagem de
     /// N em N frames numa pasta; ao parar tenta juntá-las com o ffmpeg.
@@ -1333,6 +1389,9 @@ impl Running {
             self.write_report();
         }
         self.photo_video();
+        if let Some(action) = self.ui.agent_action.take() {
+            self.agent_action(action);
+        }
         let side = std::mem::take(&mut self.ui.big_shot);
         if side > 0 {
             let epoch = self.world.params.epoch;
@@ -1503,7 +1562,11 @@ impl Running {
                         && !self.press_moved
                     {
                         let w = self.cam.screen_to_world(self.cursor, self.screen());
-                        self.inspector.pick(&self.gpu, &self.world, w);
+                        match self.loaded_agent.as_ref().filter(|_| self.ui.place_agent) {
+                            // Agente carregado + "pôr com o rato": nasce uma cópia aqui.
+                            Some(g) => self.world.request_seeds(&[ribossome::params::SpawnRequest::with_genome(w[0], w[1], g)]),
+                            None => self.inspector.pick(&self.gpu, &self.world, w),
+                        }
                     }
                 }
             }

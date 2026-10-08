@@ -656,7 +656,18 @@ fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
         let p0 = c0 + vec2<f32>(cr * anchor.x - sr * anchor.y, sr * anchor.x + cr * anchor.y);
         let dw = vec2<f32>(cr * dir.x - sr * dir.y, sr * dir.x + cr * dir.y);
         let tips = rna_tail_view[slot * 2u];
-        let p2 = select(tips.xy, tips.zw, trailer);
+        var p2 = select(tips.xy, tips.zw, trailer);
+        // A ponta guardada nunca pode ficar mais longe do que o fio: se o
+        // estado estiver atrasado ou for de outro agente (slot reutilizado,
+        // agente que não foi atualizado neste passo), o fio sai a direito em
+        // vez de se esticar pelo mundo fora.
+        let reach = p2 - p0;
+        let far_d = length(reach);
+        if (far_d > 2.0 * len + 1.0 || far_d < 1e-3) {
+            p2 = p0 + dw * len;
+        } else if (far_d > len) {
+            p2 = p0 + reach / far_d * len;
+        }
         let p1 = p0 + dw * (0.5 * len);
         let ta = f32(m) / cnt;
         let tb = f32(m + 1u) / cnt;

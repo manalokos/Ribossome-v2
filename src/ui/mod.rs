@@ -62,6 +62,14 @@ pub struct UiState {
     pub tree_now: bool,
     /// Pedido de captura do mundo inteiro: lado da imagem em píxeis (0 = nada).
     pub big_shot: u32,
+    /// AGENTES GUARDADOS: pedido (gravar o selecionado, carregar, espalhar).
+    pub agent_action: Option<AgentAction>,
+    /// Com um agente carregado: clicar na vista põe lá uma cópia.
+    pub place_agent: bool,
+    /// O agente carregado, para mostrar (nome do ficheiro e bases).
+    pub agent_info: String,
+    /// Quantas cópias espalhar de cada vez.
+    pub agent_copies: u32,
     /// MODO FOTO/VÍDEO: mostrar a mira de enquadramento na vista.
     pub frame_guide: bool,
     /// Pedido de uma fotografia do enquadramento.
@@ -130,6 +138,17 @@ const TABS: [(Tab, &str); 10] = [
     (Tab::Graficos, "Gráficos"),
     (Tab::Info, "Info"),
 ];
+
+/// O que fazer com um agente guardado em ficheiro.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentAction {
+    /// Grava o genoma do agente selecionado (janela de ficheiros).
+    Save,
+    /// Carrega um genoma de um ficheiro (janela de ficheiros).
+    Load,
+    /// Espalha cópias do agente carregado pelo mundo.
+    Spread,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerrainAction {
@@ -213,6 +232,10 @@ impl UiState {
             report_now: false,
             tree_now: false,
             big_shot: 0,
+            agent_action: None,
+            place_agent: false,
+            agent_info: String::new(),
+            agent_copies: 200,
             frame_guide: false,
             photo_now: false,
             rec: false,
@@ -682,13 +705,6 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
             st.terrain_action = Some(TerrainAction::Empty);
         }
     });
-    if ui
-        .button("pista de corridas (ensaio de natação)")
-        .on_hover_text("troca o mundo por um circuito fechado com curvas para os dois lados e recomeça do zero. Não há monómeros, comida, luz do sol, fumarolas nem corrente (os genomas nascem e copiam-se sem matéria): a única energia é AVANÇAR na pista (no sentido contrário ao dos ponteiros do relógio); tocar nas paredes tira energia; as paredes dão luz, para os sensores de luz as verem. Os filhos são cópias iguais ao pai. Todos os parâmetros passam aos do ensaio (valores por omissão + os da pista), para os resultados serem comparáveis; os que tinhas voltam quando saíres com 'terreno gerado' ou 'mundo vazio'")
-        .clicked()
-    {
-        st.terrain_action = Some(TerrainAction::Track);
-    }
     ui.separator();
     ui.strong("Pincel");
     ui.checkbox(&mut st.paint_on, "pintar com o botão esquerdo (o direito continua a arrastar a vista)");
@@ -730,6 +746,26 @@ fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     ui.checkbox(&mut st.seed_aug, "começar por AUG (tirado da sopa)");
     if ui.button("semear (geração 0, montada da sopa)").clicked() {
         st.seed_now = true;
+    }
+    ui.separator();
+    ui.strong("Agentes guardados");
+    ui.horizontal(|ui| {
+        if ui.button("gravar o selecionado…").on_hover_text("grava o genoma do agente selecionado num ficheiro de texto (letras A, U, G, C) em saves/agentes/").clicked() {
+            st.agent_action = Some(AgentAction::Save);
+        }
+        if ui.button("carregar…").on_hover_text("carrega um genoma gravado; depois podes espalhá-lo ou pô-lo com o rato").clicked() {
+            st.agent_action = Some(AgentAction::Load);
+        }
+    });
+    if !st.agent_info.is_empty() {
+        ui.small(&st.agent_info);
+        ui.horizontal(|ui| {
+            if ui.button("espalhar").on_hover_text("põe este número de cópias em sítios ao acaso do mundo (cada uma montada com bases da sopa à volta; onde não houver bases, não nasce)").clicked() {
+                st.agent_action = Some(AgentAction::Spread);
+            }
+            ui.add(egui::DragValue::new(&mut st.agent_copies).range(1..=20000).suffix(" cópias"));
+        });
+        ui.checkbox(&mut st.place_agent, "pôr com o rato").on_hover_text("ligado, um clique na vista põe lá uma cópia do agente carregado (em vez de selecionar o que lá estiver)");
     }
     ui.separator();
     ui.strong("Metabolismo");
