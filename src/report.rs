@@ -130,7 +130,7 @@ fn defence(body: &[Residue], w: &World) -> ([f32; 4], f32) {
         }
     }
     for (v, o) in t.iter_mut().zip(own) {
-        *v *= 1.0 - 0.9 * o;
+        *v *= 1.0 - 0.85 * o;
     }
     (t, pro)
 }

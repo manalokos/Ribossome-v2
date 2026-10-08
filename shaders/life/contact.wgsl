@@ -183,7 +183,7 @@ fn protease_active(slot: u32, n: u32) -> f32 {
 // resiste às dessa família vindas de outros. É o que impede dois caçadores
 // iguais de se desfazerem um ao outro ao mesmo tempo. Devolve, por família,
 // quanto do alvo fica exposto (1 = tudo, 1 − PROTEASE_IMMUNITY = protegido).
-const PROTEASE_IMMUNITY: f32 = 0.9;
+const PROTEASE_IMMUNITY: f32 = 0.85;
 fn protease_exposed(slot: u32, n: u32) -> vec4<f32> {
     var own = vec4<f32>(0.0);
     for (var k = 0u; k < n; k++) {
