@@ -192,7 +192,17 @@ impl Running {
             event_loop
                 .create_window(
                     Window::default_attributes()
-                        .with_title("Ribossome v4")
+                        .with_title("Ribossome")
+                        .with_window_icon({
+                            // Ícone da janela: o mesmo do executável (assets/icon.png).
+                            let dec = png::Decoder::new(std::io::Cursor::new(&include_bytes!("../assets/icon.png")[..]));
+                            dec.read_info().ok().and_then(|mut r| {
+                                let mut buf = vec![0; r.output_buffer_size()];
+                                let info = r.next_frame(&mut buf).ok()?;
+                                buf.truncate(info.buffer_size());
+                                winit::window::Icon::from_rgba(buf, info.width, info.height).ok()
+                            })
+                        })
                         .with_inner_size(winit::dpi::LogicalSize::new(1400, 900)),
                 )
                 .expect("create window"),
