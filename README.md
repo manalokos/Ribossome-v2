@@ -1,113 +1,138 @@
-# Ribossome v4
+# Ribossome
 
-Simulador de vida artificial a correr na placa gráfica (Rust + wgpu + WGSL).
-Um mundo aquático 2D, fechado, onde organismos feitos de RNA e proteína
-evoluem por química e não por regras desenhadas.
+![Ribossome](docs/img/splash.jpg)
 
-*Artificial-life simulator on the GPU. A closed 2D water world where
-RNA/protein organisms evolve through chemistry: genomes are translated into
-chains of amino acids and organs, matter is conserved exactly, and nothing
-compares genomes. The interface and the code comments are in Portuguese.*
+**Artificial life on the GPU.** A closed 2D water world where organisms made
+of RNA and protein evolve through chemistry, not through designed rules.
+Written in Rust with wgpu and WGSL; everything (world, creatures, drawing)
+runs on the graphics card.
 
-## A ideia
+*The interface is in English. Code comments, table keys and working notes
+are in Portuguese.*
 
-- **Matéria exata.** O mundo é fechado. Os monómeros (A, U, G, C) são
-  quantidades inteiras que só mudam de sítio; nada os cria nem destrói. Há
-  um teste que o verifica.
-- **Química igual para todos.** O que um organismo consegue fazer vem de
-  regras químicas globais. A sequência só decide onde e quanto.
-- **O organismo não conhece genomas.** Nenhuma regra compara o genoma de um
-  agente com o de outro.
-- **Replicação por emparelhamento.** Um agente copia-se base a base com
-  monómeros ativados apanhados à volta. O filho é o complemento reverso do
-  pai, por isso cada linhagem tem duas formas que alternam.
-- **Baixo Reynolds.** Movimento sobreamortecido, sem inércia; nadar é
-  mudar de forma.
+![The whole world](docs/img/world.jpg)
 
-## Como é um organismo
+*A world after forty million steps: rock and rubble, vents at the bottom,
+light from above, and colonies of different lineages.*
 
-O genoma (até 256 bases) lê-se a partir do primeiro `AUG` até um codão de
-paragem, três bases por aminoácido. O resultado é uma cadeia de até 64
-resíduos que se dobra conforme os ângulos de cada aminoácido.
+## The idea
 
-- **Órgãos.** Certos pares de aminoácidos seguidos (promotor + modificador,
-  mais um codão de intensidade) dão um órgão em vez de dois resíduos: boca,
-  músculo, sensores (comida, luz, energia, corpos; totais ou de um só lado),
-  relógio, relé, fotossistema, quimiossíntese, protease, âncora, ventosa,
-  armazenamento, dormência, revisão, quiral, bias. As tabelas estão em
-  `assets/` e editam-se com a simulação a correr.
-- **Sinais.** Quatro canais internos percorrem a cadeia. Dois (α, β) dobram
-  as juntas; dois (γ, δ) ligam e desligam órgãos.
-- **Segundo gene.** Outro `AUG` depois da paragem dá um segundo corpo, preso
-  ao primeiro por um fio mole.
-- **Energia.** Vem de comer monómeros ativados, da luz (fotossistema), do
-  redutor das fumarolas (quimiossíntese) ou de outros agentes (protease).
+- **Exact matter.** The world is closed. Monomers (A, U, G, C) are whole
+  units that only change place; nothing creates or destroys them. A test
+  checks it.
+- **The same chemistry for everyone.** What an organism can do comes from
+  global chemical rules. Its sequence only decides where and how much.
+- **Organisms do not know genomes.** No rule compares one agent's genome
+  with another's.
+- **Replication by pairing.** An agent copies itself base by base with
+  activated monomers taken from the water. The child is the reverse
+  complement of the parent, so every lineage has two forms that alternate.
+- **Low Reynolds number.** Motion is overdamped, with no inertia: swimming
+  means changing shape.
 
-## O mundo
+## What an organism is
 
-Grelha de 2048 × 2048 células com terreno de grãos (rocha e entulho), um
-fluido, luz que entra por cima com ciclo de dia e noite, fumarolas no fundo
-que dão calor e redutor, e uma sopa de monómeros em dois estados (ativado e
-gasto). Suporta 400 000 agentes.
+![Creatures](docs/img/creatures.jpg)
 
-## Requisitos
+A genome (up to 256 bases) is read from the first `AUG` to a stop codon,
+three bases per amino acid. The result is a chain of up to 64 residues that
+folds according to the angles of each amino acid.
 
-- Windows com uma placa gráfica recente (desenvolvido numa NVIDIA; usa wgpu
-  30). Não foi testado noutros sistemas.
-- Rust 1.99 (a versão está fixada em `rust-toolchain.toml`; o `rustup`
-  instala-a sozinho).
-- Opcional: `ffmpeg` no PATH, para gravar vídeo.
+- **Organs.** Certain pairs of amino acids in a row (promoter + modifier,
+  plus an intensity codon) make an organ instead of two residues: mouth,
+  muscle, sensors (food, light, energy, other bodies; all-round or
+  one-sided), clock, relay, photosystem, chemosynthesis, protease, anchor,
+  holdfast, storage, dormancy, proofreading, chiral, bias. The tables live in
+  `assets/` and can be edited while the simulation runs.
+- **Signals.** Four internal channels travel along the chain. Two (α, β)
+  bend the joints; two (γ, δ) switch organs on and off.
+- **Second gene.** Another `AUG` after the stop starts a second body, tied
+  to the first by a soft linker.
+- **Energy** comes from eating activated monomers, from light
+  (photosystem), from the reductant released by vents (chemosynthesis) or
+  from other agents (protease).
 
-## Como correr
+![Close-up](docs/img/closeup.jpg)
+
+*Close-up: agents among monomers (coloured dots are activated, grey are
+spent) next to a rock.*
+
+## The world
+
+A 2048 × 2048 grid with a terrain of grains (rock and rubble), a fluid,
+light entering from above with a day and night cycle, vents at the bottom
+that give heat and reductant, and a soup of monomers in two states
+(activated and spent). Up to 400 000 agents.
+
+## Watching evolution
+
+![Lineage tree](docs/img/lineage_tree.png)
+
+The program records lineages as it runs and draws them as an interactive
+tree: time runs left to right, each card is a branch with portraits of its
+two forms, and every lineage gets a Latin name from its genome and way of
+life. A report page lists the species, who can attack whom, and where they
+live.
+
+Other tools: an inspector for the selected agent (genome, body, organs,
+live signals), charts, whole-world captures at 8k or 16k, photo and video
+(MP4) of a framed view, and saving and re-seeding individual agents.
+
+## Requirements
+
+- Windows with a recent graphics card (developed on an NVIDIA card; uses
+  wgpu 30). Not tested on other systems.
+- Rust 1.99 (pinned in `rust-toolchain.toml`; `rustup` installs it).
+- Optional: `ffmpeg` on the PATH, to record video.
+
+## Running
 
 ```
 run.bat
 ```
 
-ou `cargo run --release`. A primeira compilação demora alguns minutos.
+or `cargo run --release`. The first build takes a few minutes.
 
-O mundo arranca vazio de vida: no painel da esquerda, **semear** põe genomas
-ao acaso. Ao fechar, o estado fica em `saves/autosave.ribo` e é retomado no
-arranque seguinte. **Mundo novo com os valores por omissão** recomeça do zero.
+The world starts without life: in the left panel, **Life cycle → Seed**
+drops random genomes. On exit the state is saved to `saves/autosave.ribo`
+and resumed at the next start. **Scene → new world with the default values**
+starts from scratch.
 
-Há também `lab.bat` (piscina pequena de laboratório, sem terreno).
+`lab.bat` runs a small laboratory pool without terrain.
 
 ## Interface
 
-- **Rato:** arrastar move, roda aproxima, clique seleciona um agente (abre o
-  inspetor à direita, com genoma, corpo, órgãos e sinais).
-- **Painel esquerdo:** parâmetros da simulação, terreno e pincel, vistas
-  (monómeros, luz, temperatura, corrente...), cenas, gráficos.
-- **Relatório:** gera uma página HTML com as espécies, quem pode atacar
-  quem e a árvore das linhagens, interativa.
-- **Capturas:** o mundo inteiro em 8k ou 16k; fotografia e vídeo (MP4) do
-  enquadramento, com mira.
-- **Agentes guardados:** gravar o genoma do selecionado, carregar um,
-  espalhá-lo ou pô-lo com o rato.
+- **Mouse:** drag to move, wheel to zoom, click to select an agent.
+- **Left panel:** tabs by question (World, Soup, Energy, Life cycle, Body),
+  with a search box that finds any control by name.
+- **Right panel:** the inspector of the selected agent.
 
-A app abre um servidor MCP local (porta 8788) para ler o estado e mudar
-parâmetros a partir de fora.
+The app opens a local MCP server (port 8788) to read the state and change
+parameters from outside.
 
-## Estrutura
+## Layout of the repository
 
-| pasta | conteúdo |
+| folder | contents |
 |---|---|
-| `src/` | aplicação: mundo, vida, desenho, interface, relatório |
-| `shaders/` | simulação e desenho em WGSL (`world/`, `life/`, `render/`) |
-| `assets/` | tabelas dos aminoácidos, dos órgãos e do código dos órgãos |
-| `examples/` | sondas: programas pequenos que medem uma regra sem janela |
-| `tests/` | testes, incluindo a conservação da matéria |
-| `docs/` | arquitetura e notas da passagem do v3 para o v4 |
+| `src/` | application: world, life, drawing, interface, report |
+| `shaders/` | simulation and drawing in WGSL (`world/`, `life/`, `render/`) |
+| `assets/` | tables of amino acids, organs and the organ code; splash image |
+| `examples/` | probes: small headless programs that measure one rule |
+| `tests/` | tests, including conservation of matter |
+| `docs/` | architecture and notes (in Portuguese) |
 
-Para correr os testes: `cargo test --release` (precisam da placa).
-Uma sonda: `cargo run --release --example probe_reach`.
+Tests: `cargo test --release` (they need the graphics card).
+A probe: `cargo run --release --example probe_reach`.
 
-## Estado
+## Status
 
-Projeto de investigação pessoal, em mudança constante. As regras e as
-tabelas mudam com frequência e as cenas gravadas com uma versão podem
-comportar-se de outra forma na seguinte.
+A personal research project, changing constantly. Rules and tables change
+often, and a scene saved with one version may behave differently in the
+next.
 
-## Licença
+The splash image is an AI rendering (in the style of a colourized electron
+micrograph) of a creature that evolved in the simulation.
 
-MIT (ver `LICENSE`).
+## License
+
+MIT (see `LICENSE`).
