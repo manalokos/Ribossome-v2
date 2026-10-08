@@ -107,3 +107,7 @@ Uma sonda: `cargo run --release --example probe_reach`.
 Projeto de investigação pessoal, em mudança constante. As regras e as
 tabelas mudam com frequência e as cenas gravadas com uma versão podem
 comportar-se de outra forma na seguinte.
+
+## Licença
+
+MIT (ver `LICENSE`).
