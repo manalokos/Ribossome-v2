@@ -62,6 +62,17 @@ pub struct UiState {
     pub tree_now: bool,
     /// Pedido de captura do mundo inteiro: lado da imagem em píxeis (0 = nada).
     pub big_shot: u32,
+    /// MODO FOTO/VÍDEO: mostrar a mira de enquadramento na vista.
+    pub frame_guide: bool,
+    /// Pedido de uma fotografia do enquadramento.
+    pub photo_now: bool,
+    /// A gravar vídeo (uma imagem de `rec_every` em `rec_every` frames).
+    pub rec: bool,
+    pub rec_every: u32,
+    /// Lado da imagem (fotografia e vídeo), em píxeis.
+    pub shot_size: u32,
+    /// Estado da gravação, para mostrar (pasta, número de imagens).
+    pub rec_info: String,
     /// Epochs entre censos das linhagens e o estado do registo (texto).
     pub lineage_every: u32,
     pub lineage_info: String,
@@ -202,6 +213,12 @@ impl UiState {
             report_now: false,
             tree_now: false,
             big_shot: 0,
+            frame_guide: false,
+            photo_now: false,
+            rec: false,
+            rec_every: 2,
+            shot_size: 1024,
+            rec_info: String::new(),
             lineage_every: 50_000,
             lineage_info: String::new(),
             history: crate::stats::History::default(),
@@ -426,6 +443,25 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
             }
         }
     });
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut st.frame_guide, "mira").on_hover_text("mostra na vista o enquadramento (um quadrado ao centro) que a fotografia e o vídeo apanham, com a regra dos terços");
+        if ui.button("foto").on_hover_text("grava o enquadramento da mira em saves/capturas/ (sem a interface), com a vista e o brilho escolhidos").clicked() {
+            st.photo_now = true;
+        }
+        let label = if st.rec { egui::RichText::new("■ parar").color(egui::Color32::from_rgb(255, 90, 80)) } else { egui::RichText::new("● rec") };
+        if ui.button(label).on_hover_text("grava o enquadramento da mira como uma sequência de imagens numa pasta nova em saves/; ao parar, junta-as num vídeo MP4 se houver ffmpeg instalado. Move e aproxima a câmara à vontade enquanto grava").clicked() {
+            st.rec = !st.rec;
+        }
+        egui::ComboBox::from_id_salt("shot_size").selected_text(format!("{} px", st.shot_size)).width(70.0).show_ui(ui, |ui| {
+            for v in [512u32, 1024, 2048] {
+                ui.selectable_value(&mut st.shot_size, v, format!("{v} px"));
+            }
+        });
+    });
+    if st.rec || !st.rec_info.is_empty() {
+        ui.add(egui::Slider::new(&mut st.rec_every, 1..=30).text("1 imagem a cada N frames")).on_hover_text("o vídeo fica a 30 imagens por segundo: com 2, um segundo de vídeo são 60 frames da simulação");
+        ui.small(&st.rec_info);
+    }
     ui.separator();
     if ui
         .button("mundo novo com os valores por omissão")

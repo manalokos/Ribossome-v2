@@ -28,6 +28,12 @@ struct Running {
     pre_track: Option<(ribossome::params::SimParams, f32)>,
     /// Pista: epoch da próxima leva de imigrantes.
     track_next_seed: u32,
+    /// MODO FOTO/VÍDEO: alvo de captura (refeito se o tamanho mudar), pasta
+    /// e contagem das imagens da gravação em curso.
+    shot_cap: Option<ribossome::render::capture::Capture>,
+    rec_dir: Option<std::path::PathBuf>,
+    rec_frames: u32,
+    rec_tick: u32,
     cam: Camera,
     egui_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
@@ -298,6 +304,10 @@ impl Running {
             msaa: None,
             pre_track: None,
             track_next_seed: 0,
+            shot_cap: None,
+            rec_dir: None,
+            rec_frames: 0,
+            rec_tick: 0,
             egui_renderer,
             profiler: Profiler::from_env(),
             ui: UiState::new(baseline),
@@ -770,6 +780,72 @@ impl Running {
     }
 
     /// Carregar / gravar / repor o terreno (botões do painel "Terreno").
+    /// MODO FOTO/VÍDEO: fotografa o enquadramento da mira (o quadrado ao
+    /// centro da vista, 90% do lado menor) e, a gravar, guarda uma imagem de
+    /// N em N frames numa pasta; ao parar tenta juntá-las com o ffmpeg.
+    fn photo_video(&mut self) {
+        let photo = std::mem::take(&mut self.ui.photo_now);
+        // Arranque e paragem da gravação.
+        if self.ui.rec && self.rec_dir.is_none() {
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let dir = std::path::Path::new(SAVES_DIR).join(format!("video_{stamp}"));
+            let _ = std::fs::create_dir_all(&dir);
+            self.rec_dir = Some(dir);
+            self.rec_frames = 0;
+            self.rec_tick = 0;
+        }
+        if !self.ui.rec && let Some(dir) = self.rec_dir.take() {
+            let made = std::process::Command::new("ffmpeg")
+                .args(["-y", "-loglevel", "error", "-framerate", "30", "-i", "f_%05d.png", "-pix_fmt", "yuv420p", "-crf", "17", "video.mp4"])
+                .current_dir(&dir)
+                .spawn()
+                .is_ok();
+            self.ui.rec_info = format!(
+                "{} imagens em {}{}",
+                self.rec_frames,
+                dir.display(),
+                if made { "; a montar video.mp4" } else { " (sem ffmpeg: junta-as tu, 30 por segundo)" }
+            );
+            log::info!("{}", self.ui.rec_info);
+        }
+        let frame = self.rec_dir.is_some() && {
+            self.rec_tick += 1;
+            (self.rec_tick - 1) % self.ui.rec_every.max(1) == 0
+        };
+        if !photo && !frame {
+            return;
+        }
+        let size = self.ui.shot_size.clamp(256, 4096);
+        if self.shot_cap.as_ref().is_none_or(|c| c.size() != size.div_ceil(64) * 64) {
+            self.shot_cap = Some(ribossome::render::capture::Capture::new(&self.gpu, &self.world, size));
+        }
+        let cap = self.shot_cap.as_ref().unwrap();
+        let side = cap.size();
+        // A imagem cobre o quadrado da mira: 90% do lado menor da vista.
+        let guide = 0.9 * self.viewport[2].min(self.viewport[3]).max(1.0);
+        let cam = Camera { center: self.cam.center, zoom: self.cam.zoom * side as f32 / guide };
+        cap.view.coc_radius.set(self.ui.coc_radius);
+        let rgba = cap.render(&self.gpu, &self.world, &cam, self.ui.view_mode, self.ui.monomer_brightness);
+        let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+        let path = if frame {
+            self.rec_frames += 1;
+            self.ui.rec_info = format!("a gravar: {} imagens", self.rec_frames);
+            self.rec_dir.as_ref().unwrap().join(format!("f_{:05}.png", self.rec_frames))
+        } else {
+            let dir = std::path::Path::new(SAVES_DIR).join("capturas");
+            let _ = std::fs::create_dir_all(&dir);
+            let path = dir.join(format!("foto_{}.png", self.world.params.epoch));
+            self.ui.scene_msg = format!("fotografia em {}", path.display());
+            path
+        };
+        // O PNG comprime-se noutra thread, para a simulação não esperar.
+        std::thread::spawn(move || {
+            if let Err(e) = ribossome::render::capture::save_rgb_png(&rgb, side, &path) {
+                log::error!("{}: {e}", path.display());
+            }
+        });
+    }
+
     /// Na pista, as sementes nascem dentro do corredor (ao acaso ao longo
     /// da volta e da largura) em vez de espalhadas pelo mundo, que é rocha.
     fn onto_track(&mut self, reqs: &mut [ribossome::params::SpawnRequest]) {
@@ -1138,8 +1214,53 @@ impl Running {
         let raw = self.egui_state.take_egui_input(&self.window);
         let ctx = self.egui_state.egui_ctx().clone();
         let mut free = None;
+        let cam_now = self.cam;
         let mut out = ctx.run_ui(raw, |root| {
             free = ui::draw(root, &mut self.ui, &mut self.world, &mut self.profiler, &mut self.inspector);
+            // Por cima da vista: mira do agente selecionado e do enquadramento.
+            if let Some(r) = free {
+                let ppp = root.ctx().pixels_per_point();
+                let painter = root.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("mira"))).with_clip_rect(r);
+                let centre = r.center();
+                let dark = egui::Stroke::new(3.0, egui::Color32::from_black_alpha(140));
+                if let Some(d) = self.inspector.data.as_ref().filter(|_| !self.inspector.dead) {
+                    // Mundo -> ecrã (cima no ecrã = +y no mundo).
+                    let p = centre + egui::vec2((d.agent.pos_x - cam_now.center[0]) * cam_now.zoom / ppp, -(d.agent.pos_y - cam_now.center[1]) * cam_now.zoom / ppp);
+                    let rad = (d.agent.radius * cam_now.zoom / ppp + 8.0).max(16.0);
+                    let light = egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 235, 120));
+                    for st in [dark, light] {
+                        for (dx, dy) in [(1.0f32, 0.0f32), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+                            let dir = egui::vec2(dx, dy);
+                            painter.line_segment([p + dir * rad, p + dir * (rad + 12.0)], st);
+                        }
+                        painter.circle_stroke(p, rad, egui::Stroke::new(st.width * 0.6, st.color));
+                    }
+                }
+                if self.ui.frame_guide || self.ui.rec {
+                    let side = 0.9 * r.width().min(r.height());
+                    let q = egui::Rect::from_center_size(centre, egui::vec2(side, side));
+                    let col = if self.ui.rec { egui::Color32::from_rgb(255, 80, 70) } else { egui::Color32::from_white_alpha(200) };
+                    let line = egui::Stroke::new(1.5, col);
+                    let arm = side * 0.08;
+                    for st in [dark, line] {
+                        for (cx, cy, sx, sy) in [(q.left(), q.top(), 1.0f32, 1.0f32), (q.right(), q.top(), -1.0, 1.0), (q.left(), q.bottom(), 1.0, -1.0), (q.right(), q.bottom(), -1.0, -1.0)] {
+                            let c = egui::pos2(cx, cy);
+                            painter.line_segment([c, c + egui::vec2(arm * sx, 0.0)], st);
+                            painter.line_segment([c, c + egui::vec2(0.0, arm * sy)], st);
+                        }
+                    }
+                    // Regra dos terços, ténue.
+                    let thin = egui::Stroke::new(1.0, egui::Color32::from_white_alpha(40));
+                    for k in [1.0f32 / 3.0, 2.0 / 3.0] {
+                        painter.line_segment([egui::pos2(q.left() + side * k, q.top()), egui::pos2(q.left() + side * k, q.bottom())], thin);
+                        painter.line_segment([egui::pos2(q.left(), q.top() + side * k), egui::pos2(q.right(), q.top() + side * k)], thin);
+                    }
+                    if self.ui.rec {
+                        painter.circle_filled(q.left_top() + egui::vec2(16.0, 16.0), 6.0, egui::Color32::from_rgb(255, 60, 50));
+                        painter.text(q.left_top() + egui::vec2(28.0, 16.0), egui::Align2::LEFT_CENTER, "REC", egui::FontId::proportional(14.0), egui::Color32::from_rgb(255, 90, 80));
+                    }
+                }
+            }
         });
         // Viewport da simulação: todo o espaço livre entre as barras.
         self.covered = free.is_none();
@@ -1211,6 +1332,7 @@ impl Running {
         if std::mem::take(&mut self.ui.report_now) {
             self.write_report();
         }
+        self.photo_video();
         let side = std::mem::take(&mut self.ui.big_shot);
         if side > 0 {
             let epoch = self.world.params.epoch;
