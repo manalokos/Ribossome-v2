@@ -375,8 +375,23 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             if (organ == ORGAN_STORAGE) {
                 // DEPOSITO: um oval ao longo da cadeia, maior e mais
                 // comprido quanto mais guarda (capacidade x intensidade).
+                // Depósitos seguidos na cadeia desenham-se como UM só,
+                // maior: cada um ganha o tamanho do conjunto e os ovais
+                // sobrepõem-se ao longo da cadeia.
+                var merged = 1.0;
+                for (var j = k + 1u; j < a.body_len && j < k + 8u; j++) {
+                    let oj = (organs_view[slot * 32u + j / 2u] >> ((j % 2u) * 16u)) & 0xFFFFu;
+                    if (oj == 0u || (oj & 0x1Fu) - 1u != ORGAN_STORAGE) { break; }
+                    merged += 1.0;
+                }
+                for (var j = 1u; j <= k && j < 8u; j++) {
+                    let oj = (organs_view[slot * 32u + (k - j) / 2u] >> (((k - j) % 2u) * 16u)) & 0xFFFFu;
+                    if (oj == 0u || (oj & 0x1Fu) - 1u != ORGAN_STORAGE) { break; }
+                    merged += 1.0;
+                }
                 let sv = organ_variants_view[ORGAN_STORAGE * ORGAN_VARIANTS + min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u)];
-                let grow = clamp(sqrt(max(sv.p0, 0.0) * clamp(exp2((f32(oc >> 8u) - 32.0) / 8.0), 0.5, 2.0) / 8.0), 0.7, 2.2);
+                let own = max(sv.p0, 0.0) * clamp(exp2((f32(oc >> 8u) - 32.0) / 8.0), 0.5, 2.0);
+                let grow = clamp(sqrt(own * merged * (1.0 + 0.25 * (merged - 1.0)) / 8.0), 0.7, 3.2);
                 r_world *= grow;
                 phase = 1.0 + 0.4 * grow;
             }

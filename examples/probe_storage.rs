@@ -14,16 +14,17 @@ fn main() {
     let gpu = Gpu::new_headless().unwrap();
     let cfg = WorldConfig::DEFAULT;
     let gly = "GGU ".repeat(10);
-    let organ = |pre: &str, modi: &str| bases(&format!("AUG {pre} {modi} GAA {gly} UAA"));
+    // Um depósito = UGG AUG GAA (W + M + intensidade 1). `n` seguidos, ou separados por glicinas.
+    let st = "UGG AUG GAA ";
     let cases: Vec<(&str, Vec<u8>)> = vec![
         ("10 glicinas", bases(&format!("AUG {gly} UAA"))),
         ("10 fenilalaninas", bases(&format!("AUG {} UAA", "UUU ".repeat(10)))),
-        ("glicinas + armazenamento variante 0 (C M)", organ("UGU", "AUG")),
-        ("glicinas + armazenamento variante 1 (C W)", organ("UGU", "UGG")),
-        ("glicinas + armazenamento variante 2 (Q M)", organ("CAA", "AUG")),
-        ("glicinas + armazenamento variante 3 (Q W)", organ("CAA", "UGG")),
-        ("glicinas + armazenamento variante 4 (W M)", organ("UGG", "AUG")),
-        ("glicinas + armazenamento variante 5 (W W)", organ("UGG", "UGG")),
+        ("glicinas + 1 depósito", bases(&format!("AUG {} {gly} UAA", st.repeat(1)))),
+        ("glicinas + 2 depósitos seguidos", bases(&format!("AUG {} {gly} UAA", st.repeat(2)))),
+        ("glicinas + 3 depósitos seguidos", bases(&format!("AUG {} {gly} UAA", st.repeat(3)))),
+        ("glicinas + 4 depósitos seguidos", bases(&format!("AUG {} {gly} UAA", st.repeat(4)))),
+        ("glicinas + 2 depósitos SEPARADOS", bases(&format!("AUG {st} GGU GGU GGU {st} {} UAA", "GGU ".repeat(7)))),
+        ("glicinas + 4 depósitos SEPARADOS", bases(&format!("AUG {st} GGU {st} GGU {st} GGU {st} {} UAA", "GGU ".repeat(7)))),
     ];
     let mut w = World::new(&gpu, cfg, 3);
     w.custom_terrain = Some((vec![0; cfg.cells() as usize], vec![0.0; cfg.cells() as usize]));
@@ -35,7 +36,7 @@ fn main() {
     w.params.pairing_rate = 0.0;
     w.params.uptake_rate = 0.0;
     w.params.uv_strength = 0.0;
-    w.params.spawn_energy = 50.0;
+    w.params.spawn_energy = 200.0;
     let reqs: Vec<SpawnRequest> = cases.iter().enumerate().map(|(i, (_, g))| SpawnRequest::with_genome(3000.0 + 2000.0 * i as f32, 5000.0, g)).collect();
     w.request_seeds(&reqs);
     let mut enc = gpu.device.create_command_encoder(&Default::default());

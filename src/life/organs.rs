@@ -249,7 +249,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
         2 => format!("{} · sente {}", sensor("sensor de comida TOTAL", "coroa de antenas verdes"), alvo()),
         3 => format!("{} · sente {}", sensor("sensor físico TOTAL", "coroa de antenas amarelas"), alvo_fisico()),
         4 => sensor("sensor de energia interna (com prolina a seguir: DOR, a energia que lhe tiram as proteases, emitida em γ/δ)", "disco com anel dourado"),
-        7 => format!("armazenamento [disco com anéis]: acrescenta {:.1} à capacidade de energia do corpo (a intensidade só conta entre ×0,5 e ×2)", v("capacidade") * g.clamp(0.5, 2.0)),
+        7 => format!("armazenamento [disco com anéis]: acrescenta {:.1} à capacidade de energia do corpo (a intensidade só conta entre ×0,5 e ×2); vários seguidos na cadeia fundem-se num depósito maior, +25% por cada um a mais", v("capacidade") * g.clamp(0.5, 2.0)),
         8 | 9 => {
             // Um lado só: par = esquerda, ímpar = direita (troca depois de um quiral).
             let lado = if gain_idx & 1 == 0 { "ESQUERDO" } else { "DIREITO" };

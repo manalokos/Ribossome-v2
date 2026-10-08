@@ -344,6 +344,8 @@ fn die_release(slot: u32, a_in: Agent, budget_in: u32) {
 //   (dormência + reserva), não a nadadores.
 // O RNA nu guarda 1.
 const BODY_CAPACITY: f32 = 0.5;
+const STORE_MERGE: f32 = 0.25;
+const STORE_MERGE_MAX: f32 = 8.0;
 const CAP_VOLUME_REF: f32 = 141.26;
 // RECARGA: um produtor (luz, fumarolas) com energia a transbordar usa-a
 // primeiro para a SUA cópia: carrega um monómero GASTO da célula, o que o
@@ -368,16 +370,28 @@ fn pair_base(b: u32) -> u32 {
 
 fn energy_capacity(slot: u32, a: Agent) -> f32 {
     var vol = 0.0;
+    // DEPÓSITOS JUSTAPOSTOS: órgãos de armazenamento seguidos na cadeia
+    // fundem-se num só depósito maior, que guarda mais do que a soma das
+    // partes (+STORE_MERGE por cada órgão a mais, até STORE_MERGE_MAX
+    // seguidos). Só há um tamanho de órgão: um depósito grande faz-se
+    // repetindo-o, e cada repetição paga o seu peso e o seu arrasto.
     var store = 0.0;
+    var run = 0.0;
+    var run_cap = 0.0;
     for (var k = 0u; k < a.body_len; k++) {
         vol += aa_props[body_get(slot, k)].volume;
         let o = organ_get(slot, k);
-        // A intensidade só afina a capacidade entre x0,5 e x2: o tamanho do
-        // depósito é o da variante (que é a que paga peso e arrasto). Sem
-        // este limite, uma intensidade alta (até x14,7) dava depósitos de
-        // centenas sem pesarem mais por isso.
-        if (organ_type(o) == ORGAN_STORAGE) { store += max(organ_var(o).p0, 0.0) * clamp(organ_gain(o), 0.5, 2.0); }
+        if (organ_type(o) == ORGAN_STORAGE) {
+            // A intensidade só afina a capacidade entre ×0,5 e ×2.
+            run += 1.0;
+            run_cap += max(organ_var(o).p0, 0.0) * clamp(organ_gain(o), 0.5, 2.0);
+        } else {
+            store += run_cap * (1.0 + STORE_MERGE * (min(run, STORE_MERGE_MAX) - 1.0)) * step(0.5, run);
+            run = 0.0;
+            run_cap = 0.0;
+        }
     }
+    store += run_cap * (1.0 + STORE_MERGE * (min(run, STORE_MERGE_MAX) - 1.0)) * step(0.5, run);
     return max(BODY_CAPACITY * vol / CAP_VOLUME_REF + store, 1.0);
 }
 
