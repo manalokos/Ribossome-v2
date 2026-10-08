@@ -113,6 +113,15 @@ fn protease_drive(slot: u32, k: u32, v: OrganVariant) -> f32 {
 // cada família em cada um e o alcance do escalão.
 const PROTEASE_MID_FROM: f32 = 10.0;
 const PROTEASE_FAR_FROM: f32 = 70.0;
+// DILUIÇÃO: uma protease de alcance é enzima largada na água, e dilui-se. A
+// tocar morde com a força inteira; daí até ao fim do alcance cai em linha
+// reta até REACH_EDGE da força. Quem tem alcance morde primeiro mas fraco;
+// quem aguenta a aproximação e chega perto morde forte.
+const REACH_EDGE: f32 = 0.2;
+fn reach_falloff(dist: f32, reach: f32) -> f32 {
+    return 1.0 - (1.0 - REACH_EDGE) * clamp(dist / max(reach, 1.0), 0.0, 1.0);
+}
+
 struct ProteaseArms {
     near: vec4<f32>,
     mid: vec4<f32>,
@@ -147,13 +156,12 @@ fn protease_arms(slot: u32, n: u32) -> ProteaseArms {
     return arms;
 }
 
-// CUSTO DE ESTAR ABERTA, em residuos de manutencao: so a ESTRUTURA dos
-// espigoes, proporcional ao alcance (alcance / PROTEASE_REACH_REF x
-// PROTEASE_ACTIVE_COST) e a abertura. Nao depende da forca nem do dano: uns
-// picos compridos a espera de presa sao quase gratis de manter (como os de
-// um heliozoario); o que custam e peso e arrasto (tabela). As de contacto
-// nao gastam nada por estarem abertas.
-const PROTEASE_ACTIVE_COST: f32 = 0.5;
+// CUSTO DE ESTAR ABERTA, em residuos de manutencao: forca x alcance /
+// PROTEASE_REACH_REF x PROTEASE_ACTIVE_COST x abertura. Largar enzima forte
+// num volume grande de agua e caro; uns picos compridos e fracos a espera de
+// presa custam pouco (como os de um heliozoario), e as de contacto nada. O
+// resto do custo dos espigoes e peso e arrasto (tabela).
+const PROTEASE_ACTIVE_COST: f32 = 1.0;
 const PROTEASE_REACH_REF: f32 = 40.0;
 fn protease_active(slot: u32, n: u32) -> f32 {
     var c = 0.0;
@@ -161,7 +169,10 @@ fn protease_active(slot: u32, n: u32) -> f32 {
         let o = organ_get(slot, k);
         if (organ_type(o) == ORGAN_PROTEASE) {
             let v = organ_var(o);
-            c += protease_drive(slot, k, v) * max(v.p0, 0.0) / PROTEASE_REACH_REF;
+            // força × alcance: a de contacto não gasta; picos compridos e fracos
+            // gastam pouco; só "longe E forte" sai caro (alcance 100, força 3 =
+            // 7,5 resíduos de manutenção).
+            c += protease_drive(slot, k, v) * max(v.p1, 0.0) * organ_gain(o) * max(v.p0, 0.0) / PROTEASE_REACH_REF;
         }
     }
     return c * PROTEASE_ACTIVE_COST;
@@ -172,7 +183,7 @@ fn protease_active(slot: u32, n: u32) -> f32 {
 // resiste às dessa família vindas de outros. É o que impede dois caçadores
 // iguais de se desfazerem um ao outro ao mesmo tempo. Devolve, por família,
 // quanto do alvo fica exposto (1 = tudo, 1 − PROTEASE_IMMUNITY = protegido).
-const PROTEASE_IMMUNITY: f32 = 0.9;
+const PROTEASE_IMMUNITY: f32 = 0.5;
 fn protease_exposed(slot: u32, n: u32) -> vec4<f32> {
     var own = vec4<f32>(0.0);
     for (var k = 0u; k < n; k++) {
@@ -269,8 +280,8 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     // alcance também a essa distância para lá do contacto.
                     var sites = vec4<f32>(0.0);
                     if (overlap > 0.0) { sites += arms.near; }
-                    if (-overlap < arms.r_mid) { sites += arms.mid; }
-                    if (-overlap < arms.r_far) { sites += arms.far; }
+                    if (-overlap < arms.r_mid) { sites += arms.mid * reach_falloff(-overlap, arms.r_mid); }
+                    if (-overlap < arms.r_far) { sites += arms.far * reach_falloff(-overlap, arms.r_far); }
                     if (armed && sites.x + sites.y + sites.z + sites.w > 0.0 && b.energy > 0.0) {
                         let power = dot(sites, unpack_targets(contact_disp[e].w)) * PRED_SITE_SCALE;
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * unpack_proline(contact_disp[e].w);
