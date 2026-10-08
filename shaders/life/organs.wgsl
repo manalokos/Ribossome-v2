@@ -181,10 +181,33 @@ fn pocket_family(nb: u32) -> u32 {
 
 // GRELHA DOS CORPOS: resíduos de agentes por célula (BODY_DIV × BODY_DIV
 // células do ambiente), para os sensores de corpos. Dois valores por célula:
-// [2i] = todos os resíduos; [2i + 1] = os que cada família de protease corta
-// (10 bits por família: bits 0-9 a 1, 10-19 a 2, 20-29 a 3).
+// [2i] = todos os resíduos nos 16 bits de baixo e, nos de cima, as
+// PROTEASES ABERTAS que lá estão (força ativa em oitavos: o "cheiro" a
+// protease); [2i + 1] = os que cada família de protease corta (10 bits por
+// família: bits 0-9 a 1, 10-19 a 2, 20-29 a 3).
 const BODY_DIV: u32 = 2u;
 const BODY_SIZE: u32 = GRID_SIZE / BODY_DIV;
+
+// CHEIRO A PROTEASE de um resíduo, em oitavos: a força com que a protease
+// está aberta (variante × intensidade × abertura, como em protease_arms).
+// Fechada não cheira: um caçador de emboscada com as proteases recolhidas
+// passa despercebido.
+fn protease_smell(slot: u32, k: u32) -> u32 {
+    let o = organ_get(slot, k);
+    var f = 0.0;
+    if (organ_type(o) == ORGAN_PROTEASE) {
+        let v = organ_var(o);
+        f = max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v);
+    }
+    return u32(round(clamp(f, 0.0, 8.0) * 8.0));
+}
+// Um oitavo de cheiro, nas unidades de sense_disc (resíduos por célula): uma
+// protease de força 1 aberta dentro do disco lê-se como ~10 resíduos.
+const PROTEASE_SMELL_SCALE: f32 = 10.0 / 8.0;
+// Família "4" dos sensores de corpos: o cheiro a protease.
+const FAM_PROTEASE: u32 = 4u;
+// DOR: energia perdida para proteases num passo que dá meia resposta.
+const PAIN_K: f32 = 0.05;
 
 @compute @workgroup_size(256)
 fn body_clear(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -211,6 +234,8 @@ fn body_count(@builtin(global_invocation_id) gid: vec3<u32>) {
             let m = u32(max(aa_props[body_get(slot, k)].protease_target, 0.0) + 0.5);
             let add = (m & 1u) | (((m >> 1u) & 1u) << 10u) | (((m >> 2u) & 1u) << 20u);
             if (add != 0u) { atomicAdd(&body_grid[bi + 1u], add); }
+            let smell = protease_smell(slot, k);
+            if (smell != 0u) { atomicAdd(&body_grid[bi], smell << 16u); }
         }
     }
 }
@@ -352,7 +377,9 @@ fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, fam
                 // Residuos por célula do ambiente (a grelha dos corpos é BODY_DIV² maior).
                 let bi = 2u * ((u32(c.y) / BODY_DIV) * BODY_SIZE + u32(c.x) / BODY_DIV);
                 if (fam == 0u) {
-                    v = f32(atomicLoad(&body_grid[bi])) / f32(BODY_DIV * BODY_DIV);
+                    v = f32(atomicLoad(&body_grid[bi]) & 0xFFFFu) / f32(BODY_DIV * BODY_DIV);
+                } else if (fam == FAM_PROTEASE) {
+                    v = f32(atomicLoad(&body_grid[bi]) >> 16u) * PROTEASE_SMELL_SCALE / f32(BODY_DIV * BODY_DIV);
                 } else {
                     let packed = atomicLoad(&body_grid[bi + 1u]);
                     v = f32((packed >> (10u * (fam - 1u))) & 1023u) * BODY_FAMILY_SCALE / f32(BODY_DIV * BODY_DIV);
@@ -388,7 +415,9 @@ fn own_body_in_disc(slot: u32, a: Agent, pos: vec2<f32>, perp: vec2<f32>, direct
         if (length(d) > SENSOR_RADIUS) { continue; }
         // Com família: só contam os resíduos-alvo dela, na mesma escala.
         var wk = 1.0;
-        if (fam != 0u) {
+        if (fam == FAM_PROTEASE) {
+            wk = f32(protease_smell(slot, k)) * PROTEASE_SMELL_SCALE;
+        } else if (fam != 0u) {
             let m = u32(max(aa_props[body_get(slot, k)].protease_target, 0.0) + 0.5);
             wk = select(0.0, BODY_FAMILY_SCALE, ((m >> (fam - 1u)) & 1u) != 0u);
         }
@@ -480,8 +509,14 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                     // vê aspartato e asparagina (família 2); um hidrofóbico
                     // (F, L, W, Y, I, V) vê os aromáticos e a leucina
                     // (família 3). Outro vizinho, ou nenhum: todos os corpos.
+                    // Vizinho PROLINA (o aminoácido que resiste às proteases,
+                    // um falso substrato): cheira as PROTEASES ABERTAS dos
+                    // outros, para fugir antes de ser tocado.
                     var fam = 0u;
-                    if (k + 1u < n) { fam = pocket_family(body_get(slot, k + 1u)); }
+                    if (k + 1u < n) {
+                        let nb = body_get(slot, k + 1u);
+                        fam = select(pocket_family(nb), FAM_PROTEASE, nb == AA_PROLINE);
+                    }
                     let raw = sense_disc(here, perp, what, dir, fam) - own_body_in_disc(slot, a, here, perp, dir, fam);
                     sensed = raw / (abs(raw) + sense_k(3u));
                 } else {
@@ -490,6 +525,14 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
             }
             case ORGAN_ENERGY_SENSOR: {
                 sensed = clamp(a.energy / max(cap, 1e-3), 0.0, 1.0) * 2.0;
+                // DOR: com uma PROLINA a seguir (a mesma antena do cheiro a
+                // protease), o sensor lê a energia que as proteases dos
+                // outros lhe tiraram no passo anterior (contact_apply), em
+                // vez da energia que tem. Zero enquanto ninguém o morde.
+                if (k + 1u < n && body_get(slot, k + 1u) == AA_PROLINE) {
+                    let lost = max(contact_disp[slot].x, 0.0);
+                    sensed = 2.0 * lost / (lost + PAIN_K);
+                }
             }
             default: { is_sensor = false; }
         }
