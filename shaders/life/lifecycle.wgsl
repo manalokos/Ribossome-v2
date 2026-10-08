@@ -744,6 +744,13 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (has_mem) { sensor_mem[ti] = ahead; }
         let reach = max(a.radius, 1.0);
         a.energy -= params.wall_damage * clamp((reach - track_wall_dist(now)) / reach, 0.0, 1.0);
+        // VIDA MÉDIA: em cada passo, cada agente morre com probabilidade
+        // 1 / track_lifespan (vidas de duração média track_lifespan passos),
+        // seja bom ou mau nadador. Dá sempre lugar aos filhos. (Não se usa
+        // a.age: esse contador não avança um por passo.)
+        if (params.track_lifespan > 0u && rng_f4(a.id, params.epoch, S_DEATH).z * f32(params.track_lifespan) < 1.0) {
+            a.energy = 0.0;
+        }
     }
 
     // ---- MORTE (v3): base ÷ energia × temperatura + risco UV ----

@@ -400,7 +400,11 @@ gpu_struct! {
         /// mais ninguém (quem já copiou o genoma espera por um lugar). A
         /// imigração de genomas ao acaso só enche até metade.
         pub track_pop: u32,
-        pub _pad_track0: u32,
+        /// Pista: VIDA MÉDIA em passos (em cada passo morre-se com
+        /// probabilidade 1 / isto). Sem isto, com a pista cheia de bons
+        /// nadadores ninguém morre e deixa de haver lugar para filhos.
+        /// 0 = sem limite.
+        pub track_lifespan: u32,
         pub _pad_track1: u32,
         pub _pad_track2: u32,
     }
@@ -588,7 +592,7 @@ impl Default for SimParams {
             track_gain: 0.1,
             wall_damage: 0.05,
             track_pop: 400,
-            _pad_track0: 0,
+            track_lifespan: 20000,
             _pad_track1: 0,
             _pad_track2: 0,
         }

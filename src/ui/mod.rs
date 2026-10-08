@@ -775,6 +775,8 @@ fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
             .on_hover_text("energia perdida por passo com o centro do agente em cima de uma parede (proporcional a quanto o seu raio entra nela)");
         ui.add(egui::Slider::new(&mut p.track_pop, 20..=20000).logarithmic(true).text("teto da população"))
             .on_hover_text("número máximo de agentes na pista: cheia, ninguém nasce. Enquanto houver menos de metade, entram genomas ao acaso (imigração), para nunca se extinguir; a outra metade é para os filhos de quem avança");
+        ui.add(egui::Slider::new(&mut p.track_lifespan, 0..=200000).logarithmic(true).text("vida média (passos)"))
+            .on_hover_text("em cada passo cada agente morre com probabilidade 1 / este valor, seja bom ou mau nadador: as vidas duram em média este número de passos. Serve para haver sempre lugares novos mesmo com a pista cheia de bons nadadores. 0 = sem limite");
         let mut same = p.copy_same != 0;
         if ui.checkbox(&mut same, "filhos iguais ao pai").on_hover_text("o filho é uma cópia do genoma do pai em vez do complemento reverso (uma só forma por linhagem)").changed() {
             p.copy_same = same as u32;

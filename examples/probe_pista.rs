@@ -38,6 +38,8 @@ fn main() {
     w.params.track_gain = envf("GAIN", w.params.track_gain);
     w.params.wall_damage = envf("WALL", w.params.wall_damage);
     w.params.signal_mode = envf("MODE", w.params.signal_mode);
+    w.params.track_lifespan = envf("LIFE", w.params.track_lifespan as f32) as u32;
+    w.params.track_pop = envf("POP", w.params.track_pop as f32) as u32;
     w.params.motor_amplitude = envf("MOTOR", w.params.motor_amplitude);
     println!("ganho {} por unidade, dano das paredes {}", w.params.track_gain, w.params.wall_damage);
     let swimmer = bases(&format!("AUG CAU CUU {} UAA", "GGU ".repeat(15)));
@@ -96,15 +98,16 @@ fn main() {
         for (k, name) in ["nadador (relógio)", "controlo", "OUTRO genoma"].iter().enumerate() {
             println!("  {name:20} vivos {:6}  energia média {:6.2}  filhos {:6}  a tocar na parede {:5}", t[k].0, t[k].1 / t[k].0.max(1) as f32, t[k].2, near_wall[k]);
         }
-        println!("  com o centro dentro da rocha: {inside_rock}");
+        println!("  com o centro dentro da rocha: {inside_rock}; idade máxima {} (limite {})", agents.iter().filter(|a| a.alive != 0).map(|a| a.age).max().unwrap_or(0), w.params.track_lifespan);
     };
     report(&w, "ao fim de 2 passos:");
     let mut done = 2;
     while done < steps {
-        let k = 500.min(steps - done);
+        // encode_steps faz no máximo 64 passos por chamada.
+        let k = 64.min(steps - done);
         run(&mut w, k);
         done += k;
-        if done % 500 == 0 || done >= steps {
+        if done >= steps {
             report(&w, &format!("ao fim de {done} passos:"));
         }
     }

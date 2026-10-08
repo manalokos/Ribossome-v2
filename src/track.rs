@@ -71,6 +71,13 @@ pub fn preset(p: &mut crate::params::SimParams) {
     // Nasce-se com pouca energia: senão quem tem um órgão de armazenamento
     // guarda a energia inicial toda e sobrevive muito mais tempo sem avançar.
     p.spawn_energy = 3.0;
+    // Com a manutenção normal um agente parado morre de fome em ~300 passos,
+    // cedo demais para se ver quem avança: um quarto dela dá ~1200. Quem
+    // avança bem não morre de fome; a vida média (5000 passos) é o que o tira
+    // para dar lugar aos filhos.
+    p.maintenance_cost = 0.0005;
+    p.track_gain = 0.3;
+    p.track_lifespan = 5000;
 }
 
 /// Um ponto do eixo da pista (para semear agentes): `t` em 0..1 dá a volta,
