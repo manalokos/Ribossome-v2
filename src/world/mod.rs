@@ -460,7 +460,7 @@ impl World {
         let bond_accept = storage_buffer(device, "bond accept", max_agents * 4);
         let bond_disp = storage_buffer(device, "bond disp", max_agents * 16);
         let (organ_code, code_source) = crate::life::table::load_code();
-        log::info!("código dos órgãos: {code_source}");
+        log::info!("organ code: {code_source}");
         let code_buf = storage_buffer(device, "organ code", 400 * 4);
         let kin_target = storage_buffer(device, "kin target", 257 * 4);
         // Dois u32 por célula da grelha dos corpos (total e resíduos-alvo por família).
@@ -476,7 +476,7 @@ impl World {
         gpu.queue.write_buffer(&code_buf, 0, bytemuck::cast_slice(&crate::life::table::code_to_gpu(&organ_code)));
         // Tabela dos aminoácidos (assets/aminoacidos.json).
         let (amino, amino_source) = crate::life::table::load();
-        log::info!("tabela dos aminoácidos: {amino_source}");
+        log::info!("amino acid table: {amino_source}");
         let aa_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("amino table"),
             size: (20 * size_of::<crate::params::AaProps>()) as u64,
@@ -485,7 +485,7 @@ impl World {
         });
         gpu.queue.write_buffer(&aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&amino)));
         let (organ_table, organ_source) = crate::life::table::load_organs();
-        log::info!("tabela dos órgãos: {organ_source}");
+        log::info!("organ table: {organ_source}");
         let organ_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("organ table"),
             size: (crate::life::organs::ORGAN_TYPES * crate::life::organs::VARIANTS * size_of::<crate::params::OrganProps>())

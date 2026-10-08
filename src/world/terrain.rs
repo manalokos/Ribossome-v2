@@ -118,16 +118,16 @@ pub fn load_png(path: &std::path::Path, cfg: &WorldConfig) -> Result<TerrainImag
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut dec = png::Decoder::new(std::io::BufReader::new(file));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = dec.read_info().map_err(|e| format!("PNG inválido: {e}"))?;
+    let mut reader = dec.read_info().map_err(|e| format!("invalid PNG: {e}"))?;
     let mut buf = vec![0u8; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buf).map_err(|e| format!("PNG inválido: {e}"))?;
+    let info = reader.next_frame(&mut buf).map_err(|e| format!("invalid PNG: {e}"))?;
     let (w, h) = (info.width as usize, info.height as usize);
     let ch = match info.color_type {
         png::ColorType::Grayscale => 1,
         png::ColorType::GrayscaleAlpha => 2,
         png::ColorType::Rgb => 3,
         png::ColorType::Rgba => 4,
-        png::ColorType::Indexed => return Err("PNG indexado não suportado (grava em RGB)".into()),
+        png::ColorType::Indexed => return Err("indexed PNG not supported (save it as RGB)".into()),
     };
     let n = cfg.grid_size as usize;
     let mut g = vec![0u32; n * n];

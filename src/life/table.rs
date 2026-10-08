@@ -149,20 +149,20 @@ const EMBEDDED_ORGANS: &str = include_str!("../../assets/orgaos.json");
 
 /// Lê e valida a tabela dos órgãos: uma linha por tipo, ordenada.
 pub fn parse_organs(text: &str) -> Result<Vec<OrganRow>, String> {
-    let mut rows: Vec<OrganRow> = serde_json::from_str(text).map_err(|e| format!("JSON inválido: {e}"))?;
+    let mut rows: Vec<OrganRow> = serde_json::from_str(text).map_err(|e| format!("invalid JSON: {e}"))?;
     rows.sort_by_key(|r| r.tipo);
     let n = super::organs::ORGAN_TYPES;
     if rows.len() != n || rows.iter().enumerate().any(|(i, r)| r.tipo as usize != i) {
-        return Err(format!("são precisas {n} linhas, tipos 0..{}", n - 1));
+        return Err(format!("{n} rows are needed, types 0..{}", n - 1));
     }
     for r in &rows {
         if r.variantes.len() != super::organs::VARIANTS {
-            return Err(format!("{}: {} variantes (devem ser {})", r.nome, r.variantes.len(), super::organs::VARIANTS));
+            return Err(format!("{}: {} variants (must be {})", super::organs::ORGAN_NAMES_EN[r.tipo as usize], r.variantes.len(), super::organs::VARIANTS));
         }
         for (vi, v) in r.variantes.iter().enumerate() {
             for p in super::organs::ORGAN_PROPS[r.tipo as usize] {
                 if !v.contains_key(p.name) {
-                    return Err(format!("{} variante {vi}: falta \"{}\"", r.nome, p.name));
+                    return Err(format!("{} variant {vi}: \"{}\" is missing", super::organs::ORGAN_NAMES_EN[r.tipo as usize], p.name));
                 }
             }
         }
@@ -175,11 +175,11 @@ pub fn load_organs() -> (Vec<OrganRow>, String) {
         Ok(text) => match parse_organs(&text) {
             Ok(rows) => (rows, ORGANS_PATH.to_string()),
             Err(e) => {
-                log::error!("{ORGANS_PATH}: {e}; uso a tabela embutida");
-                (embedded_organs(), format!("embutida ({ORGANS_PATH} inválido)"))
+                log::error!("{ORGANS_PATH}: {e}; using the embedded table");
+                (embedded_organs(), format!("embedded ({ORGANS_PATH} invalid)"))
             }
         },
-        Err(_) => (embedded_organs(), "embutida".to_string()),
+        Err(_) => (embedded_organs(), "embedded".to_string()),
     }
 }
 
@@ -257,18 +257,18 @@ pub fn variants_to_gpu(rows: &[OrganRow]) -> Vec<crate::params::OrganVariant> {
 
 /// Lê e valida: 20 linhas, uma por aminoácido; devolve-as na ordem de `AMINO`.
 pub fn parse(text: &str) -> Result<Vec<AminoRow>, String> {
-    let rows: Vec<AminoRow> = serde_json::from_str(text).map_err(|e| format!("JSON inválido: {e}"))?;
+    let rows: Vec<AminoRow> = serde_json::from_str(text).map_err(|e| format!("invalid JSON: {e}"))?;
     let mut ordered = Vec::with_capacity(20);
     for l in AA_LETTERS {
         let found: Vec<&AminoRow> = rows.iter().filter(|r| r.letra == l.to_string()).collect();
         match found.len() {
             1 => ordered.push(found[0].clone()),
-            0 => return Err(format!("falta o aminoácido {l}")),
-            _ => return Err(format!("o aminoácido {l} aparece {} vezes", found.len())),
+            0 => return Err(format!("amino acid {l} is missing")),
+            _ => return Err(format!("amino acid {l} appears {} times", found.len())),
         }
     }
     if rows.len() != 20 {
-        return Err(format!("{} linhas (devem ser 20)", rows.len()));
+        return Err(format!("{} rows (must be 20)", rows.len()));
     }
     Ok(ordered)
 }
@@ -280,11 +280,11 @@ pub fn load() -> (Vec<AminoRow>, String) {
         Ok(text) => match parse(&text) {
             Ok(rows) => (rows, TABLE_PATH.to_string()),
             Err(e) => {
-                log::error!("{TABLE_PATH}: {e}; uso a tabela embutida");
-                (embedded(), format!("embutida ({TABLE_PATH} inválido)"))
+                log::error!("{TABLE_PATH}: {e}; using the embedded table");
+                (embedded(), format!("embedded ({TABLE_PATH} invalid)"))
             }
         },
-        Err(_) => (embedded(), "embutida".to_string()),
+        Err(_) => (embedded(), "embedded".to_string()),
     }
 }
 
@@ -350,18 +350,18 @@ pub const CODE_PATH: &str = "assets/codigo_orgaos.json";
 const EMBEDDED_CODE: &str = include_str!("../../assets/codigo_orgaos.json");
 
 pub fn parse_code(text: &str) -> Result<OrganCode, String> {
-    let code: OrganCode = serde_json::from_str(text).map_err(|e| format!("JSON inválido: {e}"))?;
+    let code: OrganCode = serde_json::from_str(text).map_err(|e| format!("invalid JSON: {e}"))?;
     let letter = |l: &str| AA_LETTERS.iter().any(|c| c.to_string() == l);
     for (p, row) in &code {
         if !letter(p) {
-            return Err(format!("promotor desconhecido: {p}"));
+            return Err(format!("unknown promoter: {p}"));
         }
         for (m, [t, v]) in row {
             if !letter(m) {
-                return Err(format!("{p}: modificador desconhecido: {m}"));
+                return Err(format!("{p}: unknown modifier: {m}"));
             }
             if *t as usize >= super::organs::ORGAN_TYPES || *v as usize >= super::organs::VARIANTS {
-                return Err(format!("{p}{m}: órgão {t} variante {v} fora da tabela"));
+                return Err(format!("{p}{m}: organ {t} variant {v} is outside the table"));
             }
         }
     }
@@ -373,11 +373,11 @@ pub fn load_code() -> (OrganCode, String) {
         Ok(text) => match parse_code(&text) {
             Ok(c) => (c, CODE_PATH.to_string()),
             Err(e) => {
-                log::error!("{CODE_PATH}: {e}; uso o código embutido");
-                (embedded_code(), format!("embutido ({CODE_PATH} inválido)"))
+                log::error!("{CODE_PATH}: {e}; using the embedded code");
+                (embedded_code(), format!("embedded ({CODE_PATH} invalid)"))
             }
         },
-        Err(_) => (embedded_code(), "embutido".to_string()),
+        Err(_) => (embedded_code(), "embedded".to_string()),
     }
 }
 

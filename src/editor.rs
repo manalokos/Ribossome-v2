@@ -7,7 +7,7 @@
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
-use crate::life::organs::{GAIN_DEFAULT, ORGAN_NAMES, ORGAN_PROPS, ORGAN_SYMBOLS, ORGAN_TYPES, VARIANTS, describe};
+use crate::life::organs::{GAIN_DEFAULT, ORGAN_NAMES_EN, ORGAN_PROPS, ORGAN_SYMBOLS, ORGAN_TYPES, VARIANTS, describe};
 use crate::life::table::{self, AminoRow, OrganCode, OrganRow};
 
 /// O que a página mudou.
@@ -39,7 +39,7 @@ fn organs_json(table: &[OrganRow]) -> String {
         let textos: Vec<String> = (0..VARIANTS as u8).map(|p| describe(t as u8, p, GAIN_DEFAULT, table)).collect();
         out.push(serde_json::json!({
             "tipo": t,
-            "nome": ORGAN_NAMES[t],
+            "nome": ORGAN_NAMES_EN[t],
             "simbolo": ORGAN_SYMBOLS[t].to_string(),
             "props": props,
             "textos": textos,

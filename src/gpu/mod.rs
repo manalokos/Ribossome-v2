@@ -21,7 +21,7 @@ impl Gpu {
                 apply_limit_buckets: false,
             })
             .await
-            .map_err(|e| format!("sem adaptador GPU: {e}"))?;
+            .map_err(|e| format!("no GPU adapter: {e}"))?;
         let info = adapter.get_info();
         log::info!("GPU: {} ({:?}, {:?})", info.name, info.backend, info.device_type);
 

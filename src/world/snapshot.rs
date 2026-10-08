@@ -147,10 +147,10 @@ impl Scene {
         let mut bytes = Vec::new();
         f.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
         if bytes.len() < 12 || &bytes[..8] != MAGIC {
-            return Err(format!("{} não é uma cena do ribossome", path.display()));
+            return Err(format!("{} is not a ribossome scene", path.display()));
         }
         let hl = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-        let header: Value = serde_json::from_slice(&bytes[12..12 + hl]).map_err(|e| format!("cabeçalho: {e}"))?;
+        let header: Value = serde_json::from_slice(&bytes[12..12 + hl]).map_err(|e| format!("header: {e}"))?;
         let mut blocks = std::collections::HashMap::new();
         let mut p = 12 + hl;
         while p < bytes.len() {
@@ -159,7 +159,7 @@ impl Scene {
             p += 2 + nl;
             let cl = u64::from_le_bytes(bytes[p..p + 8].try_into().unwrap()) as usize;
             p += 8;
-            let data = lz4_flex::decompress_size_prepended(&bytes[p..p + cl]).map_err(|e| format!("bloco {name}: {e}"))?;
+            let data = lz4_flex::decompress_size_prepended(&bytes[p..p + cl]).map_err(|e| format!("block {name}: {e}"))?;
             p += cl;
             blocks.insert(name, data);
         }
@@ -167,7 +167,7 @@ impl Scene {
     }
 
     fn block(&self, name: &str) -> Result<&[u8], String> {
-        self.blocks.get(name).map(|v| v.as_slice()).ok_or_else(|| format!("falta o bloco {name}"))
+        self.blocks.get(name).map(|v| v.as_slice()).ok_or_else(|| format!("block {name} is missing"))
     }
 
     /// Um bloco binário de quem gravou (ver `save_scene`), se existir.
@@ -370,7 +370,7 @@ impl World {
     pub fn load_scene(&mut self, gpu: &Gpu, scene: &Scene) -> Result<(Value, Vec<String>), String> {
         let h = &scene.header;
         if h["cfg"] != cfg_json(&self.cfg) {
-            return Err(format!("a cena é de outro tamanho de mundo ({} ≠ {})", h["cfg"], cfg_json(&self.cfg)));
+            return Err(format!("the scene is from another world size ({} ≠ {})", h["cfg"], cfg_json(&self.cfg)));
         }
         let mut notes = Vec::new();
         // Verifica os blocos antes de mudar o que quer que seja.
@@ -387,16 +387,16 @@ impl World {
         ];
         for (name, size) in expect {
             if scene.block(name)?.len() != size {
-                return Err(format!("bloco {name} com tamanho errado"));
+                return Err(format!("block {name} has the wrong size"));
             }
         }
         let agent_words = scene.block("agents")?;
         if agent_words.len() != slots.len() * size_of::<Agent>() || counters.len() != 8 {
-            return Err("agentes com tamanho errado".into());
+            return Err("agents have the wrong size".into());
         }
         let agents: Vec<Agent> = bytemuck::pod_collect_to_vec(agent_words);
         if slots.iter().any(|&s| s >= self.cfg.max_agents) {
-            return Err("slot fora do mundo".into());
+            return Err("slot outside the world".into());
         }
         let body_len: Vec<u32> = agents.iter().map(|a| a.body_len).collect();
 
@@ -405,13 +405,13 @@ impl World {
         if let Some(obj) = h["params"].as_object() {
             for (k, v) in obj {
                 if !params.set_named(k, v.as_f64().unwrap_or(0.0)) {
-                    notes.push(format!("parâmetro {k} já não existe (ignorado)"));
+                    notes.push(format!("parameter {k} no longer exists (ignored)"));
                 }
             }
             let missing: Vec<&str> =
                 params.to_named().iter().map(|(k, _)| *k).filter(|k| !obj.contains_key(*k)).collect();
             if !missing.is_empty() {
-                notes.push(format!("parâmetros novos, com o valor por omissão: {}", missing.join(", ")));
+                notes.push(format!("new parameters, with the default value: {}", missing.join(", ")));
             }
         }
         self.params = params;
@@ -439,7 +439,7 @@ impl World {
         let same_organs = serde_json::from_value::<Vec<crate::life::table::OrganRow>>(h["tabela_orgaos"].clone())
             .is_ok_and(|t| serde_json::to_value(t).ok() == serde_json::to_value(&self.organ_table).ok());
         if !same_amino || !same_organs {
-            notes.push("as tabelas de assets/ mudaram desde a gravação (uso as de assets/)".into());
+            notes.push("the tables in assets/ changed since the scene was saved (using the ones in assets/)".into());
         }
         let grid_u32 = |name: &str| -> Option<Vec<u32>> {
             scene.blocks.get(name).filter(|b| b.len() == cells * 4).map(|b| bytemuck::pod_collect_to_vec(b))
@@ -472,12 +472,12 @@ impl World {
         q.write_buffer(&self.bonds_buf, 0, &vec![0xFFu8; self.bonds_buf.size() as usize]);
         for b in self.slot_bufs() {
             if b.name == "bonds2" && !scene.blocks.contains_key("bonds2") {
-                notes.push("cena sem ligações por âncoras (gravada antes de existirem): agentes soltos".into());
+                notes.push("scene without anchor bonds (saved before they existed): agents are unbonded".into());
                 continue;
             }
             if b.name == "signals4" && !scene.blocks.contains_key("signals4") {
                 // Cena de antes dos 4 canais: os sinais internos recomeçam a zero.
-                notes.push("cena com sinais de 2 canais (antes de γ e δ): os sinais internos recomeçam a zero".into());
+                notes.push("scene with 2-channel signals (before γ and δ): the internal signals restart at zero".into());
                 let mut enc = gpu.device.create_command_encoder(&Default::default());
                 enc.clear_buffer(&self.signals_buf, 0, None);
                 q.submit([enc.finish()]);
@@ -495,7 +495,7 @@ impl World {
             let data: &[u8] = &data;
             let (segs, words) = segments(&b, &slots, &body_len, false);
             if data.len() as u64 != words * 4 {
-                return Err(format!("bloco {} com tamanho errado", b.name));
+                return Err(format!("block {} has the wrong size", b.name));
             }
             if words == 0 {
                 continue;

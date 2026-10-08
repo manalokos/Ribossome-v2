@@ -58,14 +58,13 @@ impl RunLog {
         };
         if log.enabled {
             if let Err(e) = std::fs::create_dir_all("logs") {
-                eprintln!("log: não consegui criar logs/: {e}");
+                eprintln!("log: could not create logs/: {e}");
                 log.enabled = false;
             } else {
                 log.write(&format!(
-                    "\n######## sessão nova (unix {}) ########\n{}\nregisto de {} em {} frames; profiler ligado {} frames antes de cada registo\n",
+                    "\n######## new session (unix {}) ########\n{}\none entry every {} frames; profiler on {} frames before each entry\n",
                     unix_now(),
                     log.header,
-                    log.every,
                     log.every,
                     SAMPLE
                 ));
@@ -104,7 +103,7 @@ impl RunLog {
         let t = self.started.elapsed().as_secs_f64();
         s += &format!("==== frame {}  t={t:.1} s  unix {} ====\n", self.frame, unix_now());
         s += &format!(
-            "epoch {}  epochs/s {:.0}  frame {:.2} ms ({:.0} fps)  passos/frame {}  pausa {}  vsync {}  vista {}  cor agentes {}\n",
+            "epoch {}  epochs/s {:.0}  frame {:.2} ms ({:.0} fps)  steps/frame {}  paused {}  vsync {}  view {}  agent color {}\n",
             world.params.epoch,
             st.stats.epochs_per_sec,
             prof.frame_ms,
@@ -118,19 +117,19 @@ impl RunLog {
         match world.last_counters {
             Some(c) => {
                 s += &format!(
-                    "agentes vivos {}  nasc/s {:.1}  mortes/s {:.1}  | {:?}\n",
+                    "agents alive {}  births/s {:.1}  deaths/s {:.1}  | {:?}\n",
                     c.alive(world.cfg.max_agents),
                     st.stats.births_per_sec,
                     st.stats.deaths_per_sec,
                     c
                 )
             }
-            None => s += "agentes: ainda sem leitura\n",
+            None => s += "agents: no reading yet\n",
         }
         if let Some(l) = &st.ledger {
             let base = st.baseline.total() as i64;
             s += &format!(
-                "matéria total {} (Δ {:+} desde a semente)  livre {}  em agentes {}  ativ {:?}  gastos {:?}  presos {:?}  (leitura do epoch {})\n",
+                "total matter {} (Δ {:+} since the seed)  free {}  in agents {}  activated {:?}  spent {:?}  held {:?}  (reading from epoch {})\n",
                 l.total(),
                 l.total() as i64 - base,
                 l.free_total(),
@@ -142,11 +141,11 @@ impl RunLog {
             );
         }
         if prof.enabled {
-            s += "profiler (média exponencial):";
+            s += "profiler (exponential average):";
             for seg in prof.stats() {
                 s += &format!("  {} {:.3} ms", seg.name, seg.avg_ms);
                 if seg.name == "world" && !st.paused {
-                    s += &format!(" ({:.3} ms/passo)", seg.avg_ms / st.steps_per_frame.max(1) as f64);
+                    s += &format!(" ({:.3} ms/step)", seg.avg_ms / st.steps_per_frame.max(1) as f64);
                 }
             }
             s += "\n";
@@ -161,7 +160,7 @@ impl RunLog {
             let old = self.path.with_extension("log.1");
             let _ = std::fs::remove_file(&old);
             let _ = std::fs::rename(&self.path, &old);
-            let header = format!("(continua de ribossome.log.1)\n{}\n", self.header);
+            let header = format!("(continued from ribossome.log.1)\n{}\n", self.header);
             self.append(&header);
         }
         self.append(text);
@@ -170,7 +169,7 @@ impl RunLog {
     fn append(&mut self, text: &str) {
         let r = std::fs::OpenOptions::new().create(true).append(true).open(&self.path).and_then(|mut f| f.write_all(text.as_bytes()));
         if let Err(e) = r {
-            eprintln!("log: falhou a escrita em {}: {e}; log desligado", self.path.display());
+            eprintln!("log: writing to {} failed: {e}; log turned off", self.path.display());
             self.enabled = false;
         }
     }

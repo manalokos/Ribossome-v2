@@ -90,6 +90,33 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "fio (liga dois genes)",
 ];
 
+/// Os mesmos nomes em inglês, SÓ para mostrar (interface, gráficos, editor,
+/// relatório). `ORGAN_NAMES` continua a ser a chave guardada nas cenas e nas
+/// estatísticas ("% com <nome>"): não trocar um pelo outro.
+pub const ORGAN_NAMES_EN: [&str; ORGAN_TYPES] = [
+    "mouth",
+    "muscle (amplifier)",
+    "food sensor",
+    "light sensor",
+    "energy sensor",
+    "clock",
+    "relay",
+    "storage",
+    "one-sided food sensor",
+    "one-sided light sensor",
+    "photosystem",
+    "protease",
+    "anchor",
+    "bias",
+    "chemosynthesis",
+    "proofreading (fewer mutations)",
+    "dormancy (slow metabolism)",
+    "age bias",
+    "holdfast (grips the terrain)",
+    "chiral (flips the side of the bends)",
+    "linker (joins two genes)",
+];
+
 /// Letras curtas para o inspetor.
 pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q', '~'];
 
@@ -342,7 +369,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             fmt_canal(v("canal")),
             v("meia_vida")
         ),
-        _ => row.nome.clone(),
+        _ => ORGAN_NAMES_EN.get(t).map_or_else(|| row.nome.clone(), |n| n.to_string()),
     }
 }
 

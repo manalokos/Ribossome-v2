@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="pt">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ribossome · Aminoácidos</title>
+<title>Ribossome · Amino acids</title>
 <style>
   :root { --bg: #111418; --panel: #1a1f25; --line: #2c333b; --text: #dde3ea; --dim: #8b96a3; --accent: #e8b84a; --ok: #6fcf7f; --err: #ef6b6b; }
   * { box-sizing: border-box; }
@@ -37,56 +37,56 @@
 </head>
 <body>
 <header>
-  <h1>Aminoácidos</h1>
-  <button id="save">gravar no ficheiro</button>
-  <button id="reload">recarregar do ficheiro</button>
-  <span id="status">a carregar…</span>
+  <h1>Amino acids</h1>
+  <button id="save">save to file</button>
+  <button id="reload">reload from file</button>
+  <span id="status">loading…</span>
 </header>
 <main>
-  <p class="note">Cada alteração é aplicada à simulação no passo seguinte. "Gravar" escreve <code>assets/aminoacidos.json</code> e <code>assets/orgaos.json</code> (as fontes dos valores ao arrancar). Passa o rato pelos cabeçalhos para ver o que cada coluna faz.</p>
+  <p class="note">Each change is applied to the simulation on the next step. "Save" writes <code>assets/aminoacidos.json</code> and <code>assets/orgaos.json</code> (the sources of the values at startup). Hover over the headers to see what each column does.</p>
   <div class="scroll"><table id="t"></table></div>
-  <h2>Código dos órgãos</h2>
-  <p class="note">Linha = aminoácido <b>promotor</b>, coluna = aminoácido <b>modificador</b> (o seguinte na proteína). Cada célula escolhe o órgão e a variante (0–5) que esse par forma; "—" = sem órgão (ficam os dois aminoácidos normais). Codões sinónimos dão o mesmo órgão. Um terceiro codão (se não for stop) dá a intensidade (×0,06 a ×15). Vale para os nascimentos e sementes seguintes; os corpos já feitos não mudam.</p>
+  <h2>Organ code</h2>
+  <p class="note">Row = <b>promoter</b> amino acid, column = <b>modifier</b> amino acid (the next one in the protein). Each cell chooses the organ and the variant (0–5) that the pair forms; "—" = no organ (the two amino acids stay as normal ones). Synonymous codons give the same organ. A third codon (if it is not a stop) gives the intensity (×0.06 to ×15). It applies to the births and seeds that follow; bodies already made do not change.</p>
   <div class="scroll"><table id="code"></table></div>
   <p class="note" id="codecount"></p>
-  <h2>Órgãos</h2>
-  <p class="note">Cada variante tem as suas propriedades; o comprimento e a massa multiplicam os do aminoácido promotor; os custos da variante multiplicam os do tipo.</p>
+  <h2>Organs</h2>
+  <p class="note">Each variant has its own properties; the length and the mass multiply those of the promoter amino acid; the costs of the variant multiply those of the type.</p>
   <div id="organs"></div>
 </main>
 <script>
 const COLS = [
-  ["massa", "massa", "Massa do resíduo (Da): pesa no centro de massa e na sedimentação."],
-  ["volume", "volume", "Volume da cadeia lateral (Å³): espessura com que é desenhado."],
-  ["catalise", "catálise", "Propensão catalítica (M-CSA): quanto come quando é a boca."],
-  ["flexibilidade", "flex", "Flexibilidade (Vihinen 1994): rigidez da junta = 1/flex²."],
-  ["angulo_repouso", "repouso", "Ângulo de repouso da junta (rad, com sinal): a forma do corpo."],
-  ["dobra_max", "dobra máx", "Desvio máximo que os sinais conseguem impor à junta (rad)."],
-  ["sens_alfa", "sens α", "Dobra da junta por unidade de sinal α."],
-  ["sens_beta", "sens β", "Dobra da junta por unidade de sinal β."],
-  ["cond_alfa_N", "α do N", "Fração do sinal α vinda do vizinho N (início) que passa; negativo inverte."],
-  ["cond_alfa_C", "α do C", "Fração do sinal α vinda do vizinho C (fim) que passa; negativo inverte."],
-  ["cond_beta_N", "β do N", "Fração do sinal β vinda do vizinho N que passa."],
-  ["cond_beta_C", "β do C", "Fração do sinal β vinda do vizinho C que passa."],
-  ["sens_gama", "sens γ", "Dobra da junta por unidade de sinal γ (modos de sinais 0 e 3)."],
-  ["sens_delta", "sens δ", "Dobra da junta por unidade de sinal δ (modos de sinais 0 e 3)."],
-  ["cond_gama_N", "γ do N", "Fração do sinal γ vinda do vizinho N que passa; negativo inverte."],
-  ["cond_gama_C", "γ do C", "Fração do sinal γ vinda do vizinho C que passa; negativo inverte."],
-  ["cond_delta_N", "δ do N", "Fração do sinal δ vinda do vizinho N que passa; negativo inverte."],
-  ["cond_delta_C", "δ do C", "Fração do sinal δ vinda do vizinho C que passa; negativo inverte."],
-  ["contacto_canal", "contacto: canal", "Emissão por contacto: canal em que emite ao tocar num resíduo não vizinho da classe que procura (0 α, 1 β, 2 γ, 3 δ; −1 = não emite)."],
-  ["contacto_quer", "contacto: quer", "Classe de parceiro que o faz emitir (1 ácidos, 2 tiol, 3 aromáticos)."],
-  ["contacto_classe", "contacto: classe", "Classe deste aminoácido como parceiro de contacto (0 = nenhuma)."],
-  ["arrasto", "arrasto", "Arrasto do resíduo na água (multiplicador; 1 = normal). Independente da massa: decide quanto este resíduo resiste a ser movido, na natação e na dobra das juntas."],
-  ["protease_alvo", "protease: alvo", "Famílias de protease (decididas pelo aminoácido a seguir à protease) que cortam este aminoácido numa vítima. Soma: 1 = família 1, 2 = família 2, 4 = família 3."],
-  ["substrato_A", "A", "Preferência por comer monómeros A (as quatro devem somar 1)."],
-  ["substrato_U", "U", "Preferência por U."],
-  ["substrato_G", "G", "Preferência por G."],
-  ["substrato_C", "C", "Preferência por C."],
-  ["absorcao_uv", "UV", "Absorção de luz UV (sombra): triptofano = 1."],
-  ["comprimento", "compr.", "Comprimento do segmento (unidades do mundo; o v3 usava 11). Também pesa no arrasto da natação."],
-  ["termoestabilidade", "termo", "Termoestabilidade (0..1): a desnaturação pelo calor é × (1 − média do corpo). Termófilos: mais E, K, R, P; menos Q, N."],
+  ["massa", "mass", "Residue mass (Da): it weighs in the center of mass and in sedimentation."],
+  ["volume", "volume", "Side-chain volume (Å³): the thickness it is drawn with."],
+  ["catalise", "catalysis", "Catalytic propensity (M-CSA): how much it eats when it is the mouth."],
+  ["flexibilidade", "flex", "Flexibility (Vihinen 1994): joint stiffness = 1/flex²."],
+  ["angulo_repouso", "rest", "Rest angle of the joint (rad, signed): the shape of the body."],
+  ["dobra_max", "max bend", "Maximum deviation that the signals can impose on the joint (rad)."],
+  ["sens_alfa", "sens α", "Bend of the joint per unit of α signal."],
+  ["sens_beta", "sens β", "Bend of the joint per unit of β signal."],
+  ["cond_alfa_N", "α from N", "Fraction of the α signal coming from the N neighbor (start) that passes; negative inverts."],
+  ["cond_alfa_C", "α from C", "Fraction of the α signal coming from the C neighbor (end) that passes; negative inverts."],
+  ["cond_beta_N", "β from N", "Fraction of the β signal coming from the N neighbor that passes."],
+  ["cond_beta_C", "β from C", "Fraction of the β signal coming from the C neighbor that passes."],
+  ["sens_gama", "sens γ", "Bend of the joint per unit of γ signal (signal modes 0 and 3)."],
+  ["sens_delta", "sens δ", "Bend of the joint per unit of δ signal (signal modes 0 and 3)."],
+  ["cond_gama_N", "γ from N", "Fraction of the γ signal coming from the N neighbor that passes; negative inverts."],
+  ["cond_gama_C", "γ from C", "Fraction of the γ signal coming from the C neighbor that passes; negative inverts."],
+  ["cond_delta_N", "δ from N", "Fraction of the δ signal coming from the N neighbor that passes; negative inverts."],
+  ["cond_delta_C", "δ from C", "Fraction of the δ signal coming from the C neighbor that passes; negative inverts."],
+  ["contacto_canal", "contact: channel", "Emission on contact: the channel it emits on when it touches a non-neighbor residue of the class it looks for (0 α, 1 β, 2 γ, 3 δ; −1 = does not emit)."],
+  ["contacto_quer", "contact: wants", "Class of partner that makes it emit (1 acids, 2 thiol, 3 aromatics)."],
+  ["contacto_classe", "contact: class", "Class of this amino acid as a contact partner (0 = none)."],
+  ["arrasto", "drag", "Drag of the residue in the water (multiplier; 1 = normal). Independent of the mass: it decides how much this residue resists being moved, in swimming and in the bending of the joints."],
+  ["protease_alvo", "protease: target", "Protease families (decided by the amino acid that follows the protease) that cut this amino acid in a victim. Sum: 1 = family 1, 2 = family 2, 4 = family 3."],
+  ["substrato_A", "A", "Preference for eating A monomers (the four must add up to 1)."],
+  ["substrato_U", "U", "Preference for U."],
+  ["substrato_G", "G", "Preference for G."],
+  ["substrato_C", "C", "Preference for C."],
+  ["absorcao_uv", "UV", "Absorption of UV light (shade): tryptophan = 1."],
+  ["comprimento", "length", "Length of the segment (world units; v3 used 11). It also weighs in the swimming drag."],
+  ["termoestabilidade", "thermo", "Thermostability (0..1): denaturation by heat is × (1 − average of the body). Thermophiles: more E, K, R, P; fewer Q, N."],
 ];
-const GROUPS = [["", 1], ["física", 4], ["forma e sinais", 4], ["condutividade", 4], ["substrato", 4], ["luz", 1], ["corpo", 1]];
+const GROUPS = [["", 1], ["physics", 4], ["shape and signals", 4], ["conductivity", 4], ["substrate", 4], ["light", 1], ["body", 1]];
 let organRows = [];
 let otimer = null;
 let rows = [];
@@ -116,7 +116,7 @@ function render() {
 async function push() {
   const r = await fetch("/api/table", { method: "POST", body: JSON.stringify(rows) });
   const txt = await r.text();
-  status(r.ok ? "aplicado à simulação (não gravado)" : txt, r.ok ? "ok" : "err");
+  status(r.ok ? "applied to the simulation (not saved)" : txt, r.ok ? "ok" : "err");
 }
 
 async function load() {
@@ -126,12 +126,12 @@ async function load() {
 
 let organInfo = [];
 // Custos por variante, em múltiplos dos do tipo (1 = igual ao tipo).
-const COSTS = [["custo_comprimento", "× compr."], ["custo_massa", "× massa"], ["custo_arrasto", "× arrasto"], ["custo_manutencao", "× manut."]];
+const COSTS = [["custo_comprimento", "× length"], ["custo_massa", "× mass"], ["custo_arrasto", "× drag"], ["custo_manutencao", "× maint."]];
 
 function organCard(r, info) {
   const props = info.props.map(p => p.nome);
-  let h = `<div class="organ"><h3>${info.simbolo} ${info.nome} <span style="color:var(--dim);font-weight:400">(tipo ${r.tipo})</span></h3>`;
-  h += `<div style="margin:4px 0 8px">` + [["comprimento_mult", "× comprimento"], ["massa_mult", "× massa"], ["arrasto_mult", "× arrasto"], ["manutencao", "manutenção"], ["intensidade_paga", "intensidade paga (0/1)"]]
+  let h = `<div class="organ"><h3>${info.simbolo} ${info.nome} <span style="color:var(--dim);font-weight:400">(type ${r.tipo})</span></h3>`;
+  h += `<div style="margin:4px 0 8px">` + [["comprimento_mult", "× length"], ["massa_mult", "× mass"], ["arrasto_mult", "× drag"], ["manutencao", "maintenance"], ["intensidade_paga", "intensity is paid for (0/1)"]]
     .map(([k, l]) => `<label style="margin-right:14px;color:var(--dim)">${l} <input type="number" step="0.1" data-t="${r.tipo}" data-k="${k}" value="${+(r[k] ?? 0).toFixed(3)}"></label>`).join("") + `</div>`;
   // Propriedades da junta/sinais próprias do órgão: vazio = as do aminoácido promotor.
   const opt = (k, l, i, tip) => {
@@ -139,16 +139,16 @@ function organCard(r, info) {
     return `<label title="${tip}" style="margin-right:10px;color:var(--dim)">${l} <input type="number" step="0.05" style="width:62px" placeholder="—" data-t="${r.tipo}" data-o="${k}"${i === undefined ? "" : ` data-i="${i}"`} value="${val === undefined || val === null ? "" : +(+val).toFixed(3)}"></label>`;
   };
   const CH = ["α", "β", "γ", "δ"];
-  h += `<div style="margin:4px 0 4px">` + opt("angulo", "ângulo (rad)", undefined, "ângulo de repouso próprio; vazio = o do aminoácido promotor") +
-    opt("flexibilidade", "flexibilidade", undefined, "flexibilidade da junta (rigidez = rigidez das juntas / flexibilidade²); vazio = a do promotor") +
-    opt("dobra_max", "dobra máx.", undefined, "dobra máxima pelos sinais (rad); vazio = a do promotor") +
-    CH.map((c, i) => opt("sensibilidade", "sens. " + c, i, "quanto a junta dobra com o sinal " + c + " (modos 0 e 3); vazio = a do promotor")).join("") + `</div>`;
-  h += `<div style="margin:0 0 8px">` + ["α N", "α C", "β N", "β C"].map((c, i) => opt("conducao", "cond. " + c, i, "condução do sinal vindo do vizinho do lado N ou C (modo 0); vazio = a do promotor")).join("") +
-    ["γ N", "γ C", "δ N", "δ C"].map((c, i) => opt("conducao_gd", "cond. " + c, i, "condução nos canais γ e δ (modo 0); vazio = γ usa a de α e δ a de β")).join("") + `</div>`;
-  h += `<div class="scroll"><table><thead><tr><th>variante</th>` +
+  h += `<div style="margin:4px 0 4px">` + opt("angulo", "angle (rad)", undefined, "its own rest angle; empty = that of the promoter amino acid") +
+    opt("flexibilidade", "flexibility", undefined, "flexibility of the joint (stiffness = joint stiffness / flexibility²); empty = that of the promoter") +
+    opt("dobra_max", "max bend", undefined, "maximum bend by the signals (rad); empty = that of the promoter") +
+    CH.map((c, i) => opt("sensibilidade", "sens. " + c, i, "how much the joint bends with the " + c + " signal (modes 0 and 3); empty = that of the promoter")).join("") + `</div>`;
+  h += `<div style="margin:0 0 8px">` + ["α N", "α C", "β N", "β C"].map((c, i) => opt("conducao", "cond. " + c, i, "conduction of the signal coming from the neighbor on the N or C side (mode 0); empty = that of the promoter")).join("") +
+    ["γ N", "γ C", "δ N", "δ C"].map((c, i) => opt("conducao_gd", "cond. " + c, i, "conduction on the γ and δ channels (mode 0); empty = γ uses that of α and δ that of β")).join("") + `</div>`;
+  h += `<div class="scroll"><table><thead><tr><th>variant</th>` +
     info.props.map(p => `<th title="${p.desc}">${p.nome}</th>`).join("") +
-    COSTS.map(([k, l]) => `<th title="custo da variante: ${l.slice(2)} do tipo" style="color:var(--dim)">${l}</th>`).join("") +
-    `<th style="text-align:left">o que faz</th></tr></thead><tbody>`;
+    COSTS.map(([k, l]) => `<th title="cost of the variant: multiplies the ${l.slice(2)} of the type" style="color:var(--dim)">${l}</th>`).join("") +
+    `<th style="text-align:left">what it does</th></tr></thead><tbody>`;
   r.variantes.forEach((v, vi) => {
     h += `<tr><td>${vi}</td>` + props.map(k => `<td><input type="number" step="0.05" data-t="${r.tipo}" data-v="${vi}" data-k="${k}" value="${+(v[k] ?? 0).toFixed(3)}"></td>`).join("") +
       COSTS.map(([k]) => `<td><input type="number" step="0.05" data-t="${r.tipo}" data-v="${vi}" data-k="${k}" value="${+(v[k] ?? 1).toFixed(3)}"></td>`).join("") +
@@ -195,7 +195,7 @@ function renderOrgans() {
 
 async function pushOrgans() {
   const r = await fetch("/api/organ_table", { method: "POST", body: JSON.stringify(organRows) });
-  status(r.ok ? "aplicado à simulação (não gravado)" : await r.text(), r.ok ? "ok" : "err");
+  status(r.ok ? "applied to the simulation (not saved)" : await r.text(), r.ok ? "ok" : "err");
   if (!r.ok) return;
   // Atualiza as descrições sem redesenhar (para não perder o foco).
   organInfo = await (await fetch("/api/organs")).json();
@@ -221,7 +221,7 @@ function codeOptions(cur) {
 }
 
 function renderCode() {
-  let h = `<thead><tr><th>promotor ↓ · modificador →</th>` + AAS.map(a => `<th>${a}</th>`).join("") + `</tr></thead><tbody>`;
+  let h = `<thead><tr><th>promoter ↓ · modifier →</th>` + AAS.map(a => `<th>${a}</th>`).join("") + `</tr></thead><tbody>`;
   for (const p of AAS) {
     h += `<tr><td class="aa">${p}</td>`;
     for (const m of AAS) {
@@ -252,13 +252,13 @@ function renderCode() {
 function countCode() {
   const per = {};
   for (const p in code) for (const m in code[p]) { const t = code[p][m][0]; per[t] = (per[t] || 0) + 1; }
-  document.getElementById("codecount").textContent = "promotores: " + Object.keys(code).join(", ") + " · pares por órgão: " +
+  document.getElementById("codecount").textContent = "promoters: " + Object.keys(code).join(", ") + " · pairs per organ: " +
     organInfo.map((o, t) => `${o.nome} ${per[t] || 0}`).join(", ");
 }
 
 async function pushCode() {
   const r = await fetch("/api/code", { method: "POST", body: JSON.stringify(code) });
-  status(r.ok ? "código aplicado (não gravado)" : await r.text(), r.ok ? "ok" : "err");
+  status(r.ok ? "code applied (not saved)" : await r.text(), r.ok ? "ok" : "err");
 }
 
 async function loadOrgans() {
@@ -284,7 +284,7 @@ document.getElementById("reload").onclick = async () => {
 (async () => {
   await load();
   await loadOrgans();
-  status("pronto", "ok");
+  status("ready", "ok");
 })();
 </script>
 </body>

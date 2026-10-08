@@ -8,7 +8,7 @@
 
 use std::io::Write;
 
-use crate::life::organs::{ORGAN_NAMES, ORGAN_TYPES};
+use crate::life::organs::{ORGAN_NAMES, ORGAN_NAMES_EN, ORGAN_TYPES};
 use crate::world::{Ledger, LifeCounters};
 
 /// Palavras do buffer de estatísticas (a ordem de observe.wgsl).
@@ -43,6 +43,35 @@ pub fn series_names() -> Vec<String> {
     let mut v: Vec<String> = BASE.iter().map(|s| s.to_string()).collect();
     v.extend(ORGAN_NAMES.iter().map(|n| format!("% com {n}")));
     v
+}
+
+/// Nomes das séries fixas em inglês, SÓ para mostrar (a ordem de `BASE`).
+const BASE_EN: [&str; 13] = [
+    "alive",
+    "births / 1000 epochs",
+    "deaths / 1000 epochs",
+    "mean energy",
+    "residues per body",
+    "bases per genome",
+    "mean generation",
+    "maximum generation",
+    "% bonded",
+    "organs per agent",
+    "% free monomers activated",
+    "% matter in agents",
+    "deaths by protease / 1000 epochs",
+];
+
+/// Nome de uma série para MOSTRAR (legendas dos gráficos). O nome guardado
+/// (cenas, CSV, MCP) fica em português; um que não se conheça sai como está.
+pub fn display_name(stored: &str) -> String {
+    if let Some(i) = BASE.iter().position(|b| *b == stored) {
+        return BASE_EN[i].to_string();
+    }
+    if let Some(i) = stored.strip_prefix("% com ").and_then(|o| ORGAN_NAMES.iter().position(|n| *n == o)) {
+        return format!("% with {}", ORGAN_NAMES_EN[i]);
+    }
+    stored.to_string()
 }
 
 pub struct History {
@@ -314,11 +343,15 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History, sel: &mut ChartSel) {
         .names
         .iter()
         .enumerate()
-        .map(|(i, n)| match last.get(i) {
-            Some(v) if as_count(i) => format!("{}: {:.0}", n.trim_start_matches("% "), v * alive_last / 100.0),
-            Some(v) if v.abs() >= 100.0 => format!("{n}: {v:.0}"),
-            Some(v) => format!("{n}: {v:.1}"),
-            None => n.clone(),
+        .map(|(i, n)| {
+            // (Só o texto mostrado: `h.names` fica com as chaves guardadas.)
+            let n = display_name(n);
+            match last.get(i) {
+                Some(v) if as_count(i) => format!("{}: {:.0}", n.trim_start_matches("% "), v * alive_last / 100.0),
+                Some(v) if v.abs() >= 100.0 => format!("{n}: {v:.0}"),
+                Some(v) => format!("{n}: {v:.1}"),
+                None => n,
+            }
         })
         .collect();
     let series = h.plot_series();

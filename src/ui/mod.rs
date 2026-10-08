@@ -527,7 +527,7 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
     if st.signal_view == 4 {
         ui.label("click an organism: green ball = close genome, yellow = intermediate, red = distant (shared 8-mers; the child counts as kin)");
     }
-    let names = crate::life::organs::ORGAN_NAMES;
+    let names = crate::life::organs::ORGAN_NAMES_EN;
     let current = match st.mark_organ {
         0 => "none",
         MARK_BONDED => "bonded by anchor",
