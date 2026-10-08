@@ -376,7 +376,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 // DEPOSITO: um oval ao longo da cadeia, maior e mais
                 // comprido quanto mais guarda (capacidade x intensidade).
                 let sv = organ_variants_view[ORGAN_STORAGE * ORGAN_VARIANTS + min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u)];
-                let grow = clamp(sqrt(max(sv.p0, 0.0) * exp2((f32(oc >> 8u) - 32.0) / 8.0) / 8.0), 0.7, 2.2);
+                let grow = clamp(sqrt(max(sv.p0, 0.0) * clamp(exp2((f32(oc >> 8u) - 32.0) / 8.0), 0.5, 2.0) / 8.0), 0.7, 2.2);
                 r_world *= grow;
                 phase = 1.0 + 0.4 * grow;
             }

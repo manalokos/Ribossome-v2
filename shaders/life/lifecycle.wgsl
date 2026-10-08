@@ -372,7 +372,11 @@ fn energy_capacity(slot: u32, a: Agent) -> f32 {
     for (var k = 0u; k < a.body_len; k++) {
         vol += aa_props[body_get(slot, k)].volume;
         let o = organ_get(slot, k);
-        if (organ_type(o) == ORGAN_STORAGE) { store += max(organ_var(o).p0, 0.0) * organ_gain(o); }
+        // A intensidade só afina a capacidade entre x0,5 e x2: o tamanho do
+        // depósito é o da variante (que é a que paga peso e arrasto). Sem
+        // este limite, uma intensidade alta (até x14,7) dava depósitos de
+        // centenas sem pesarem mais por isso.
+        if (organ_type(o) == ORGAN_STORAGE) { store += max(organ_var(o).p0, 0.0) * clamp(organ_gain(o), 0.5, 2.0); }
     }
     return max(BODY_CAPACITY * vol / CAP_VOLUME_REF + store, 1.0);
 }

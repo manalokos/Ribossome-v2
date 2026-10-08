@@ -364,7 +364,7 @@ pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life:
                 .filter(|&&o| o != 0 && (o & 0x1F) - 1 == 7)
                 .map(|&o| {
                     let v = organ_table.get(7).and_then(|r| r.variantes.get(((o >> 5) & 0x7) as usize)).and_then(|v| v.get("capacidade")).copied().unwrap_or(0.0);
-                    v.max(0.0) * crate::life::organs::organ_gain((o >> 8) as u8)
+                    v.max(0.0) * crate::life::organs::organ_gain((o >> 8) as u8).clamp(0.5, 2.0)
                 })
                 .sum();
             let cap = (body_cap + store).max(1.0);

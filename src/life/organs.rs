@@ -156,7 +156,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("carga", "condensador: quanto carrega por passo e por unidade de sinal (perde um décimo disto por passo); diferenciador: a que velocidade a média segue a entrada (0..1 por passo)"),
         pd("descarga", "condensador: quanto se esvazia por passo enquanto dispara (limiar ÷ descarga = duração do pulso em passos)"),
     ],
-    &[pd("capacidade", "energia que este órgão acrescenta à capacidade do corpo (× a intensidade); o corpo sozinho guarda 0,5 por resíduo de volume médio")],
+    &[pd("capacidade", "energia que este órgão acrescenta à capacidade do corpo (× a intensidade, limitada entre ×0,5 e ×2); o corpo sozinho guarda 0,5 por resíduo de volume médio")],
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
     &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],
@@ -249,7 +249,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
         2 => format!("{} · sente {}", sensor("sensor de comida TOTAL", "coroa de antenas verdes"), alvo()),
         3 => format!("{} · sente {}", sensor("sensor físico TOTAL", "coroa de antenas amarelas"), alvo_fisico()),
         4 => sensor("sensor de energia interna (com prolina a seguir: DOR, a energia que lhe tiram as proteases, emitida em γ/δ)", "disco com anel dourado"),
-        7 => format!("armazenamento [disco com anéis]: acrescenta {:.1} à capacidade de energia do corpo", v("capacidade") * g),
+        7 => format!("armazenamento [disco com anéis]: acrescenta {:.1} à capacidade de energia do corpo (a intensidade só conta entre ×0,5 e ×2)", v("capacidade") * g.clamp(0.5, 2.0)),
         8 | 9 => {
             // Um lado só: par = esquerda, ímpar = direita (troca depois de um quiral).
             let lado = if gain_idx & 1 == 0 { "ESQUERDO" } else { "DIREITO" };
