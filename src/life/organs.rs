@@ -21,7 +21,8 @@
 //! - sensores (comida, luz, energia): bit 0 canal α/β, bit 1 sinal +/−,
 //!   bit 2 nível ou VARIAÇÃO desde o passo anterior. Os de comida e luz
 //!   amostram as células num raio: os TOTAIS somam o disco todo; os
-//!   DIRECIONAIS dão (lado esquerdo − lado direito) da cadeia;
+//!   DIRECIONAIS leem só UM lado da cadeia (esquerdo se o índice de
+//!   intensidade for par, direito se ímpar; o quiral troca-os);
 //! - relógio: canal, período e modulação por α/β vêm das variantes (assets/orgaos.json);
 //! - relé: bits 0–1 modo (α->β, β->α, inverte α, inverte β), bit 2 ganho ×2;
 //! - boca: catálise ×(2 + p); músculo: resposta ×(2 + p/2);
@@ -108,7 +109,7 @@ pub const MAX_PROPS: usize = 8;
 
 const SENSOR_PROPS: &[PropDef] = &[
     pd("canal", "0 = emite em α, 1 = em β"),
-    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ou, no direcional, o contraste relativo (−1..1)"),
+    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ; o direcional lê só um lado da cadeia"),
     pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
     pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
 ];
@@ -116,7 +117,7 @@ const SENSOR_PROPS: &[PropDef] = &[
 /// Sensores "de luz" (físicos): as mesmas propriedades e o que sentem.
 const LIGHT_SENSOR_PROPS: &[PropDef] = &[
     pd("canal", "0 = emite em α, 1 = em β"),
-    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ou, no direcional, o contraste relativo (−1..1)"),
+    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ; o direcional lê só um lado da cadeia"),
     pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
     pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
     pd("alvo", "0 = luz, 1 = temperatura, 2 = redutor das fumarolas, 3 = terreno (grãos)"),
@@ -125,7 +126,7 @@ const LIGHT_SENSOR_PROPS: &[PropDef] = &[
 /// Sensores "de comida": as mesmas propriedades e o que sentem.
 const FOOD_SENSOR_PROPS: &[PropDef] = &[
     pd("canal", "0 = emite em α, 1 = em β"),
-    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ou, no direcional, o contraste relativo (−1..1)"),
+    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ; o direcional lê só um lado da cadeia"),
     pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
     pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
     pd("alvo", "0 = comida (ativados; os canais pesados pelas afinidades do aminoácido SEGUINTE da cadeia, a antena), 1 = gastos (já sem variantes), 2 = corpos de outros agentes (a antena é o aminoácido SEGUINTE: D ou E vê só corpos ricos em lisina e arginina, o que a protease da família 1 corta; K ou R vê aspartato e asparagina, família 2; F, L, W, Y, I ou V vê os aromáticos e a leucina, família 3; P, prolina, cheira as PROTEASES ABERTAS dos outros; outro vizinho vê todos)"),
@@ -245,7 +246,17 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
         ),
         2 => format!("{} · sente {}", sensor("sensor de comida TOTAL", "coroa de antenas verdes"), alvo()),
         3 => format!("{} · sente {}", sensor("sensor físico TOTAL", "coroa de antenas amarelas"), alvo_fisico()),
-        4 => sensor("sensor de energia interna", "disco com anel dourado"),
+        4 => sensor("sensor de energia interna (com prolina a seguir: DOR, a energia que lhe tiram as proteases, emitida em γ/δ)", "disco com anel dourado"),
+        7 => format!("armazenamento [disco com anéis]: acrescenta {:.1} à capacidade de energia do corpo", v("capacidade") * g),
+        8 | 9 => {
+            // Um lado só: par = esquerda, ímpar = direita (troca depois de um quiral).
+            let lado = if gain_idx & 1 == 0 { "ESQUERDO" } else { "DIREITO" };
+            if t == 8 {
+                format!("{} · sente {}", sensor(&format!("sensor de comida do lado {lado}"), "antenas verdes de um lado"), alvo())
+            } else {
+                format!("{} · sente {}", sensor(&format!("sensor físico do lado {lado}"), "antenas amarelas de um lado"), alvo_fisico())
+            }
+        }
         5 => format!(
             "relógio [mostrador]: em {}, período {:.0} passos, força ×{g:.2}{}",
             fmt_canal(v("canal")),
@@ -314,12 +325,13 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             v("valor") * g,
             fmt_canal(v("canal"))
         ),
-        _ => format!(
+        17 => format!(
             "bias de idade [meio disco]: emite {:+.2} em {} ao nascer; cai para metade a cada {:.0} passos de vida",
             v("valor") * g,
             fmt_canal(v("canal")),
             v("meia_vida")
         ),
+        _ => row.nome.clone(),
     }
 }
 

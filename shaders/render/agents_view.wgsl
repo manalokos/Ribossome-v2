@@ -361,6 +361,14 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 // Flash: so a cor, com a forma que a protease tem no momento.
                 if (bite.z > 0.0 && glyph && drive > 0.0) { flash = BITE_ATTACK_COLOR; }
             }
+            if (organ == ORGAN_STORAGE) {
+                // DEPOSITO: um oval ao longo da cadeia, maior e mais
+                // comprido quanto mais guarda (capacidade x intensidade).
+                let sv = organ_variants_view[ORGAN_STORAGE * ORGAN_VARIANTS + min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u)];
+                let grow = clamp(sqrt(max(sv.p0, 0.0) * exp2((f32(oc >> 8u) - 32.0) / 8.0) / 8.0), 0.7, 2.2);
+                r_world *= grow;
+                phase = 1.0 + 0.4 * grow;
+            }
             if (organ == ORGAN_HOLDFAST) { col = vec3<f32>(0.85, 0.6, 0.3); }
             if (organ == ORGAN_CHIRAL) { col = vec3<f32>(0.95, 0.35, 0.85); }
             if (organ == ORGAN_AGE_BIAS) {
@@ -790,8 +798,20 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             let hollow = u > 0.0 && d < core * 0.7;
             return vec4<f32>(select(in.color, in.color * 0.25, hollow), 1.0);
         }
+        case ORGAN_STORAGE: {
+            // Deposito: oval ao longo da cadeia (alongamento em core_phase.y,
+            // pela capacidade), cheio, com aneis e um brilho de gota.
+            let asp = clamp(in.core_phase.y, 1.0, 1.9);
+            let dd = length(vec2<f32>(u / asp, v));
+            if (dd > core) { discard; }
+            let x = dd / core;
+            let rings = step(0.5, fract(x * 3.0));
+            let shade = sqrt(max(1.0 - x * x, 0.0));
+            let c = mix(in.color, vec3<f32>(0.15, 0.1, 0.0), rings * 0.45) * (0.55 + 0.45 * shade) + vec3<f32>(0.2) * pow(shade, 6.0);
+            return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+        }
         default: {
-            // Armazenamento: disco com anéis concêntricos.
+            // Outros: disco com anéis concêntricos.
             if (d > core) { discard; }
             let rings = step(0.5, fract(d / core * 3.0));
             return vec4<f32>(mix(in.color, vec3<f32>(0.15, 0.1, 0.0), rings * 0.7), 1.0);

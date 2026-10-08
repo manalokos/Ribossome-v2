@@ -313,11 +313,11 @@ fn sense_sample(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, k
             let rad = SENSOR_RADIUS * sqrt(u.x);
             let ang = 6.2831853 * u.y;
             var d = rad * vec2<f32>(cos(ang), sin(ang));
-            let left = !directional || h == 0u;
+            let left = true;
             if (directional) {
-                // Espelha para o lado pedido (h = 0 esquerda, 1 direita).
+                // Espelha para o lado do sensor (+perp).
                 let side = dot(d, perp);
-                if ((side < 0.0) == left) { d -= 2.0 * side * perp; }
+                if (side < 0.0) { d -= 2.0 * side * perp; }
             }
             let c = vec2<i32>(floor((pos + d) / w));
             if (any(c < vec2<i32>(0)) || any(c >= vec2<i32>(i32(GRID_SIZE)))) { continue; }
@@ -332,10 +332,9 @@ fn sense_sample(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, k
         }
     }
     let kk = sense_k(what);
-    let l = sum_l / max(n_l, 1.0);
-    if (!directional) { return l / (l + kk); }
-    let r = sum_r / max(n_r, 1.0);
-    return (l - r) / (l + r + kk);
+    // Total ou de um lado so: a mesma ocupacao c / (c + K).
+    let l = (sum_l + sum_r) / max(n_l + n_r, 1.0);
+    return l / (l + kk);
 }
 
 // Leitura EXATA do disco inteiro (só para os corpos de agentes, onde é
@@ -397,8 +396,8 @@ fn sense_disc(pos: vec2<f32>, perp: vec2<f32>, what: u32, directional: bool, fam
             }
         }
     }
-    if (!directional) { return sum_l / max(n_l, 1.0); }
-    return sum_l / max(n_l, 1.0) - sum_r / max(n_r, 1.0);
+    // Direcional: so o lado de +perp (o outro nao se le).
+    return sum_l / max(n_l, 1.0);
 }
 
 // O que o próprio corpo conta no disco do sensor de corpos (para o
@@ -425,7 +424,7 @@ fn own_body_in_disc(slot: u32, a: Agent, pos: vec2<f32>, perp: vec2<f32>, direct
         if (!directional || side > 0.25 * w) { l += wk; } else if (side < -0.25 * w) { rt += wk; }
     }
     if (!directional) { return l / cells; }
-    return (l - rt) / (0.5 * cells);
+    return l / (0.5 * cells);
 }
 
 // Normal (lado esquerdo) da cadeia no resíduo k, no MUNDO.
@@ -498,7 +497,14 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 }
                 let dir = t == ORGAN_FOOD_SENSOR_DIR || t == ORGAN_LIGHT_SENSOR_DIR;
                 let here = residue_world(slot, a, k);
-                let perp = chain_normal(slot, a, k);
+                // SENSOR DE UM LADO: um direcional le so metade do disco, a
+                // esquerda ou a direita da cadeia. O lado vem da paridade do
+                // indice de intensidade do orgao (par = esquerda, impar =
+                // direita) e troca depois de um orgao quiral. Para comparar
+                // os dois lados sao precisos DOIS sensores, um de cada lado e
+                // de sinais contrarios no mesmo canal.
+                var perp = chain_normal(slot, a, k);
+                if (dir) { perp *= chir * select(1.0, -1.0, ((o >> 8u) & 1u) == 1u); }
                 if (what == 3u) {
                     // Corpos: só se conhece a diferença (ou o total) já sem o
                     // próprio corpo; a mesma saturação, com sinal.
@@ -567,7 +573,6 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 v = q;
             }
             v *= ov.p1 * organ_gain(o);
-            if (t == ORGAN_FOOD_SENSOR_DIR || t == ORGAN_LIGHT_SENSOR_DIR) { v *= chir; }
             if (pain) {
                 if (ov.p0 < 0.5) { emit[k].z = v; } else { emit[k].w = v; }
             } else if (ov.p0 < 0.5) {
