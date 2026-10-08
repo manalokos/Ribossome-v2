@@ -502,7 +502,7 @@ impl World {
         });
         gpu.queue.write_buffer(&variant_buf, 0, bytemuck::cast_slice(&crate::life::table::variants_to_gpu(&organ_table)));
         // Fios de RNA das pontas (só visual): posição anterior das pontas e curvatura.
-        let tail_buf = storage_buffer(device, "rna tails", max_agents * 32);
+        let tail_buf = storage_buffer(device, "rna tails", max_agents * 64);
         let draw_args_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("draw args"),
             // Três draws indiretos: o completo (byte 0), o da vista afastada

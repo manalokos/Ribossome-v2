@@ -23,7 +23,7 @@ const VERSION: u32 = 2;
 const MAX_BODY: u64 = crate::life::amino::MAX_BODY as u64;
 /// Palavras por agente nos buffers por slot.
 const AGENT_WORDS: u64 = (size_of::<Agent>() / 4) as u64;
-const TAIL_WORDS: u64 = 8;
+const TAIL_WORDS: u64 = 16;
 
 /// Cópia de segmentos de u32 entre dois buffers (um fio por segmento):
 /// compacta os slots vivos para gravar e espalha-os ao carregar.
@@ -220,7 +220,7 @@ impl World {
             per_slot("genomes", &self.genomes_buf, SLOT_WORDS),
             per_slot("bodies", &self.bodies_buf, SLOT_WORDS),
             per_slot("organs", &self.organs_buf, MAX_BODY / 2),
-            per_slot("rna_tails", &self.tail_buf, TAIL_WORDS),
+            per_slot("rna_tails4", &self.tail_buf, TAIL_WORDS),
             per_slot("bitten", &s.bitten, 1),
             per_res("body_pos", &self.body_pos_buf, 2),
             per_res("signals4", &self.signals_buf, 4),

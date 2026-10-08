@@ -447,7 +447,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // agentes andar ~25× mais de lado do que em frente). O transporte pela
     // água (corrente nos resíduos, com rotação) entra sem ganho.
     var swim_v = vec2<f32>(0.0);
-    var aux = rna_tail[slot * 2u + 1u];
+    var aux = rna_tail[slot * 4u + 1u];
     if (a.age == 0u) { aux = vec4<f32>(0.0); } // slot reutilizado: sem herança
     // Orientação a meio do passo (o corpo roda durante o passo).
     // Transporte pela água × flow_coupling (1 = físico).
@@ -487,7 +487,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     a.vel_y = step.y / dt_s;
     a.age += 1u;
     // (zw = média da velocidade de natação; xy = curvatura dos fios, a seguir)
-    rna_tail[slot * 2u + 1u] = aux;
+    rna_tail[slot * 4u + 1u] = aux;
     update_rna_tails(slot, a);
 
     // ---- BIOTURBAÇÃO: um resíduo (ao acaso) que atravessa ENTULHO empurra
@@ -1030,28 +1030,30 @@ fn agents_ledger(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 
 // FIOS DE RNA DAS PONTAS (só visual): cada fio é uma fita MOLE rebocada
-// pela ponta do corpo. Guarda-se só a posição da PONTA LIVRE de cada fio, no
-// mundo; em cada passo ela é puxada na direção da ponta do corpo até ficar
-// ao comprimento do fio ("segue o líder": um fio mole em baixo Reynolds
-// quase não escorrega de lado, vai atrás por onde foi puxado). Não tem
-// rigidez nenhuma: se o corpo recua para cima dela, encolhe (até
-// TAIL_MIN_CHORD do comprimento) em vez de empurrar. O desenho faz a curva
-// entre a raiz (que sai na direção do corpo) e essa ponta.
-// Custo: dois vetores por agente e meia dúzia de contas por passo.
+// pela ponta do corpo, feita de 3 troços iguais. Guardam-se, no mundo, os 3
+// pontos de cada fio (meio, meio, ponta livre); em cada passo cada ponto é
+// puxado pelo anterior até ficar à distância de um troço ("segue o líder":
+// um fio mole em baixo Reynolds quase não escorrega de lado, vai atrás por
+// onde foi puxado). Não tem rigidez: se o corpo recua para cima dele, os
+// pontos aproximam-se (até TAIL_MIN_LINK de um troço) e o fio ENCARQUILHA em
+// vez de empurrar. Uma agitação mínima em cada ponto dá-lhe o ar de fio à
+// deriva. Custo: 4 vetores por agente e umas dezenas de contas por passo.
+// rna_tail[slot*4 + 0] = (N1, N2); +1 = (livre, livre, média da natação);
+//                 + 2 = (N3, C1); +3 = (C2, C3).
 const TAIL_BASES_MAX: u32 = 32u;
 const TAIL_SPACING: f32 = 5.0;
-const TAIL_MIN_CHORD: f32 = 0.5;
+const TAIL_MIN_LINK: f32 = 0.3;
+const TAIL_JIGGLE: f32 = 0.5;
+const S_TAIL: u32 = 91u;
 
-fn tail_follow(tip: vec2<f32>, root: vec2<f32>, out_dir: vec2<f32>, len: f32, fresh: bool) -> vec2<f32> {
-    var t = tip;
-    let d = t - root;
+// O ponto `p` segue o `leader` a um troço de distância; `straight` é onde
+// fica se o estado não servir (acabado de nascer, slot reutilizado...).
+fn tail_link(p: vec2<f32>, leader: vec2<f32>, link: f32, straight: vec2<f32>, fresh: bool) -> vec2<f32> {
+    var t = straight;
+    let d = p - leader;
     let dist = length(d);
-    // Acabado de nascer, sem comprimento ou longe demais (slot reutilizado,
-    // cena antiga): estica a direito para fora do corpo.
-    if (fresh || len <= 0.0 || dist > 3.0 * len + 1.0 || dist < 1e-3) {
-        t = root + out_dir * len;
-    } else {
-        t = root + d / dist * clamp(dist, TAIL_MIN_CHORD * len, len);
+    if (!fresh && link > 0.0 && dist > 1e-3 && dist < 4.0 * link + 1.0) {
+        t = leader + d / dist * clamp(dist, TAIL_MIN_LINK * link, link);
     }
     return t;
 }
@@ -1059,8 +1061,9 @@ fn tail_follow(tip: vec2<f32>, root: vec2<f32>, out_dir: vec2<f32>, len: f32, fr
 fn update_rna_tails(slot: u32, a: Agent) {
     let n = a.body_len;
     if (n == 0u) { return; }
-    let s0 = rna_tail[slot * 2u];
-    var bend = rna_tail[slot * 2u + 1u]; // zw = média da natação (não mexer)
+    let q0 = rna_tail[slot * 4u];
+    let q2 = rna_tail[slot * 4u + 2u];
+    let q3 = rna_tail[slot * 4u + 3u];
     let pn = residue_world(slot, a, 0u);
     let pc = residue_world(slot, a, n - 1u);
     var dn = vec2<f32>(-1.0, 0.0);
@@ -1069,15 +1072,22 @@ fn update_rna_tails(slot: u32, a: Agent) {
         dn = normalize(pn - residue_world(slot, a, 1u) + vec2<f32>(1e-6, 0.0));
         dc = normalize(pc - residue_world(slot, a, n - 2u) + vec2<f32>(1e-6, 0.0));
     }
-    // Bases não traduzidas de cada ponta (como no desenho).
+    // Bases não traduzidas de cada ponta (como no desenho), em 3 troços.
     let start = a.coding_span & 0xFFFFu;
     let after = a.coding_span >> 16u;
-    let len_n = f32(min(start, TAIL_BASES_MAX)) * TAIL_SPACING;
-    let len_c = f32(min(a.gene_len - min(after, a.gene_len), TAIL_BASES_MAX)) * TAIL_SPACING;
+    let ln = f32(min(start, TAIL_BASES_MAX)) * TAIL_SPACING / 3.0;
+    let lc = f32(min(a.gene_len - min(after, a.gene_len), TAIL_BASES_MAX)) * TAIL_SPACING / 3.0;
     let fresh = a.age <= 1u;
-    let tn = tail_follow(s0.xy, pn, dn, len_n, fresh);
-    let tc = tail_follow(s0.zw, pc, dc, len_c, fresh);
-    bend = vec4<f32>(0.0, 0.0, bend.z, bend.w);
-    rna_tail[slot * 2u] = vec4<f32>(tn, tc);
-    rna_tail[slot * 2u + 1u] = bend;
+    let j0 = (rng_f4(a.id, params.epoch, S_TAIL) - vec4<f32>(0.5)) * TAIL_JIGGLE;
+    let j1 = (rng_f4(a.id, params.epoch, S_TAIL + 1u) - vec4<f32>(0.5)) * TAIL_JIGGLE;
+    let j2 = (rng_f4(a.id, params.epoch, S_TAIL + 2u) - vec4<f32>(0.5)) * TAIL_JIGGLE;
+    let n1 = tail_link(q0.xy + j0.xy, pn, ln, pn + dn * ln, fresh);
+    let n2 = tail_link(q0.zw + j0.zw, n1, ln, n1 + dn * ln, fresh);
+    let n3 = tail_link(q2.xy + j1.xy, n2, ln, n2 + dn * ln, fresh);
+    let c1 = tail_link(q2.zw + j1.zw, pc, lc, pc + dc * lc, fresh);
+    let c2 = tail_link(q3.xy + j2.xy, c1, lc, c1 + dc * lc, fresh);
+    let c3 = tail_link(q3.zw + j2.zw, c2, lc, c2 + dc * lc, fresh);
+    rna_tail[slot * 4u] = vec4<f32>(n1, n2);
+    rna_tail[slot * 4u + 2u] = vec4<f32>(n3, c1);
+    rna_tail[slot * 4u + 3u] = vec4<f32>(c2, c3);
 }

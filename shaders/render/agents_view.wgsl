@@ -602,6 +602,22 @@ fn kin_vertex(vi: u32, slot: u32, a: Agent) -> AgentVsOut {
     return capsule_vertex(vi, c, c, KIN_DOT_PX / view.zoom, col);
 }
 
+// Ponto u (0..3) da curva de Catmull-Rom por p0..p3; antes de p0 a curva
+// vem da direção do corpo (um ponto fantasma em p0 - out).
+fn tail_curve(p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>, out: vec2<f32>, u: f32) -> vec2<f32> {
+    let seg = min(floor(u), 2.0);
+    let t = u - seg;
+    var a = p0 - out;
+    var b = p0;
+    var c = p1;
+    var d = p2;
+    if (seg > 0.5) { a = p0; b = p1; c = p2; d = p3; }
+    if (seg > 1.5) { a = p1; b = p2; c = p3; d = p3 + (p3 - p2); }
+    let t2 = t * t;
+    let t3 = t2 * t;
+    return 0.5 * ((2.0 * b) + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (3.0 * b - a - 3.0 * c + d) * t3);
+}
+
 fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
     var o: AgentVsOut;
     o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
@@ -649,30 +665,28 @@ fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
         pw = c0 + vec2<f32>(cr * p.x - sr * p.y, sr * p.x + cr * p.y);
         qw = c0 + vec2<f32>(cr * prev.x - sr * prev.y, sr * prev.x + cr * prev.y);
     } else {
-        // FITA MOLE (ver update_rna_tails): curva de Bézier da raiz, que sai
-        // na direção da ponta do corpo, até à ponta livre guardada no mundo.
+        // FITA MOLE (ver update_rna_tails): curva suave (Catmull-Rom) pela
+        // raiz e pelos 3 pontos do fio guardados no mundo.
         let cnt = f32(max(select(min(start, RNA_PER_END), min(a.gene_len - min(after, a.gene_len), RNA_PER_END), trailer), 1u));
-        let len = cnt * RNA_SPACING;
+        let link = cnt * RNA_SPACING / 3.0;
         let p0 = c0 + vec2<f32>(cr * anchor.x - sr * anchor.y, sr * anchor.x + cr * anchor.y);
         let dw = vec2<f32>(cr * dir.x - sr * dir.y, sr * dir.x + cr * dir.y);
-        let tips = rna_tail_view[slot * 2u];
-        var p2 = select(tips.xy, tips.zw, trailer);
-        // A ponta guardada nunca pode ficar mais longe do que o fio: se o
-        // estado estiver atrasado ou for de outro agente (slot reutilizado,
-        // agente que não foi atualizado neste passo), o fio sai a direito em
-        // vez de se esticar pelo mundo fora.
-        let reach = p2 - p0;
-        let far_d = length(reach);
-        if (far_d > 2.0 * len + 1.0 || far_d < 1e-3) {
-            p2 = p0 + dw * len;
-        } else if (far_d > len) {
-            p2 = p0 + reach / far_d * len;
+        let t0 = rna_tail_view[slot * 4u];
+        let t2 = rna_tail_view[slot * 4u + 2u];
+        let t3 = rna_tail_view[slot * 4u + 3u];
+        var p1 = select(t0.xy, t2.zw, trailer);
+        var p2 = select(t0.zw, t3.xy, trailer);
+        var p3 = select(t2.xy, t3.zw, trailer);
+        // Estado atrasado ou de outro agente: o fio sai a direito em vez de
+        // se esticar pelo mundo fora.
+        let lim = 2.0 * link + 1.0;
+        if (length(p1 - p0) > lim || length(p2 - p1) > lim || length(p3 - p2) > lim) {
+            p1 = p0 + dw * link;
+            p2 = p1 + dw * link;
+            p3 = p2 + dw * link;
         }
-        let p1 = p0 + dw * (0.5 * len);
-        let ta = f32(m) / cnt;
-        let tb = f32(m + 1u) / cnt;
-        qw = mix(mix(p0, p1, ta), mix(p1, p2, ta), ta);
-        pw = mix(mix(p0, p1, tb), mix(p1, p2, tb), tb);
+        qw = tail_curve(p0, p1, p2, p3, dw * link, 3.0 * f32(m) / cnt);
+        pw = tail_curve(p0, p1, p2, p3, dw * link, 3.0 * f32(m + 1u) / cnt);
     }
     return capsule_vertex(vi, qw, pw, max(RNA_RADIUS, 1.0 / view.zoom), base_color(genome_base(slot, base_i)) * 0.85);
 }
