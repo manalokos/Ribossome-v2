@@ -472,7 +472,7 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
             st.photo_now = true;
         }
         let label = if st.rec { egui::RichText::new("■ parar").color(egui::Color32::from_rgb(255, 90, 80)) } else { egui::RichText::new("● rec") };
-        if ui.button(label).on_hover_text("grava o enquadramento da mira como uma sequência de imagens numa pasta nova em saves/; ao parar, junta-as num vídeo MP4 se houver ffmpeg instalado. Move e aproxima a câmara à vontade enquanto grava").clicked() {
+        if ui.button(label).on_hover_text("grava o enquadramento da mira diretamente num vídeo MP4 em saves/videos/ (as imagens vão cruas para o ffmpeg, sem ficheiros intermédios). Move e aproxima a câmara à vontade enquanto grava; o tamanho fica o do arranque").clicked() {
             st.rec = !st.rec;
         }
         egui::ComboBox::from_id_salt("shot_size").selected_text(format!("{} px", st.shot_size)).width(70.0).show_ui(ui, |ui| {

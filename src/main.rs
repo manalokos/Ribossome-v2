@@ -33,7 +33,11 @@ struct Running {
     /// MODO FOTO/VÍDEO: alvo de captura (refeito se o tamanho mudar), pasta
     /// e contagem das imagens da gravação em curso.
     shot_cap: Option<ribossome::render::capture::Capture>,
-    rec_dir: Option<std::path::PathBuf>,
+    /// Gravação em curso: canal para a thread que alimenta o ffmpeg (fechar
+    /// o canal termina o ficheiro), o ficheiro e o lado da imagem.
+    rec_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    rec_path: std::path::PathBuf,
+    rec_side: u32,
     rec_frames: u32,
     rec_tick: u32,
     cam: Camera,
@@ -308,7 +312,9 @@ impl Running {
             track_next_seed: 0,
             loaded_agent: None,
             shot_cap: None,
-            rec_dir: None,
+            rec_tx: None,
+            rec_path: std::path::PathBuf::new(),
+            rec_side: 0,
             rec_frames: 0,
             rec_tick: 0,
             egui_renderer,
@@ -837,43 +843,71 @@ impl Running {
     }
 
     /// MODO FOTO/VÍDEO: fotografa o enquadramento da mira (o quadrado ao
-    /// centro da vista, 90% do lado menor) e, a gravar, guarda uma imagem de
-    /// N em N frames numa pasta; ao parar tenta juntá-las com o ffmpeg.
+    /// centro da vista, 90% do lado menor). A gravar, cada imagem vai CRUA
+    /// (sem PNG, sem ficheiros intermédios) para um ffmpeg que escreve logo o
+    /// MP4: uma thread à parte alimenta-o, e se o codificador se atrasar a
+    /// imagem perde-se em vez de travar a simulação.
     fn photo_video(&mut self) {
         let photo = std::mem::take(&mut self.ui.photo_now);
-        // Arranque e paragem da gravação.
-        if self.ui.rec && self.rec_dir.is_none() {
-            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            let dir = std::path::Path::new(SAVES_DIR).join(format!("video_{stamp}"));
-            let _ = std::fs::create_dir_all(&dir);
-            self.rec_dir = Some(dir);
-            self.rec_frames = 0;
-            self.rec_tick = 0;
-        }
-        if !self.ui.rec && let Some(dir) = self.rec_dir.take() {
-            let made = std::process::Command::new("ffmpeg")
-                .args(["-y", "-loglevel", "error", "-framerate", "30", "-i", "f_%05d.png", "-pix_fmt", "yuv420p", "-crf", "17", "video.mp4"])
-                .current_dir(&dir)
-                .spawn()
-                .is_ok();
-            self.ui.rec_info = format!(
-                "{} imagens em {}{}",
-                self.rec_frames,
-                dir.display(),
-                if made { "; a montar video.mp4" } else { " (sem ffmpeg: junta-as tu, 30 por segundo)" }
-            );
+        // Paragem: fechar o canal faz a thread fechar o ffmpeg, que termina o ficheiro.
+        if !self.ui.rec && self.rec_tx.take().is_some() {
+            self.ui.rec_info = format!("vídeo gravado: {} ({} imagens)", self.rec_path.display(), self.rec_frames);
             log::info!("{}", self.ui.rec_info);
         }
-        let frame = self.rec_dir.is_some() && {
+        let starting = self.ui.rec && self.rec_tx.is_none();
+        let frame = self.ui.rec && {
             self.rec_tick += 1;
-            (self.rec_tick - 1) % self.ui.rec_every.max(1) == 0
+            starting || (self.rec_tick - 1) % self.ui.rec_every.max(1) == 0
         };
         if !photo && !frame {
             return;
         }
-        let size = self.ui.shot_size.clamp(256, 4096);
-        if self.shot_cap.as_ref().is_none_or(|c| c.size() != size.div_ceil(64) * 64) {
+        // A gravar, o tamanho fica o do arranque (o ffmpeg precisa de imagens iguais).
+        let size = if self.rec_tx.is_some() { self.rec_side } else { self.ui.shot_size.clamp(256, 4096).div_ceil(64) * 64 };
+        if self.shot_cap.as_ref().is_none_or(|c| c.size() != size) {
             self.shot_cap = Some(ribossome::render::capture::Capture::new(&self.gpu, &self.world, size));
+        }
+        if starting {
+            let dir = std::path::Path::new(SAVES_DIR).join("videos");
+            let _ = std::fs::create_dir_all(&dir);
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            self.rec_path = dir.join(format!("video_{stamp}_epoch{}.mp4", self.world.params.epoch));
+            let child = std::process::Command::new("ffmpeg")
+                .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s"])
+                .arg(format!("{size}x{size}"))
+                .args(["-r", "30", "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"])
+                .arg(&self.rec_path)
+                .stdin(std::process::Stdio::piped())
+                .spawn();
+            match child {
+                Ok(mut child) => {
+                    // Até 8 imagens em espera; mais do que isso, perdem-se.
+                    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+                    std::thread::spawn(move || {
+                        use std::io::Write;
+                        if let Some(mut pipe) = child.stdin.take() {
+                            for rgba in rx {
+                                if pipe.write_all(&rgba).is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        let _ = child.wait();
+                    });
+                    self.rec_tx = Some(tx);
+                    self.rec_side = size;
+                    self.rec_frames = 0;
+                    self.rec_tick = 1;
+                }
+                Err(e) => {
+                    self.ui.rec = false;
+                    self.ui.rec_info = format!("não consegui arrancar o ffmpeg ({e}): tem de estar instalado e no PATH");
+                    log::warn!("{}", self.ui.rec_info);
+                    if !photo {
+                        return;
+                    }
+                }
+            }
         }
         let cap = self.shot_cap.as_ref().unwrap();
         let side = cap.size();
@@ -882,24 +916,34 @@ impl Running {
         let cam = Camera { center: self.cam.center, zoom: self.cam.zoom * side as f32 / guide };
         cap.view.coc_radius.set(self.ui.coc_radius);
         let rgba = cap.render(&self.gpu, &self.world, &cam, self.ui.view_mode, self.ui.monomer_brightness);
-        let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
-        let path = if frame {
-            self.rec_frames += 1;
-            self.ui.rec_info = format!("a gravar: {} imagens", self.rec_frames);
-            self.rec_dir.as_ref().unwrap().join(format!("f_{:05}.png", self.rec_frames))
-        } else {
+        if photo {
             let dir = std::path::Path::new(SAVES_DIR).join("capturas");
             let _ = std::fs::create_dir_all(&dir);
             let path = dir.join(format!("foto_{}.png", self.world.params.epoch));
             self.ui.scene_msg = format!("fotografia em {}", path.display());
-            path
-        };
-        // O PNG comprime-se noutra thread, para a simulação não esperar.
-        std::thread::spawn(move || {
-            if let Err(e) = ribossome::render::capture::save_rgb_png(&rgb, side, &path) {
-                log::error!("{}: {e}", path.display());
+            let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+            // O PNG comprime-se noutra thread, para a simulação não esperar.
+            std::thread::spawn(move || {
+                if let Err(e) = ribossome::render::capture::save_rgb_png(&rgb, side, &path) {
+                    log::error!("{}: {e}", path.display());
+                }
+            });
+        }
+        if let Some(tx) = self.rec_tx.as_ref().filter(|_| frame) {
+            match tx.try_send(rgba) {
+                Ok(()) => {
+                    self.rec_frames += 1;
+                    self.ui.rec_info = format!("a gravar {}: {} imagens ({:.1} s de vídeo)", self.rec_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), self.rec_frames, self.rec_frames as f32 / 30.0);
+                }
+                // Codificador atrasado: esta imagem perde-se.
+                Err(std::sync::mpsc::TrySendError::Full(_)) => {}
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                    self.rec_tx = None;
+                    self.ui.rec = false;
+                    self.ui.rec_info = "o ffmpeg parou a meio da gravação".into();
+                }
             }
-        });
+        }
     }
 
     /// Na pista, as sementes nascem dentro do corredor (ao acaso ao longo
