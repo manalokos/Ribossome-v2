@@ -84,7 +84,7 @@ pub fn portraits(gpu: &crate::gpu::Gpu, w: &World, l: &Lineages) -> Vec<[Vec<u8>
         }
         out.push(pair);
     }
-    log::info!("retratos da árvore: mundo {:.1} s, {} retratos, total {:.1} s", t_world.as_secs_f32(), 2 * n, clock.elapsed().as_secs_f32());
+    log::info!("tree portraits: world {:.1} s, {} portraits, total {:.1} s", t_world.as_secs_f32(), 2 * n, clock.elapsed().as_secs_f32());
     out
 }
 
@@ -184,7 +184,7 @@ fn form_json(genome: &[u8], w: &World, code: &[u32]) -> String {
     let list: Vec<String> = body
         .iter()
         .enumerate()
-        .filter_map(|(k, r)| r.organ.map(|(t, p, g)| js_str(&format!("{} posição {k}: {}", ORGAN_SYMBOLS[t as usize], describe(t, p, g, &w.organ_table)))))
+        .filter_map(|(k, r)| r.organ.map(|(t, p, g)| js_str(&format!("{} position {k}: {}", ORGAN_SYMBOLS[t as usize], describe(t, p, g, &w.organ_table)))))
         .collect();
     // Lista de aminoácidos com as cores do desenho (órgãos a branco, a negrito).
     let mut ph = String::new();
@@ -210,8 +210,8 @@ fn pic(pics: Option<&[[Vec<u8>; 2]]>, i: usize, f: usize) -> String {
 pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String {
     if l.censuses < 2 || l.branches.is_empty() {
         return format!(
-            "<p>Ainda não há linhagens registadas nesta cena ({} censo(s)). O registo faz-se durante a corrida, de {} em {} epochs, e fica guardado com a cena.</p>",
-            l.censuses, l.every, l.every
+            "<p>There are no lineages recorded in this scene yet ({} census(es)). The record is made during the run, every {} epochs, and is saved with the scene.</p>",
+            l.censuses, l.every
         );
     }
     let code = crate::life::table::code_to_gpu(&w.organ_code);
@@ -240,13 +240,12 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
     data.push(']');
     let alive = l.branches.iter().filter(|b| l.alive(b)).count();
     format!(
-        "<p>{} ramos registados em {} censos (de {} em {} epochs), {} vivos. O eixo horizontal é o TEMPO: cada nó está no epoch em que o ramo apareceu e a barra à frente dele dura enquanto existiu. Liga-se por uma curva ao ramo de onde saiu. Verde = vivo (a barra acaba em seta); cinzento = extinto (a barra acaba numa travessa, no último censo em que apareceu); mais grosso = mais agentes no pico. Tracejado = o ramo novo apareceu depois de o de origem ter desaparecido. <b>Roda</b> = zoom, <b>arrastar</b> = mover, <b>clique</b> = ver o ramo. De perto cada nó mostra o desenho das duas formas.</p>\
-<div class=\"tv-bar\"><label>esconder ramos com pico abaixo de <input id=\"tv-min\" type=\"range\" min=\"0\" max=\"100\" value=\"0\"> <span id=\"tv-minv\">0</span></label> <label><input id=\"tv-alive\" type=\"checkbox\"> só os vivos e os seus antepassados</label> <button id=\"tv-fit\">ver tudo</button></div>\
-<div class=\"tv-wrap\"><canvas id=\"tv\"></canvas><div id=\"tv-info\"><i>clica num ramo</i></div></div>\
+        "<p>{} branches recorded in {} censuses (every {} epochs), {} alive. The horizontal axis is TIME: each node sits at the epoch in which the branch appeared and the bar in front of it lasts for as long as it existed. A curve links it to the branch it came from. Green = alive (the bar ends in an arrow); gray = extinct (the bar ends in a crossbar, at the last census in which it appeared); thicker = more agents at the peak. Dashed = the new branch appeared after the one it came from had disappeared. <b>Wheel</b> = zoom, <b>drag</b> = move, <b>click</b> = view the branch. Up close each node shows the drawing of the two forms.</p>\
+<div class=\"tv-bar\"><label>hide branches with a peak below <input id=\"tv-min\" type=\"range\" min=\"0\" max=\"100\" value=\"0\"> <span id=\"tv-minv\">0</span></label> <label><input id=\"tv-alive\" type=\"checkbox\"> only the living and their ancestors</label> <button id=\"tv-fit\">see all</button></div>\
+<div class=\"tv-wrap\"><canvas id=\"tv\"></canvas><div id=\"tv-info\"><i>click a branch</i></div></div>\
 <script>const TV_DATA={data};const TV_T0={};const TV_T1={};const TV_EVERY={};\n{JS}</script>",
         l.branches.len(),
         l.censuses,
-        l.every,
         l.every,
         alive,
         l.first_epoch,
@@ -258,7 +257,7 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
 /// Página só com a árvore (gera-se num instante: não lê nada da GPU).
 pub fn page(l: &Lineages, w: &World, title: &str, pics: Option<&[[Vec<u8>; 2]]>) -> String {
     format!(
-        "<!doctype html><html lang=\"pt\"><meta charset=\"utf-8\"><title>{t}</title><style>body{{background:#12151a;color:#dde3ea;font:14px/1.45 system-ui,sans-serif;margin:16px}}h1{{font-size:20px}}{CSS}</style><h1>{t}</h1>{}</html>",
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>{t}</title><style>body{{background:#12151a;color:#dde3ea;font:14px/1.45 system-ui,sans-serif;margin:16px}}h1{{font-size:20px}}{CSS}</style><h1>{t}</h1>{}</html>",
         viewer(l, w, pics),
         t = title.replace('<', "&lt;")
     )
@@ -344,9 +343,9 @@ function draw(){
     const ia=img(n,'ia'), ib=img(n,'ib');
     if(ia) ctx.drawImage(ia,n.x+5,y+4,66,66); else body(ctx,n.a,n.x+38,n.y,52);
     if(ib) ctx.drawImage(ib,n.x+73,y+4,66,66); else body(ctx,n.b,n.x+106,n.y,52);
-    if(text){ const tx=n.x+146; ctx.fillStyle=n.alive?'#e6edf3':'#9aa4af'; ctx.font='bold 14px system-ui'; ctx.fillText('R'+n.id,tx,y+20);
-      ctx.font='11px system-ui'; ctx.fillStyle='#9fb0c0'; ctx.fillText(n.bases+' bases · pico '+n.peak,tx,y+36,CW-152);
-      ctx.fillText(fmtT(n.born)+' → '+(n.alive?'vivo':fmtT(n.last)),tx,y+50,CW-152);
+    if(text){ const tx=n.x+146; ctx.fillStyle=n.alive?'#e6edf3':'#9aa4af'; ctx.font='bold 14px system-ui'; ctx.fillText('B'+n.id,tx,y+20);
+      ctx.font='11px system-ui'; ctx.fillStyle='#9fb0c0'; ctx.fillText(n.bases+' bases · peak '+n.peak,tx,y+36,CW-152);
+      ctx.fillText(fmtT(n.born)+' → '+(n.alive?'alive':fmtT(n.last)),tx,y+50,CW-152);
       ctx.fillStyle='#c8b06a'; ctx.fillText(n.a.org+' | '+n.b.org,tx,y+65,CW-152); }
   }
   ctx.restore();
@@ -355,13 +354,13 @@ function pick(mx,my){ const x=(mx-ox)/z,y=(my-oy)/z; const cards=CW*z>=64; let b
   for(const n of nodes){ if(cards){ if(x>=n.x&&x<=n.x+CW&&Math.abs(y-n.y)<=CH/2) return n; } else { const dd=(x-n.x)**2+(y-n.y)**2; if(dd<bd){bd=dd;best=n;} } }
   return (!cards&&bd<(14/z)**2)?best:null; }
 function show(b){
-  sel=b; if(!b){ info.innerHTML='<i>clica num ramo</i>'; draw(); return; }
-  const par=b.par===null?'raiz (sem parente reconhecível)':'R'+b.par;
-  const kn=(kids.get(b.id)||[]).map(k=>'R'+k.id).join(', ')||'nenhum';
-  let h='<h3 style="margin:0">R'+b.id+(b.alive?' · vivo':' · extinto')+'</h3><div>'+b.bases+' bases · pico '+b.peak+' agentes</div><div>apareceu ao epoch '+b.born+', último censo '+b.last+'</div><div>sai de: '+par+'</div><div>ramos que saem dele: '+kn+'</div>';
-  h+='<h4>população nos censos</h4><canvas id="tv-sp" width="300" height="60"></canvas>';
-  for(const [nm,f,im] of [['forma A',b.a,b.ia],['forma B (o complemento, os filhos)',b.b,b.ib]]){
-    h+='<h4>'+nm+' · '+f.n+' resíduos</h4>'+(im?'<img width="300" height="300" src="'+im+'">':'<canvas class="tv-b" width="300" height="200"></canvas>')+'<div class="seq" title="lista de aminoácidos, do N ao C; a branco os órgãos">'+f.ph+'</div><ul>'+(f.list.length?f.list.map(x=>'<li>'+x.replace(/</g,'&lt;')+'</li>').join(''):'<li>sem órgãos</li>')+'</ul>';
+  sel=b; if(!b){ info.innerHTML='<i>click a branch</i>'; draw(); return; }
+  const par=b.par===null?'root (no recognizable relative)':'B'+b.par;
+  const kn=(kids.get(b.id)||[]).map(k=>'B'+k.id).join(', ')||'none';
+  let h='<h3 style="margin:0">B'+b.id+(b.alive?' · alive':' · extinct')+'</h3><div>'+b.bases+' bases · peak '+b.peak+' agents</div><div>appeared at epoch '+b.born+', last census '+b.last+'</div><div>comes from: '+par+'</div><div>branches that come from it: '+kn+'</div>';
+  h+='<h4>population at the censuses</h4><canvas id="tv-sp" width="300" height="60"></canvas>';
+  for(const [nm,f,im] of [['form A',b.a,b.ia],['form B (the complement, the children)',b.b,b.ib]]){
+    h+='<h4>'+nm+' · '+f.n+' residues</h4>'+(im?'<img width="300" height="300" src="'+im+'">':'<canvas class="tv-b" width="300" height="200"></canvas>')+'<div class="seq" title="list of amino acids, from N to C; organs in white">'+f.ph+'</div><ul>'+(f.list.length?f.list.map(x=>'<li>'+x.replace(/</g,'&lt;')+'</li>').join(''):'<li>no organs</li>')+'</ul>';
   }
   info.innerHTML=h;
   let ci=0; const cs=info.querySelectorAll('canvas.tv-b'); [[b.a,b.ia],[b.b,b.ib]].forEach(([f,im])=>{ if(!im){ const c=cs[ci++].getContext('2d'); body(c,f,150,100,180); } });

@@ -130,7 +130,7 @@ fn test_scenario(world: &mut World) {
         .map(|_| ribossome::params::SpawnRequest::with_genome(s * (0.2 + 0.6 * rng.f32()), s * (0.3 + 0.5 * rng.f32()), &g))
         .collect();
     world.request_seeds(&reqs);
-    log::info!("cenário de teste: {} nadadores{}", n, if control { " (controlo, sem relógio)" } else { "" });
+    log::info!("test scenario: {} swimmers{}", n, if control { " (control, no clock)" } else { "" });
 }
 
 /// Terreno carregado por omissão no mundo completo (azul = terreno, vermelho = calor).
@@ -157,8 +157,8 @@ fn startup_terrain(world: &mut World) {
         world.custom_terrain = Some((vec![0; n], vec![0.0; n]));
     } else if let Some(path) = terrain {
         match world.load_terrain_png(std::path::Path::new(&path)) {
-            Ok(nf) => log::info!("terreno de {path} ({nf} células quentes)"),
-            Err(e) => log::error!("RIBO_TERRAIN: {e}; uso o terreno gerado"),
+            Ok(nf) => log::info!("terrain from {path} ({nf} hot cells)"),
+            Err(e) => log::error!("RIBO_TERRAIN: {e}; using the generated terrain"),
         }
     }
 }
@@ -194,10 +194,10 @@ impl Running {
                         .with_title("Ribossome v4")
                         .with_inner_size(winit::dpi::LogicalSize::new(1400, 900)),
                 )
-                .expect("criar janela"),
+                .expect("create window"),
         );
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let surface = instance.create_surface(window.clone()).expect("criar surface");
+        let surface = instance.create_surface(window.clone()).expect("create surface");
         let gpu = pollster::block_on(Gpu::new(instance, Some(&surface))).expect("GPU");
 
         let caps = surface.get_capabilities(&gpu.adapter);
@@ -218,7 +218,7 @@ impl Running {
         surface.configure(&gpu.device, &surface_cfg);
 
         let cfg = world_config_from_env();
-        log::info!("mundo {}² células, {} unidades", cfg.grid_size, cfg.sim_size());
+        log::info!("world {}² cells, {} units", cfg.grid_size, cfg.sim_size());
         let seed = 1;
         let mut world = World::new(&gpu, cfg, seed as u32);
         startup_terrain(&mut world);
@@ -247,15 +247,15 @@ impl Running {
                 Ok((extra, notes)) => {
                     resumed_stats = stats_bytes;
                     resumed_lineages = lineage_bytes.and_then(|b| ribossome::lineage::Lineages::from_bytes(&b));
-                    scene_msg = format!("retomado de {path} (epoch {})", world.params.epoch);
-                    log::info!("{scene_msg} em {:.1} s", t.elapsed().as_secs_f32());
+                    scene_msg = format!("resumed from {path} (epoch {})", world.params.epoch);
+                    log::info!("{scene_msg} in {:.1} s", t.elapsed().as_secs_f32());
                     for n in notes {
                         log::warn!("autosave: {n}");
                     }
                     let changed = world.params.changed_from_default();
                     if !changed.is_empty() {
-                        let list: Vec<String> = changed.iter().map(|(k, a, b)| format!("{k} {a} (código {b})")).collect();
-                        log::warn!("autosave: parâmetros diferentes do código: {}", list.join(", "));
+                        let list: Vec<String> = changed.iter().map(|(k, a, b)| format!("{k} {a} (code {b})")).collect();
+                        log::warn!("autosave: parameters differing from the code: {}", list.join(", "));
                     }
                     if let Some(b) = ribossome::world::ledger_from_json(&extra["baseline"]) {
                         baseline = b;
@@ -263,7 +263,7 @@ impl Running {
                     resumed = Some(extra);
                 }
                 Err(e) => {
-                    scene_msg = format!("não consegui retomar {path}: {e}; mundo novo");
+                    scene_msg = format!("could not resume {path}: {e}; new world");
                     log::error!("{scene_msg}");
                 }
             }
@@ -283,8 +283,8 @@ impl Running {
         let mut egui_renderer = egui_wgpu::Renderer::new(&gpu.device, format, egui_wgpu::RendererOptions::default());
         let info = gpu.adapter.get_info();
         let runlog = ribossome::runlog::RunLog::from_env(format!(
-            "modo {}  {:?}  GPU {} ({:?}, driver {})  build {}",
-            if lab_mode() { "laboratório" } else { "mundo completo" },
+            "mode {}  {:?}  GPU {} ({:?}, driver {})  build {}",
+            if lab_mode() { "lab" } else { "full world" },
             world.cfg,
             info.name,
             info.backend,
@@ -422,8 +422,8 @@ impl Running {
         let extra = self.interface_json();
         let blocks = vec![("estatisticas", self.ui.history.to_bytes()), ("linhagens", self.lineages.to_bytes())];
         self.save_job = Some(self.world.save_scene(&self.gpu, path, extra, blocks, keep_previous));
-        log::info!("cena: estado lido da GPU em {:.2} s (epoch {})", t.elapsed().as_secs_f32(), self.world.params.epoch);
-        self.ui.scene_msg = "a gravar…".into();
+        log::info!("scene: state read from the GPU in {:.2} s (epoch {})", t.elapsed().as_secs_f32(), self.world.params.epoch);
+        self.ui.scene_msg = "saving…".into();
     }
 
     /// Recolhe o resultado da gravação em curso (`wait`: espera por ela).
@@ -431,14 +431,14 @@ impl Running {
         let Some(job) = self.save_job.take_if(|j| wait || j.is_finished()) else { return };
         self.ui.scene_msg = match job.join() {
             Ok(Ok(m)) => {
-                log::info!("cena gravada: {m}");
-                format!("gravado {m}")
+                log::info!("scene saved: {m}");
+                format!("saved {m}")
             }
             Ok(Err(e)) => {
-                log::error!("cena: {e}");
-                format!("erro a gravar: {e}")
+                log::error!("scene: {e}");
+                format!("error saving: {e}")
             }
-            Err(_) => "erro a gravar (a thread falhou)".into(),
+            Err(_) => "error saving (the thread failed)".into(),
         };
     }
 
@@ -455,10 +455,10 @@ impl Running {
                 let dir = std::path::Path::new(SAVES_DIR);
                 let _ = std::fs::create_dir_all(dir);
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("cena do ribossome", &["ribo"])
+                    .add_filter("Ribossome scene", &["ribo"])
                     .set_directory(dir.canonicalize().unwrap_or_default())
                     .set_file_name(format!("cena_epoch{epoch}.ribo"))
-                    .set_title("Gravar cena")
+                    .set_title("Save scene")
                     .save_file()
                 {
                     self.start_save(path, false);
@@ -467,9 +467,9 @@ impl Running {
             Some(SceneAction::Load) => {
                 let dir = std::path::Path::new(SAVES_DIR).canonicalize().unwrap_or_default();
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("cena do ribossome", &["ribo"])
+                    .add_filter("Ribossome scene", &["ribo"])
                     .set_directory(dir)
-                    .set_title("Carregar cena")
+                    .set_title("Load scene")
                     .pick_file()
                 {
                     self.finish_save(true);
@@ -487,18 +487,18 @@ impl Running {
                             );
                             self.ui.ledger = None;
                             self.last_autosave = self.world.params.epoch;
-                            self.ui.scene_msg = format!("carregado {} (epoch {})", path.display(), self.world.params.epoch);
+                            self.ui.scene_msg = format!("loaded {} (epoch {})", path.display(), self.world.params.epoch);
                             log::info!("{}", self.ui.scene_msg);
                             for n in &notes {
-                                log::warn!("cena: {n}");
+                                log::warn!("scene: {n}");
                             }
                             if !notes.is_empty() {
                                 self.ui.scene_msg += &format!("\n{}", notes.join("\n"));
                             }
                         }
                         Err(e) => {
-                            self.ui.scene_msg = format!("erro: {e}");
-                            log::error!("cena: {e}");
+                            self.ui.scene_msg = format!("error: {e}");
+                            log::error!("scene: {e}");
                         }
                     }
                 }
@@ -520,7 +520,7 @@ impl Running {
                 self.seed = 0;
                 self.ui.reseed = true;
                 self.last_autosave = 0;
-                self.ui.scene_msg = "mundo novo com os valores por omissão".into();
+                self.ui.scene_msg = "new world with the default values".into();
                 log::info!("{}", self.ui.scene_msg);
             }
             None => {}
@@ -729,7 +729,7 @@ impl Running {
             "activate_spent" => {
                 let f = args["fraction"].as_f64().ok_or("falta 'fraction' (0..1)")? as f32;
                 let n = self.world.activate_spent(&self.gpu, f, self.world.params.epoch as u64);
-                log::info!("mcp: ativar já {f}: {n} monómeros");
+                log::info!("mcp: activate now {f}: {n} monomers");
                 Ok(vec![text(format!("{n} monómeros gastos ativados ({:.0}%)", f.clamp(0.0, 1.0) * 100.0))])
             }
             "paint" => {
@@ -749,7 +749,7 @@ impl Running {
                         self.gpu.queue.submit([enc.finish()]);
                     }
                 }
-                log::info!("mcp: pintar {name} em ({cx:.0}, {cy:.0}) raio {r:.0}");
+                log::info!("mcp: paint {name} at ({cx:.0}, {cy:.0}) radius {r:.0}");
                 Ok(vec![text(format!("pintado: {name}, centro ({cx:.0}, {cy:.0}) células, raio {r:.0}"))])
             }
             "pause" => {
@@ -759,7 +759,7 @@ impl Running {
                 if let Some(n) = args["steps_per_frame"].as_u64() {
                     self.ui.steps_per_frame = (n as u32).clamp(1, ribossome::world::MAX_STEPS_PER_FRAME);
                 }
-                log::info!("mcp: pausa {} passos/frame {}", self.ui.paused, self.ui.steps_per_frame);
+                log::info!("mcp: pause {} steps/frame {}", self.ui.paused, self.ui.steps_per_frame);
                 Ok(vec![text(format!("pausa: {}, passos por frame: {}", self.ui.paused, self.ui.steps_per_frame))])
             }
             _ => Err(format!("ferramenta desconhecida: {tool}")),
@@ -796,36 +796,36 @@ impl Running {
         const LETTERS: [char; 4] = ['A', 'U', 'G', 'C'];
         let dir = std::path::Path::new(SAVES_DIR).join("agentes");
         let _ = std::fs::create_dir_all(&dir);
-        let dialog = rfd::FileDialog::new().add_filter("genoma", &["rna", "txt"]).set_directory(dir.canonicalize().unwrap_or(dir.clone()));
+        let dialog = rfd::FileDialog::new().add_filter("genome", &["rna", "txt"]).set_directory(dir.canonicalize().unwrap_or(dir.clone()));
         match action {
             AgentAction::Save => {
                 let Some(d) = self.inspector.data.as_ref() else {
-                    self.ui.scene_msg = "gravar agente: não há nenhum selecionado".into();
+                    self.ui.scene_msg = "save agent: none is selected".into();
                     return;
                 };
                 let name = format!("agente_{}_{}bases.rna", d.agent.id, d.genome.len());
-                if let Some(path) = dialog.set_title("Gravar agente").set_file_name(&name).save_file() {
+                if let Some(path) = dialog.set_title("Save agent").set_file_name(&name).save_file() {
                     let text: String = d.genome.iter().map(|&b| LETTERS[(b & 3) as usize]).collect();
                     self.ui.scene_msg = match std::fs::write(&path, text + "\n") {
-                        Ok(()) => format!("agente gravado em {}", path.display()),
-                        Err(e) => format!("gravar agente: {e}"),
+                        Ok(()) => format!("agent saved to {}", path.display()),
+                        Err(e) => format!("save agent: {e}"),
                     };
                 }
             }
             AgentAction::Load => {
-                if let Some(path) = dialog.set_title("Carregar agente").pick_file() {
+                if let Some(path) = dialog.set_title("Load agent").pick_file() {
                     match std::fs::read_to_string(&path) {
                         Ok(text) => {
                             // Aceita T por U e ignora tudo o que não for base (espaços, linhas).
                             let g: Vec<u8> = text.chars().filter_map(|c| match c.to_ascii_uppercase() { 'A' => Some(0), 'U' | 'T' => Some(1), 'G' => Some(2), 'C' => Some(3), _ => None }).take(256).collect();
                             if g.len() < 3 {
-                                self.ui.scene_msg = format!("{}: não tem um genoma (letras A, U, G, C)", path.display());
+                                self.ui.scene_msg = format!("{}: does not contain a genome (letters A, U, G, C)", path.display());
                             } else {
                                 self.ui.agent_info = format!("{} ({} bases)", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), g.len());
                                 self.loaded_agent = Some(g);
                             }
                         }
-                        Err(e) => self.ui.scene_msg = format!("carregar agente: {e}"),
+                        Err(e) => self.ui.scene_msg = format!("load agent: {e}"),
                     }
                 }
             }
@@ -835,7 +835,7 @@ impl Running {
                     let reqs: Vec<ribossome::params::SpawnRequest> =
                         (0..self.ui.agent_copies).map(|_| ribossome::params::SpawnRequest::with_genome(self.seed_rng.f32() * s, self.seed_rng.f32() * s, g)).collect();
                     self.world.request_seeds(&reqs);
-                    self.ui.scene_msg = format!("{} cópias pedidas (nascem onde houver bases na sopa)", reqs.len());
+                    self.ui.scene_msg = format!("{} copies requested (they are born where there are bases in the soup)", reqs.len());
                 }
             }
         }
@@ -851,7 +851,7 @@ impl Running {
         let photo = std::mem::take(&mut self.ui.photo_now);
         // Paragem: fechar o canal faz a thread fechar o ffmpeg, que termina o ficheiro.
         if !self.ui.rec && self.rec_tx.take().is_some() {
-            self.ui.rec_info = format!("vídeo gravado: {} ({} imagens)", self.rec_path.display(), self.rec_frames);
+            self.ui.rec_info = format!("video saved: {} ({} images)", self.rec_path.display(), self.rec_frames);
             log::info!("{}", self.ui.rec_info);
         }
         let starting = self.ui.rec && self.rec_tx.is_none();
@@ -901,7 +901,7 @@ impl Running {
                 }
                 Err(e) => {
                     self.ui.rec = false;
-                    self.ui.rec_info = format!("não consegui arrancar o ffmpeg ({e}): tem de estar instalado e no PATH");
+                    self.ui.rec_info = format!("could not start ffmpeg ({e}): it must be installed and on the PATH");
                     log::warn!("{}", self.ui.rec_info);
                     if !photo {
                         return;
@@ -920,7 +920,7 @@ impl Running {
             let dir = std::path::Path::new(SAVES_DIR).join("capturas");
             let _ = std::fs::create_dir_all(&dir);
             let path = dir.join(format!("foto_{}.png", self.world.params.epoch));
-            self.ui.scene_msg = format!("fotografia em {}", path.display());
+            self.ui.scene_msg = format!("photo saved to {}", path.display());
             let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
             // O PNG comprime-se noutra thread, para a simulação não esperar.
             std::thread::spawn(move || {
@@ -933,14 +933,14 @@ impl Running {
             match tx.try_send(rgba) {
                 Ok(()) => {
                     self.rec_frames += 1;
-                    self.ui.rec_info = format!("a gravar {}: {} imagens ({:.1} s de vídeo)", self.rec_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), self.rec_frames, self.rec_frames as f32 / 30.0);
+                    self.ui.rec_info = format!("recording {}: {} images ({:.1} s of video)", self.rec_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), self.rec_frames, self.rec_frames as f32 / 30.0);
                 }
                 // Codificador atrasado: esta imagem perde-se.
                 Err(std::sync::mpsc::TrySendError::Full(_)) => {}
                 Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
                     self.rec_tx = None;
                     self.ui.rec = false;
-                    self.ui.rec_info = "o ffmpeg parou a meio da gravação".into();
+                    self.ui.rec_info = "ffmpeg stopped in the middle of the recording".into();
                 }
             }
         }
@@ -989,7 +989,7 @@ impl Running {
         self.onto_track(&mut reqs);
         self.world.request_seeds(&reqs);
         self.track_next_seed = 0;
-        self.ui.terrain_msg = "pista de corridas: energia só do avanço; paredes luminosas e que magoam; filhos iguais ao pai".into();
+        self.ui.terrain_msg = "race track: energy only from advancing; walls glow and hurt; children identical to the parent".into();
         log::info!("{}", self.ui.terrain_msg);
     }
 
@@ -1010,12 +1010,12 @@ impl Running {
         let name = last.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "terreno.png".into());
         let dialog = rfd::FileDialog::new().add_filter("PNG", &["png"]).set_directory(&dir);
         let chosen = match action {
-            TerrainAction::Load => dialog.set_title("Carregar terreno").pick_file(),
-            TerrainAction::Save => dialog.set_title("Gravar terreno").set_file_name(&name).save_file(),
+            TerrainAction::Load => dialog.set_title("Load terrain").pick_file(),
+            TerrainAction::Save => dialog.set_title("Save terrain").set_file_name(&name).save_file(),
             TerrainAction::Generated | TerrainAction::Empty | TerrainAction::Track => Some(last.clone()),
         };
         let Some(path) = chosen else {
-            self.ui.terrain_msg = "cancelado".into();
+            self.ui.terrain_msg = "canceled".into();
             return;
         };
         self.ui.terrain_path = path.display().to_string();
@@ -1023,30 +1023,30 @@ impl Running {
             TerrainAction::Load => match self.world.load_terrain_png_live(&self.gpu, &path) {
                 Ok(nf) => {
                     self.ui.terrain_msg =
-                        format!("carregado {} ({nf} células quentes); o mundo continua (semeia de novo para começar do zero)", path.display());
+                        format!("loaded {} ({nf} hot cells); the world carries on (seed again to start from scratch)", path.display());
                     log::info!("{}", self.ui.terrain_msg);
                     false
                 }
                 Err(e) => {
-                    self.ui.terrain_msg = format!("erro: {e}");
+                    self.ui.terrain_msg = format!("error: {e}");
                     false
                 }
             },
             TerrainAction::Save => {
                 self.ui.terrain_msg = match self.world.save_terrain_png(&self.gpu, &path) {
-                    Ok(()) => format!("gravado em {}", path.display()),
-                    Err(e) => format!("erro: {e}"),
+                    Ok(()) => format!("saved to {}", path.display()),
+                    Err(e) => format!("error: {e}"),
                 };
                 false
             }
             TerrainAction::Generated => {
                 self.world.use_generated_terrain();
-                self.ui.terrain_msg = "terreno gerado; mundo semeado de novo".into();
+                self.ui.terrain_msg = "generated terrain; world seeded again".into();
                 true
             }
             TerrainAction::Empty => {
                 self.world.use_empty_terrain();
-                self.ui.terrain_msg = "mundo vazio (só água); semeado de novo".into();
+                self.ui.terrain_msg = "empty world (water only); seeded again".into();
                 true
             }
             TerrainAction::Track => false,
@@ -1072,7 +1072,7 @@ impl Running {
                 self.world.settings = Default::default();
                 self.world.seed_density = ribossome::world::SEED_DENSITY_DEFAULT;
                 self.world.seed_active = ribossome::world::SEED_ACTIVE_DEFAULT;
-                log::info!("saída da pista sem parâmetros guardados: valores por omissão");
+                log::info!("left the track with no saved parameters: default values");
             }
             self.world.params.track_mode = 0;
             self.world.params.copy_same = 0;
@@ -1162,7 +1162,7 @@ impl Running {
         self.lineages.census(epoch, &species, genomes.len());
         let l = &self.lineages;
         self.ui.lineage_info = format!(
-            "{} censos, {} ramos registados ({} vivos); último censo ao epoch {}",
+            "{} censuses, {} branches recorded ({} alive); last census at epoch {}",
             l.censuses,
             l.branches.len(),
             l.branches.iter().filter(|b| l.alive(b)).count(),
@@ -1174,8 +1174,8 @@ impl Running {
     fn write_report(&mut self) {
         let t = std::time::Instant::now();
         let epoch = self.world.params.epoch;
-        let html = ribossome::report::generate(&self.gpu, &self.world, Some(&self.lineages), &format!("Ribossome: relatório ao epoch {epoch}"));
-        self.write_page(&format!("relatorio_{epoch}.html"), html, &format!("relatório ({:.1} s)", t.elapsed().as_secs_f32()));
+        let html = ribossome::report::generate(&self.gpu, &self.world, Some(&self.lineages), &format!("Ribossome: report at epoch {epoch}"));
+        self.write_page(&format!("relatorio_{epoch}.html"), html, &format!("report ({:.1} s)", t.elapsed().as_secs_f32()));
     }
 
     /// Grava uma página em saves/relatorios/ e abre-a no browser.
@@ -1185,7 +1185,7 @@ impl Running {
         let r = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, html));
         match r {
             Ok(()) => {
-                self.ui.scene_msg = format!("{what} em {}", path.display());
+                self.ui.scene_msg = format!("{what} saved to {}", path.display());
                 let full = path.canonicalize().unwrap_or(path.clone());
                 #[cfg(windows)]
                 let _ = std::process::Command::new("cmd").args(["/C", "start", "", &full.display().to_string()]).spawn();
@@ -1257,7 +1257,7 @@ impl Running {
         }
         if std::mem::take(&mut self.ui.activate_now) {
             let n = self.world.activate_spent(&self.gpu, self.ui.activate_frac, self.world.params.epoch as u64);
-            log::info!("ativar já: {n} monómeros gastos ativados ({:.0}%)", self.ui.activate_frac * 100.0);
+            log::info!("activate now: {n} spent monomers activated ({:.0}%)", self.ui.activate_frac * 100.0);
         }
         if let Some(action) = self.ui.terrain_action.take() {
             self.terrain_action(action);
@@ -1275,7 +1275,7 @@ impl Running {
             self.ui.history = ribossome::stats::History::default();
             self.lineages = ribossome::lineage::Lineages::default();
             self.last_autosave = 0;
-            log::info!("recomeço: mesmo terreno e parâmetros, epoch 0");
+            log::info!("restart: same terrain and parameters, epoch 0");
         }
         if self.ui.reseed {
             self.ui.reseed = false;
@@ -1304,7 +1304,7 @@ impl Running {
                 return;
             }
             other => {
-                log::warn!("sem textura da surface: {other:?}");
+                log::warn!("no surface texture: {other:?}");
                 return;
             }
         };
@@ -1448,19 +1448,19 @@ impl Running {
             let dir = std::path::Path::new(SAVES_DIR).join("capturas");
             let _ = std::fs::create_dir_all(&dir);
             let path = dir.join(format!("mundo_{}k_{epoch}.png", side / 1024));
-            self.ui.scene_msg = format!("a gravar {} (segundo plano)", path.display());
+            self.ui.scene_msg = format!("saving {} (in the background)", path.display());
             log::info!("{}", self.ui.scene_msg);
             // O PNG comprime-se noutra thread, para a simulação não ficar à espera.
             std::thread::spawn(move || match ribossome::render::capture::save_rgb_png(&rgb, side, &path) {
-                Ok(()) => log::info!("captura gravada em {}", path.display()),
-                Err(e) => log::error!("captura {}: {e}", path.display()),
+                Ok(()) => log::info!("capture saved to {}", path.display()),
+                Err(e) => log::error!("capture {}: {e}", path.display()),
             });
         }
         if std::mem::take(&mut self.ui.tree_now) {
             let epoch = self.world.params.epoch;
             let pics = ribossome::tree_view::portraits(&self.gpu, &self.world, &self.lineages);
-            let html = ribossome::tree_view::page(&self.lineages, &self.world, &format!("Ribossome: árvore das linhagens ao epoch {epoch}"), Some(&pics));
-            self.write_page(&format!("arvore_{epoch}.html"), html, "árvore");
+            let html = ribossome::tree_view::page(&self.lineages, &self.world, &format!("Ribossome: lineage tree at epoch {epoch}"), Some(&pics));
+            self.write_page(&format!("arvore_{epoch}.html"), html, "tree");
         }
         let n_steps = self.adaptive_steps();
         let (vp, covered) = (self.viewport, self.covered);

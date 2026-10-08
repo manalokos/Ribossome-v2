@@ -111,86 +111,86 @@ pub const VARIANTS: usize = 6;
 pub const MAX_PROPS: usize = 8;
 
 const SENSOR_PROPS: &[PropDef] = &[
-    pd("canal", "0 = emite em α, 1 = em β"),
-    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ; o direcional lê só um lado da cadeia"),
-    pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
-    pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
+    pd("canal", "0 = emits on α, 1 = on β"),
+    pd("ganho", "multiplies what it senses (negative inverts). The sensor already returns the receptor occupancy (0..1); the directional one reads only one side of the chain"),
+    pd("modo", "0 = by the LEVEL, 1 = by the CHANGE (chemotaxis)"),
+    pd("memoria", "0..1: fraction of the sensor's charge that remains on each step (discharge = 1 − this; ~1/(1 − this) steps). For the level it is the reading itself; for the change it is the slow reference"),
 ];
 
 /// Sensores "de luz" (físicos): as mesmas propriedades e o que sentem.
 const LIGHT_SENSOR_PROPS: &[PropDef] = &[
-    pd("canal", "0 = emite em α, 1 = em β"),
-    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ; o direcional lê só um lado da cadeia"),
-    pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
-    pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
-    pd("alvo", "0 = luz, 1 = temperatura, 2 = redutor das fumarolas, 3 = terreno (grãos)"),
+    pd("canal", "0 = emits on α, 1 = on β"),
+    pd("ganho", "multiplies what it senses (negative inverts). The sensor already returns the receptor occupancy (0..1); the directional one reads only one side of the chain"),
+    pd("modo", "0 = by the LEVEL, 1 = by the CHANGE (chemotaxis)"),
+    pd("memoria", "0..1: fraction of the sensor's charge that remains on each step (discharge = 1 − this; ~1/(1 − this) steps). For the level it is the reading itself; for the change it is the slow reference"),
+    pd("alvo", "0 = light, 1 = temperature, 2 = vent reductant, 3 = terrain (grains)"),
 ];
 
 /// Sensores "de comida": as mesmas propriedades e o que sentem.
 const FOOD_SENSOR_PROPS: &[PropDef] = &[
-    pd("canal", "0 = emite em α, 1 = em β"),
-    pd("ganho", "multiplica o que sente (negativo inverte). O sensor já devolve a ocupação do recetor (0..1) ; o direcional lê só um lado da cadeia"),
-    pd("modo", "0 = pelo NÍVEL, 1 = pela VARIAÇÃO (quimiotaxia)"),
-    pd("memoria", "0..1: fração da carga do sensor que fica em cada passo (descarga = 1 − isto; ~1/(1 − isto) passos). No nível é a própria leitura; na variação é a referência lenta"),
-    pd("alvo", "0 = comida (ativados; os canais pesados pelas afinidades do aminoácido SEGUINTE da cadeia, a antena), 1 = gastos (já sem variantes), 2 = corpos de outros agentes (a antena é o aminoácido SEGUINTE: D ou E vê só corpos ricos em lisina e arginina, o que a protease da família 1 corta; K ou R vê aspartato e asparagina, família 2; F, L, W, Y, I ou V vê os aromáticos e a leucina, família 3; P, prolina, cheira as PROTEASES ABERTAS dos outros; outro vizinho vê todos)"),
+    pd("canal", "0 = emits on α, 1 = on β"),
+    pd("ganho", "multiplies what it senses (negative inverts). The sensor already returns the receptor occupancy (0..1); the directional one reads only one side of the chain"),
+    pd("modo", "0 = by the LEVEL, 1 = by the CHANGE (chemotaxis)"),
+    pd("memoria", "0..1: fraction of the sensor's charge that remains on each step (discharge = 1 − this; ~1/(1 − this) steps). For the level it is the reading itself; for the change it is the slow reference"),
+    pd("alvo", "0 = food (activated monomers; the channels weighted by the affinities of the NEXT amino acid in the chain, the antenna), 1 = spent monomers (no variants any more), 2 = bodies of other agents (the antenna is the NEXT amino acid: D or E sees only bodies rich in lysine and arginine, what the family 1 protease cuts; K or R sees aspartate and asparagine, family 2; F, L, W, Y, I or V sees the aromatics and leucine, family 3; P, proline, smells the OPEN PROTEASES of others; any other neighbor sees them all)"),
 ];
 
 /// Propriedades de cada tipo de órgão, por ordem (a mesma na GPU).
 pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     &[
-        pd("forca", "multiplica a catálise do promotor"),
-        pd("vies_AU", "-1..1: prefere A/U (+) ou G/C (−)"),
-        pd("fecha", "−1 = sempre aberta; 2 = fecha com sinal γ positivo; 3 = fecha com sinal δ positivo (fechada não come nem deixa fugir energia)"),
+        pd("forca", "multiplies the promoter's catalysis"),
+        pd("vies_AU", "-1..1: prefers A/U (+) or G/C (−)"),
+        pd("fecha", "−1 = always open; 2 = closes with a positive γ signal; 3 = closes with a positive δ signal (closed, it neither eats nor lets energy leak)"),
     ],
-    &[pd("amplificacao", "multiplica a dobra da junta pelos sinais"), pd("canal", "0 = só α, 1 = só β, 2 = ambos")],
+    &[pd("amplificacao", "multiplies the bending of the joint by the signals"), pd("canal", "0 = α only, 1 = β only, 2 = both")],
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
     SENSOR_PROPS,
     &[
-        pd("canal", "0 = emite em α, 1 = em β"),
-        pd("periodo", "passos por ciclo"),
-        pd("mod_alfa", "o relógio acelera (+) ou abranda (−) com o nível de α"),
-        pd("mod_beta", "o mesmo com β"),
+        pd("canal", "0 = emits on α, 1 = on β"),
+        pd("periodo", "steps per cycle"),
+        pd("mod_alfa", "the clock speeds up (+) or slows down (−) with the level of α"),
+        pd("mod_beta", "the same with β"),
     ],
     &[
-        pd("funcao", "0 = SWITCH (passa o sinal do canal de entrada para o de saída e trava a entrada aqui), 1 = cópia (emite na saída, a entrada segue), 2 = inversor (emite o simétrico), 3 = GATE que fecha (entrada acima do limiar: o canal de saída não passa aqui), 4 = CONDENSADOR (acumula a entrada devagar; ao chegar ao limiar dispara e emite na saída enquanto se esvazia), 5 = DIFERENCIADOR (emite na saída a diferença entre a entrada de agora e a sua média recente, amplificada)"),
-        pd("ganho", "multiplica o que emite (× a força do 3.º codão); no condensador é a altura do pulso"),
-        pd("limiar", "limiar da porta (módulo do sinal de entrada) ou carga a que o condensador dispara"),
-        pd("carga", "condensador: quanto carrega por passo e por unidade de sinal (perde um décimo disto por passo); diferenciador: a que velocidade a média segue a entrada (0..1 por passo)"),
-        pd("descarga", "condensador: quanto se esvazia por passo enquanto dispara (limiar ÷ descarga = duração do pulso em passos)"),
+        pd("funcao", "0 = SWITCH (passes the signal from the input channel to the output channel and blocks the input here), 1 = copy (emits on the output, the input carries on), 2 = inverter (emits the negative), 3 = closing GATE (input above the threshold: the output channel does not pass here), 4 = CAPACITOR (slowly accumulates the input; on reaching the threshold it fires and emits on the output while it empties), 5 = DIFFERENTIATOR (emits on the output the difference between the current input and its recent average, amplified)"),
+        pd("ganho", "multiplies what it emits (× the strength from the 3rd codon); for the capacitor it is the pulse height"),
+        pd("limiar", "gate threshold (magnitude of the input signal) or charge at which the capacitor fires"),
+        pd("carga", "capacitor: how much it charges per step and per unit of signal (it loses one tenth of this per step); differentiator: how fast the average follows the input (0..1 per step)"),
+        pd("descarga", "capacitor: how much it empties per step while firing (threshold ÷ discharge = pulse duration in steps)"),
     ],
-    &[pd("capacidade", "energia que este órgão acrescenta à capacidade do corpo (× a intensidade, limitada entre ×0,5 e ×2); o corpo sozinho guarda 0,5 por resíduo de volume médio")],
+    &[pd("capacidade", "energy this organ adds to the body's capacity (× the intensity, limited between ×0.5 and ×2); the body alone stores 0.5 per residue of average volume")],
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
-    &[pd("reciclar", "0..1: fração da luz usada para reativar gastos (o resto dá energia)"), pd("eficiencia", "multiplica o rendimento")],
+    &[pd("reciclar", "0..1: fraction of the light used to reactivate spent monomers (the rest gives energy)"), pd("eficiencia", "multiplies the yield")],
     &[
-        pd("alcance", "a que distância ALÉM do contacto chega (unidades do mundo): 0 = só a tocar; ~40 = médio; ~100 = longo. Mais alcance = mais arrasto, mais massa e mais gasto enquanto está ligada"),
-        pd("forca", "multiplica o risco de lise que causa (× intensidade)"),
-        pd("canal", "−1 = sempre ativa; 2 = só com sinal γ positivo; 3 = só com sinal δ positivo (proporcional ao sinal, até 1)"),
+        pd("alcance", "how far BEYOND contact it reaches (world units): 0 = touching only; ~40 = medium; ~100 = long. More reach = more drag, more mass and more expense while it is on"),
+        pd("forca", "multiplies the risk of lysis it causes (× intensity)"),
+        pd("canal", "−1 = always active; 2 = only with a positive γ signal; 3 = only with a positive δ signal (proportional to the signal, up to 1)"),
     ],
     &[
-        pd("polaridade", "já não decide a quem se liga (qualquer âncora serve); só escolhe a cor do anel: +1 vermelho, −1 azul"),
-        pd("quebra", "probabilidade por passo de se soltar (0 = permanente)"),
+        pd("polaridade", "no longer decides what it binds to (any anchor will do); it only picks the color of the ring: +1 red, −1 blue"),
+        pd("quebra", "probability per step of letting go (0 = permanent)"),
     ],
-    &[pd("canal", "0 = emite em α, 1 = em β"), pd("valor", "sinal constante emitido (× intensidade)")],
+    &[pd("canal", "0 = emits on α, 1 = on β"), pd("valor", "constant signal emitted (× intensity)")],
     &[
-        pd("reciclar", "0..1: fração do redutor usada para reativar gastos (o resto dá energia)"),
-        pd("eficiencia", "multiplica o que consome"),
+        pd("reciclar", "0..1: fraction of the reductant used to reactivate spent monomers (the rest gives energy)"),
+        pd("eficiencia", "multiplies what it consumes"),
     ],
-    &[pd("protecao", "divide a taxa de mutação das cópias deste agente por 1 + a soma das proteções (× intensidade)")],
+    &[pd("protecao", "divides the mutation rate of this agent's copies by 1 + the sum of the protections (× intensity)")],
     &[
-        pd("fator", "o metabolismo do agente (manutenção, comer, quimiossíntese e copiar, tudo junto) é multiplicado por isto quando o órgão está a atuar em pleno"),
-        pd("canal", "−1 = atua sempre; 2 = só com sinal γ positivo; 3 = só com sinal δ positivo (proporcional ao sinal, até 1)"),
+        pd("fator", "the agent's metabolism (maintenance, eating, chemosynthesis and copying, all together) is multiplied by this when the organ is acting at full strength"),
+        pd("canal", "−1 = always acts; 2 = only with a positive γ signal; 3 = only with a positive δ signal (proportional to the signal, up to 1)"),
     ],
     &[
         pd("canal", "0 = α, 1 = β"),
-        pd("valor", "sinal emitido ao nascer (× intensidade)"),
-        pd("meia_vida", "passos de vida até o sinal cair para metade"),
+        pd("valor", "signal emitted at birth (× intensity)"),
+        pd("meia_vida", "steps of life until the signal falls to half"),
     ],
     &[
-        pd("forca", "arrasto extra deste resíduo quando toca em entulho ou rocha (× intensidade): prende-o ao sítio"),
-        pd("larga", "−1 = agarra sempre; 2 = larga com sinal γ positivo; 3 = larga com sinal δ positivo"),
-        pd("emite", "canal do sinal que emite enquanto está agarrada (2 = γ, 3 = δ; −1 = nenhum)"),
+        pd("forca", "extra drag of this residue when it touches rubble or rock (× intensity): holds it in place"),
+        pd("larga", "−1 = always grips; 2 = lets go with a positive γ signal; 3 = lets go with a positive δ signal"),
+        pd("emite", "channel of the signal it emits while gripping (2 = γ, 3 = δ; −1 = none)"),
     ],
     &[],
     &[],
@@ -205,70 +205,70 @@ fn fmt_canal(v: f32) -> &'static str {
 pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) -> String {
     let g = organ_gain(gain_idx);
     let t = t as usize;
-    let Some(row) = table.get(t) else { return format!("órgão {t}") };
+    let Some(row) = table.get(t) else { return format!("organ {t}") };
     let v = |name: &str| row.variantes.get(p as usize).and_then(|m| m.get(name)).copied().unwrap_or(0.0);
     let alvo = || match v("alvo").round() as i32 {
-        1 => "GASTOS (rasto de quem come)",
-        2 => "CORPOS de outros agentes (todos, ou só os que uma família de protease corta, conforme o aminoácido a seguir: D/E -> K,R; K/R -> D,N; F/L/W/Y/I/V -> aromáticos)",
-        _ => "comida (ativados)",
+        1 => "SPENT monomers (the trail of those who eat)",
+        2 => "BODIES of other agents (all, or only those that one protease family cuts, depending on the next amino acid: D/E -> K,R; K/R -> D,N; F/L/W/Y/I/V -> aromatics)",
+        _ => "food (activated monomers)",
     };
     let alvo_fisico = || match v("alvo").round() as i32 {
-        1 => "TEMPERATURA",
-        2 => "REDUTOR das fumarolas",
-        3 => "TERRENO (grãos: entulho e rocha)",
-        _ => "luz",
+        1 => "TEMPERATURE",
+        2 => "vent REDUCTANT",
+        3 => "TERRAIN (grains: rubble and rock)",
+        _ => "light",
     };
     let sensor = |o_que: &str, aspeto: &str| {
         format!(
-            "{o_que} [{aspeto}]: emite em {}, ganho ×{:.2}, {}",
+            "{o_que} [{aspeto}]: emits on {}, gain ×{:.2}, {}",
             fmt_canal(v("canal")),
             v("ganho") * g,
             if v("modo") < 0.5 {
-                "pelo NÍVEL".to_string()
+                "by the LEVEL".to_string()
             } else {
-                format!("pela VARIAÇÃO (memória {:.2})", v("memoria"))
+                format!("by the CHANGE (memory {:.2})", v("memoria"))
             }
         )
     };
     match t {
         0 => format!(
-            "boca [disco com abertura escura]: come monómeros ativados, força ×{:.2}, {}, {}",
+            "mouth [disc with a dark opening]: eats activated monomers, strength ×{:.2}, {}, {}",
             v("forca") * g,
             match v("vies_AU") {
-                x if x > 0.05 => format!("prefere A/U ({x:+.2})"),
-                x if x < -0.05 => format!("prefere G/C ({x:+.2})"),
-                _ => "sem preferência extra".into(),
+                x if x > 0.05 => format!("prefers A/U ({x:+.2})"),
+                x if x < -0.05 => format!("prefers G/C ({x:+.2})"),
+                _ => "no extra preference".into(),
             },
             match v("fecha") {
-                c if c < 0.0 => "sempre aberta",
-                c if c < 2.5 => "fecha com sinal γ positivo",
-                _ => "fecha com sinal δ positivo",
+                c if c < 0.0 => "always open",
+                c if c < 2.5 => "closes with a positive γ signal",
+                _ => "closes with a positive δ signal",
             }
         ),
         1 => format!(
-            "músculo [elipse às riscas]: dobra ×{:.2} com {}",
+            "muscle [striped ellipse]: bend ×{:.2} with {}",
             v("amplificacao") * g,
-            ["α", "β", "α e β"][(v("canal").round().clamp(0.0, 2.0)) as usize]
+            ["α", "β", "α and β"][(v("canal").round().clamp(0.0, 2.0)) as usize]
         ),
-        2 => format!("{} · sente {}", sensor("sensor de comida TOTAL", "coroa de antenas verdes"), alvo()),
-        3 => format!("{} · sente {}", sensor("sensor físico TOTAL", "coroa de antenas amarelas"), alvo_fisico()),
-        4 => sensor("sensor de energia interna (com prolina a seguir: DOR, a energia que lhe tiram as proteases, emitida em γ/δ)", "disco com anel dourado"),
-        7 => format!("armazenamento [disco com anéis]: acrescenta {:.1} à capacidade de energia do corpo (a intensidade só conta entre ×0,5 e ×2); vários seguidos na cadeia fundem-se num depósito maior, +25% por cada um a mais", v("capacidade") * g.clamp(0.5, 2.0)),
+        2 => format!("{} · senses {}", sensor("TOTAL food sensor", "crown of green antennae"), alvo()),
+        3 => format!("{} · senses {}", sensor("TOTAL physical sensor", "crown of yellow antennae"), alvo_fisico()),
+        4 => sensor("internal energy sensor (with proline next: PAIN, the energy that proteases take from it, emitted on γ/δ)", "disc with a golden ring"),
+        7 => format!("storage [disc with rings]: adds {:.1} to the body's energy capacity (the intensity only counts between ×0.5 and ×2); several in a row along the chain merge into a larger store, +25% for each extra one", v("capacidade") * g.clamp(0.5, 2.0)),
         8 | 9 => {
             // Um lado só: par = esquerda, ímpar = direita (troca depois de um quiral).
-            let lado = if gain_idx & 1 == 0 { "ESQUERDO" } else { "DIREITO" };
+            let lado = if gain_idx & 1 == 0 { "LEFT" } else { "RIGHT" };
             if t == 8 {
-                format!("{} · sente {}", sensor(&format!("sensor de comida do lado {lado}"), "antenas verdes de um lado"), alvo())
+                format!("{} · senses {}", sensor(&format!("food sensor on the {lado} side"), "green antennae on one side"), alvo())
             } else {
-                format!("{} · sente {}", sensor(&format!("sensor físico do lado {lado}"), "antenas amarelas de um lado"), alvo_fisico())
+                format!("{} · senses {}", sensor(&format!("physical sensor on the {lado} side"), "yellow antennae on one side"), alvo_fisico())
             }
         }
         5 => format!(
-            "relógio [mostrador]: em {}, período {:.0} passos, força ×{g:.2}{}",
+            "clock [dial]: on {}, period {:.0} steps, strength ×{g:.2}{}",
             fmt_canal(v("canal")),
             v("periodo"),
             if v("mod_alfa").abs() + v("mod_beta").abs() > 0.0 {
-                format!("; acelera com α ×{:+.2} e com β ×{:+.2}", v("mod_alfa"), v("mod_beta"))
+                format!("; speeds up with α ×{:+.2} and with β ×{:+.2}", v("mod_alfa"), v("mod_beta"))
             } else {
                 String::new()
             }
@@ -279,65 +279,65 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             let (cin, cout) = (RELAY_CHANNELS[(gain_idx & 3) as usize], RELAY_CHANNELS[((gain_idx >> 2) & 3) as usize]);
             let mag = RELAY_MAG[((gain_idx >> 4) & 3) as usize] * v("ganho");
             match v("funcao").round() as i32 {
-                0 => format!("relé SWITCH [losango]: passa {cin} para {cout} (×{mag:.2}) e trava {cin} aqui"),
-                1 => format!("relé cópia [losango]: lê {cin} e emite em {cout} (×{mag:.2})"),
-                2 => format!("relé inversor [losango]: lê {cin} e emite −{cin} em {cout} (×{mag:.2})"),
-                3 => format!("relé GATE [losango]: com |{cin}| > {:.2}, {cout} não passa aqui", v("limiar")),
+                0 => format!("relay SWITCH [diamond]: passes {cin} to {cout} (×{mag:.2}) and blocks {cin} here"),
+                1 => format!("relay copy [diamond]: reads {cin} and emits on {cout} (×{mag:.2})"),
+                2 => format!("relay inverter [diamond]: reads {cin} and emits −{cin} on {cout} (×{mag:.2})"),
+                3 => format!("relay GATE [diamond]: with |{cin}| > {:.2}, {cout} does not pass here", v("limiar")),
                 4 => format!(
-                    "CONDENSADOR [losango]: acumula {cin} (cheio em ~{:.0} passos de sinal 1); ao chegar a {:.2} dispara {mag:+.2} em {cout} durante ~{:.0} passos",
+                    "CAPACITOR [diamond]: accumulates {cin} (full in ~{:.0} steps of signal 1); on reaching {:.2} it fires {mag:+.2} on {cout} for ~{:.0} steps",
                     v("limiar") / v("carga").max(1e-4),
                     v("limiar"),
                     v("limiar") / v("descarga").max(1e-4)
                 ),
-                _ => format!("DIFERENCIADOR [losango]: emite em {cout} a mudança de {cin} em relação à média recente (×{mag:.2}; a média segue a {:.0}% por passo)", v("carga") * 100.0),
+                _ => format!("DIFFERENTIATOR [diamond]: emits on {cout} the change of {cin} relative to the recent average (×{mag:.2}; the average follows at {:.0}% per step)", v("carga") * 100.0),
             }
         }
-        15 => format!("revisão [escudo]: taxa de mutação das cópias ÷ (1 + {:.1})", v("protecao") * g),
+        15 => format!("proofreading [shield]: mutation rate of the copies ÷ (1 + {:.1})", v("protecao") * g),
         16 => format!(
-            "dormência [lua]: metabolismo × {:.2} (come, copia e gasta mais devagar), {}",
+            "dormancy [moon]: metabolism × {:.2} (eats, copies and spends more slowly), {}",
             v("fator").clamp(0.01, 1.0).powf(g),
             match v("canal") {
-                c if c < 0.0 => "sempre".to_string(),
-                c if c < 2.5 => "só com sinal γ positivo".to_string(),
-                _ => "só com sinal δ positivo".to_string(),
+                c if c < 0.0 => "always".to_string(),
+                c if c < 2.5 => "only with a positive γ signal".to_string(),
+                _ => "only with a positive δ signal".to_string(),
             }
         ),
         11 => format!(
-            "protease [disco com dentes; espigões se tiver alcance]: tira energia a {}, força ×{:.2}, {}. Corta conforme o aminoácido a seguir (D/E -> lisina e arginina; K/R -> aspartato e asparagina; F/L/W/Y/I/V -> aromáticos e leucina; outro -> as três a um terço). Gasta energia enquanto está ligada; quem tem protease de uma família resiste a essa família; a prolina protege",
+            "protease [toothed disc; spikes if it has reach]: takes energy from {}, strength ×{:.2}, {}. Cuts according to the next amino acid (D/E -> lysine and arginine; K/R -> aspartate and asparagine; F/L/W/Y/I/V -> aromatics and leucine; other -> all three at one third). It spends energy while it is on; whoever has a protease of one family resists that family; proline protects",
             match v("alcance") {
-                r if r < 10.0 => "quem toca".to_string(),
-                r => format!("quem está a menos de {r:.0} unidades"),
+                r if r < 10.0 => "whoever touches it".to_string(),
+                r => format!("whoever is closer than {r:.0} units"),
             },
             v("forca") * g,
             match v("canal") {
-                c if c < 0.0 => "sempre ligada".to_string(),
-                c if c < 2.5 => "só com sinal γ positivo".to_string(),
-                _ => "só com sinal δ positivo".to_string(),
+                c if c < 0.0 => "always on".to_string(),
+                c if c < 2.5 => "only with a positive γ signal".to_string(),
+                _ => "only with a positive δ signal".to_string(),
             }
         ),
         12 => format!(
-            "âncora [anel {}]: agarra-se a outra âncora, a uma ventosa ou a um relé (livres) de outro agente que toque, ou a um filho; {}",
-            if v("polaridade") >= 0.0 { "vermelho" } else { "azul" },
+            "anchor [{} ring]: grips another anchor, a holdfast or a relay (free ones) of another agent that touches it, or a child; {}",
+            if v("polaridade") >= 0.0 { "red" } else { "blue" },
             if v("quebra") <= 0.0 {
-                "permanente (só se solta se esticar demais)".to_string()
+                "permanent (only lets go if stretched too far)".to_string()
             } else {
-                format!("solta-se em média ao fim de {:.0} passos", 1.0 / v("quebra"))
+                format!("lets go after {:.0} steps on average", 1.0 / v("quebra"))
             }
         ),
         14 => format!(
-            "quimiossíntese [disco amarelo-enxofre]: consome o redutor das fumarolas; {:.0}% para reativar gastos, {:.0}% para energia, eficiência ×{:.2}",
+            "chemosynthesis [sulfur-yellow disc]: consumes the vent reductant; {:.0}% to reactivate spent monomers, {:.0}% for energy, efficiency ×{:.2}",
             v("reciclar") * 100.0,
             (1.0 - v("reciclar")) * 100.0,
             v("eficiencia") * g
         ),
         13 => format!(
-            "bias [ponto {}]: emite sempre {:+.2} em {}",
-            if v("canal") < 0.5 { "laranja" } else { "verde" },
+            "bias [{} dot]: always emits {:+.2} on {}",
+            if v("canal") < 0.5 { "orange" } else { "green" },
             v("valor") * g,
             fmt_canal(v("canal"))
         ),
         17 => format!(
-            "bias de idade [meio disco]: emite {:+.2} em {} ao nascer; cai para metade a cada {:.0} passos de vida",
+            "age bias [half disc]: emits {:+.2} on {} at birth; halves every {:.0} steps of life",
             v("valor") * g,
             fmt_canal(v("canal")),
             v("meia_vida")

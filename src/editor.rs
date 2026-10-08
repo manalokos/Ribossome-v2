@@ -55,7 +55,7 @@ impl Editor {
         let server = match tiny_http::Server::http(("127.0.0.1", port)) {
             Ok(s) => s,
             Err(e) => {
-                log::error!("editor: não consegui abrir a porta {port}: {e}");
+                log::error!("editor: could not open port {port}: {e}");
                 return None;
             }
         };
@@ -89,9 +89,9 @@ impl Editor {
                             Ok(rows) => {
                                 *shared_org.lock().unwrap() = rows.clone();
                                 let _ = tx.send(Update::Organs(rows));
-                                tiny_http::Response::from_string("aplicado")
+                                tiny_http::Response::from_string("applied")
                             }
-                            Err(e) => tiny_http::Response::from_string(format!("erro: {e}")).with_status_code(400),
+                            Err(e) => tiny_http::Response::from_string(format!("error: {e}")).with_status_code(400),
                         }
                     }
                     (tiny_http::Method::Get, "/api/code") => {
@@ -106,9 +106,9 @@ impl Editor {
                             Ok(code) => {
                                 *shared_code.lock().unwrap() = code.clone();
                                 let _ = tx.send(Update::Code(code));
-                                tiny_http::Response::from_string("aplicado")
+                                tiny_http::Response::from_string("applied")
                             }
-                            Err(e) => tiny_http::Response::from_string(format!("erro: {e}")).with_status_code(400),
+                            Err(e) => tiny_http::Response::from_string(format!("error: {e}")).with_status_code(400),
                         }
                     }
                     (tiny_http::Method::Get, "/api/organs") => {
@@ -122,9 +122,9 @@ impl Editor {
                             Ok(rows) => {
                                 *shared.lock().unwrap() = rows.clone();
                                 let _ = tx.send(Update::Amino(rows));
-                                tiny_http::Response::from_string("aplicado")
+                                tiny_http::Response::from_string("applied")
                             }
-                            Err(e) => tiny_http::Response::from_string(format!("erro: {e}")).with_status_code(400),
+                            Err(e) => tiny_http::Response::from_string(format!("error: {e}")).with_status_code(400),
                         }
                     }
                     (tiny_http::Method::Post, "/api/save") => {
@@ -133,12 +133,12 @@ impl Editor {
                         let code = shared_code.lock().unwrap().clone();
                         match table::save(&rows).and_then(|_| table::save_organs(&orgs)).and_then(|_| table::save_code(&code)) {
                             Ok(()) => tiny_http::Response::from_string(format!(
-                                "gravado em {}, {} e {}",
+                                "saved to {}, {} and {}",
                                 table::TABLE_PATH,
                                 table::ORGANS_PATH,
                                 table::CODE_PATH
                             )),
-                            Err(e) => tiny_http::Response::from_string(format!("erro: {e}")).with_status_code(500),
+                            Err(e) => tiny_http::Response::from_string(format!("error: {e}")).with_status_code(500),
                         }
                     }
                     (tiny_http::Method::Post, "/api/reload") => {
@@ -151,15 +151,15 @@ impl Editor {
                         let _ = tx.send(Update::Amino(rows));
                         let _ = tx.send(Update::Organs(orgs));
                         let _ = tx.send(Update::Code(code));
-                        tiny_http::Response::from_string(format!("recarregado de {src}, {src_o} e {src_c}"))
+                        tiny_http::Response::from_string(format!("reloaded from {src}, {src_o} and {src_c}"))
                     }
-                    _ => tiny_http::Response::from_string("não encontrado").with_status_code(404),
+                    _ => tiny_http::Response::from_string("not found").with_status_code(404),
                 };
                 let _ = req.respond(reply);
             }
         });
         let url = format!("http://127.0.0.1:{port}/");
-        log::info!("editor dos aminoácidos em {url}");
+        log::info!("amino acid editor at {url}");
         Some(Self { rx, url })
     }
 
@@ -175,7 +175,7 @@ impl Editor {
         #[cfg(not(windows))]
         let r = std::process::Command::new("xdg-open").arg(&self.url).spawn();
         if let Err(e) = r {
-            log::error!("não consegui abrir o browser: {e}");
+            log::error!("could not open the browser: {e}");
         }
     }
 }

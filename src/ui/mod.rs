@@ -127,15 +127,15 @@ pub enum Tab {
 }
 
 const TABS: [(Tab, &str); 10] = [
-    (Tab::Vista, "Vista"),
-    (Tab::Materia, "Matéria"),
-    (Tab::Luz, "Luz"),
-    (Tab::Agua, "Água e fumarolas"),
-    (Tab::Terreno, "Terreno"),
-    (Tab::Vida, "Vida"),
-    (Tab::Movimento, "Corpo"),
-    (Tab::Cena, "Cena"),
-    (Tab::Graficos, "Gráficos"),
+    (Tab::Vista, "View"),
+    (Tab::Materia, "Matter"),
+    (Tab::Luz, "Light"),
+    (Tab::Agua, "Water and vents"),
+    (Tab::Terreno, "Terrain"),
+    (Tab::Vida, "Life"),
+    (Tab::Movimento, "Body"),
+    (Tab::Cena, "Scene"),
+    (Tab::Graficos, "Charts"),
     (Tab::Info, "Info"),
 ];
 
@@ -167,13 +167,13 @@ pub enum TerrainAction {
 
 /// Materiais do pincel (o índice é `UiState::paint_material`).
 pub const PAINT_MATERIALS: [&str; 7] = [
-    "água (apaga terreno)",
-    "entulho fino (1 grão)",
-    "entulho denso (2 grãos)",
-    "rocha",
-    "fumarola: calor",
-    "fumarola: química (redutor)",
-    "apagar fumarolas",
+    "water (erases terrain)",
+    "fine rubble (1 grain)",
+    "dense rubble (2 grains)",
+    "rock",
+    "vent: heat",
+    "vent: chemistry (reductant)",
+    "erase vents",
 ];
 
 #[derive(Default)]
@@ -272,16 +272,16 @@ impl UiState {
 
 pub const VIEW_NAMES: [&str; 11] = [
     "normal",
-    "1 A ativ.",
-    "2 U ativ.",
-    "3 G ativ.",
-    "4 C ativ.",
-    "5 gastos",
-    "6 terreno",
-    "7 temperatura",
-    "8 luz UV",
-    "9 fluido",
-    "redutor das fumarolas",
+    "1 A act.",
+    "2 U act.",
+    "3 G act.",
+    "4 C act.",
+    "5 spent",
+    "6 terrain",
+    "7 temperature",
+    "8 UV light",
+    "9 fluid",
+    "vent reductant",
 ];
 const CH: [&str; 4] = ["A", "U", "G", "C"];
 
@@ -308,15 +308,15 @@ pub fn draw(root: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
 fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut Profiler) {
     // ---- Topo, sempre visível ----
     ui.horizontal(|ui| {
-        if ui.button(if st.paused { "▶ continuar" } else { "⏸ pausa" }).clicked() {
+        if ui.button(if st.paused { "▶ resume" } else { "⏸ pause" }).clicked() {
             st.paused = !st.paused;
         }
-        if ui.button("nova semente").clicked() {
+        if ui.button("new seed").clicked() {
             st.reseed = true;
         }
         if ui
-            .button("recomeçar")
-            .on_hover_text("começa de novo no mesmo sítio: sopa nova, sem agentes e epoch a zero, mas com o terreno tal como está agora e todos os parâmetros que tens. (\"nova semente\" gera também um terreno novo, se não for de imagem, e não mexe na epoch)")
+            .button("restart")
+            .on_hover_text("starts again in the same place: fresh soup, no agents and epoch at zero, but with the terrain as it is now and all your current parameters. (\"new seed\" also generates a new terrain, unless it comes from an image, and leaves the epoch alone)")
             .clicked()
         {
             st.restart = true;
@@ -324,7 +324,7 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
     });
     if world.params.day_period >= 1.0 {
         let d = world.params.daylight(world.params.epoch);
-        ui.label(if d > 0.0 { format!("☀ dia ({:.0}% do sol)", d * 100.0) } else { "☾ noite".to_string() });
+        ui.label(if d > 0.0 { format!("☀ day ({:.0}% of the sun)", d * 100.0) } else { "☾ night".to_string() });
     }
     ui.label(format!(
         "epoch {}   ({:.0} epochs/s)   frame {:.1} ms ({:.0} fps)",
@@ -335,18 +335,18 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
     ));
     ui.label(match st.stats.alive {
         Some(n) => format!(
-            "agentes vivos {n}   (+{:.0}/s nascimentos, −{:.0}/s mortes)",
+            "living agents {n}   (+{:.0}/s births, −{:.0}/s deaths)",
             st.stats.births_per_sec, st.stats.deaths_per_sec
         ),
-        None => "agentes vivos …".into(),
+        None => "living agents …".into(),
     });
     ui.horizontal(|ui| {
-        ui.add(egui::Slider::new(&mut st.steps_per_frame, 1..=MAX_STEPS_PER_FRAME).text("passos/frame"));
+        ui.add(egui::Slider::new(&mut st.steps_per_frame, 1..=MAX_STEPS_PER_FRAME).text("steps/frame"));
         ui.checkbox(&mut st.vsync, "vsync");
-        ui.checkbox(&mut st.smooth_refresh, "ecrã fluido")
-            .on_hover_text("os passos por frame passam a ser um máximo: se a placa não os faz todos a tempo, fazem-se menos por frame para o ecrã não ficar preso. O ecrã refresca a ~30 imagens por segundo quando o desenho é barato; quando é caro (muitos agentes à vista) refresca mais devagar, até 15 por segundo, para a simulação ficar com até 80% do tempo da placa");
+        ui.checkbox(&mut st.smooth_refresh, "smooth display")
+            .on_hover_text("steps per frame become a maximum: if the graphics card cannot do them all in time, fewer are done per frame so the display does not freeze. The display refreshes at ~30 images per second when drawing is cheap; when it is expensive (many agents in view) it refreshes more slowly, down to 15 per second, so the simulation gets up to 80% of the card's time");
         if st.smooth_refresh && st.steps_done < st.steps_per_frame {
-            ui.label(format!("a fazer {}", st.steps_done));
+            ui.label(format!("doing {}", st.steps_done));
         }
     });
 
@@ -377,20 +377,20 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
 fn changed_params(ui: &mut egui::Ui, world: &mut World) {
     let diff = world.params.changed_from_default();
     let title = if diff.is_empty() {
-        "parâmetros: todos com os valores do código".to_string()
+        "parameters: all at the code values".to_string()
     } else {
-        format!("parâmetros diferentes do código: {}", diff.len())
+        format!("parameters differing from the code: {}", diff.len())
     };
     egui::CollapsingHeader::new(title).id_salt("changed_params").show(ui, |ui| {
         for &(k, a, b) in &diff {
             ui.horizontal(|ui| {
-                ui.label(format!("{k}: {a:.6} (código {b:.6})"));
-                if ui.small_button("repor").clicked() {
+                ui.label(format!("{k}: {a:.6} (code {b:.6})"));
+                if ui.small_button("reset").clicked() {
                     world.params.set_named(k, b);
                 }
             });
         }
-        if !diff.is_empty() && ui.button("repor todos (mantém o mundo)").clicked() {
+        if !diff.is_empty() && ui.button("reset all (keeps the world)").clicked() {
             for &(k, _, b) in &diff {
                 world.params.set_named(k, b);
             }
@@ -401,65 +401,65 @@ fn changed_params(ui: &mut egui::Ui, world: &mut World) {
 fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     changed_params(ui, world);
     ui.separator();
-    ui.label("Uma cena = o mundo inteiro (matéria, terreno, água, agentes) e todos os parâmetros.");
-    ui.label("As tabelas dos aminoácidos e órgãos vêm sempre de assets/ (não da cena).");
+    ui.label("A scene = the whole world (matter, terrain, water, agents) and all the parameters.");
+    ui.label("The amino acid and organ tables always come from assets/ (not from the scene).");
     ui.horizontal(|ui| {
-        if ui.button("gravar cena…").clicked() {
+        if ui.button("save scene…").clicked() {
             st.scene_action = Some(SceneAction::Save);
         }
-        if ui.button("carregar cena…").clicked() {
+        if ui.button("load scene…").clicked() {
             st.scene_action = Some(SceneAction::Load);
         }
     });
     ui.separator();
     match &st.autosave_path {
         Some(path) => {
-            ui.checkbox(&mut st.autosave_on, format!("autosave em {path}"))
-                .on_hover_text("ao arrancar, o programa continua deste ficheiro; ao fechar grava-o");
+            ui.checkbox(&mut st.autosave_on, format!("autosave to {path}"))
+                .on_hover_text("on startup the program continues from this file; on exit it saves it");
             ui.horizontal(|ui| {
                 ui.add(egui::DragValue::new(&mut st.autosave_every).range(1000..=10_000_000).speed(1000));
-                ui.label("epochs entre gravações");
+                ui.label("epochs between saves");
             });
-            if ui.button("gravar autosave agora").clicked() {
+            if ui.button("save autosave now").clicked() {
                 st.scene_action = Some(SceneAction::AutosaveNow);
             }
         }
         None => {
-            ui.label("autosave desligado neste arranque (cenário de teste)");
+            ui.label("autosave off for this run (test scenario)");
         }
     }
     ui.separator();
-    ui.strong("Espécies e linhagens");
+    ui.strong("Species and lineages");
     ui.horizontal(|ui| {
-        ui.label("censo das linhagens de");
+        ui.label("lineage census every");
         ui.add(egui::DragValue::new(&mut st.lineage_every).range(5_000..=5_000_000).speed(1000));
-        ui.label("em epochs");
+        ui.label("epochs");
     })
     .response
-    .on_hover_text("de tempos a tempos agrupam-se os genomas vivos em espécies e liga-se cada uma àquela de que descende: é o registo da árvore da vida desta corrida. Fica guardado com a cena e recomeça com um mundo novo. Cada censo lê os agentes todos da placa (uma pausa de centésimos de segundo)");
+    .on_hover_text("from time to time the living genomes are grouped into species and each one is linked to the one it descends from: this is the record of this run's tree of life. It is saved with the scene and starts over with a new world. Each census reads all the agents from the graphics card (a pause of hundredths of a second)");
     if !st.lineage_info.is_empty() {
         ui.small(&st.lineage_info);
     }
     if ui
-        .button("gerar relatório (página HTML)")
-        .on_hover_text("uma página com as espécies e as suas duas formas (retratos, órgãos, onde vivem), quem pode atacar quem, ataques e ligações a decorrer, e as árvores: a das linhagens registadas e a do parentesco entre as espécies vivas. Fica em saves/relatorios/ e abre no browser. Demora uns segundos")
+        .button("generate report (HTML page)")
+        .on_hover_text("a page with the species and their two forms (portraits, organs, where they live), who can attack whom, attacks and bonds in progress, and the trees: that of the recorded lineages and that of the kinship between the living species. It is written to saves/relatorios/ and opens in the browser. Takes a few seconds")
         .clicked()
     {
         st.report_now = true;
     }
     if ui
-        .button("abrir a árvore das linhagens")
-        .on_hover_text("a árvore da vida desta corrida numa página interativa (zoom, arrastar, clicar num ramo): o desenho das duas formas de cada ramo, os órgãos e a população ao longo do tempo. Demora uns segundos: os retratos são desenhados pela simulação num mundo à parte")
+        .button("open the lineage tree")
+        .on_hover_text("this run's tree of life on an interactive page (zoom, drag, click a branch): the drawing of the two forms of each branch, the organs and the population over time. Takes a few seconds: the portraits are drawn by the simulation in a separate world")
         .clicked()
     {
         st.tree_now = true;
     }
     ui.horizontal(|ui| {
-        ui.label("captura do mundo inteiro:");
+        ui.label("whole-world capture:");
         for (name, side) in [("8k", 8192u32), ("16k", 16384)] {
             if ui
                 .button(name)
-                .on_hover_text("o mundo todo numa imagem PNG (8192 ou 16384 píxeis de lado), com a vista e o brilho escolhidos. Fica em saves/capturas/. A simulação pára uns segundos enquanto desenha; o ficheiro acaba de se gravar em segundo plano (o de 16k ocupa centenas de MB)")
+                .on_hover_text("the whole world in one PNG image (8192 or 16384 pixels per side), with the chosen view and brightness. It is written to saves/capturas/. The simulation stops for a few seconds while it draws; the file finishes saving in the background (the 16k one takes hundreds of MB)")
                 .clicked()
             {
                 st.big_shot = side;
@@ -467,12 +467,12 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         }
     });
     ui.horizontal(|ui| {
-        ui.checkbox(&mut st.frame_guide, "mira").on_hover_text("mostra na vista o enquadramento (um quadrado ao centro) que a fotografia e o vídeo apanham, com a regra dos terços");
-        if ui.button("foto").on_hover_text("grava o enquadramento da mira em saves/capturas/ (sem a interface), com a vista e o brilho escolhidos").clicked() {
+        ui.checkbox(&mut st.frame_guide, "framing guide").on_hover_text("shows in the view the framing (a square in the center) that the photo and the video capture, with the rule of thirds");
+        if ui.button("photo").on_hover_text("saves what the framing guide frames to saves/capturas/ (without the interface), with the chosen view and brightness").clicked() {
             st.photo_now = true;
         }
-        let label = if st.rec { egui::RichText::new("■ parar").color(egui::Color32::from_rgb(255, 90, 80)) } else { egui::RichText::new("● rec") };
-        if ui.button(label).on_hover_text("grava o enquadramento da mira diretamente num vídeo MP4 em saves/videos/ (as imagens vão cruas para o ffmpeg, sem ficheiros intermédios). Move e aproxima a câmara à vontade enquanto grava; o tamanho fica o do arranque").clicked() {
+        let label = if st.rec { egui::RichText::new("■ stop").color(egui::Color32::from_rgb(255, 90, 80)) } else { egui::RichText::new("● rec") };
+        if ui.button(label).on_hover_text("records what the framing guide frames straight into an MP4 video in saves/videos/ (the images go raw to ffmpeg, with no intermediate files). Move and zoom the camera freely while recording; the size stays as it was at the start").clicked() {
             st.rec = !st.rec;
         }
         egui::ComboBox::from_id_salt("shot_size").selected_text(format!("{} px", st.shot_size)).width(70.0).show_ui(ui, |ui| {
@@ -482,13 +482,13 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         });
     });
     if st.rec || !st.rec_info.is_empty() {
-        ui.add(egui::Slider::new(&mut st.rec_every, 1..=30).text("1 imagem a cada N frames")).on_hover_text("o vídeo fica a 30 imagens por segundo: com 2, um segundo de vídeo são 60 frames da simulação");
+        ui.add(egui::Slider::new(&mut st.rec_every, 1..=30).text("1 image every N frames")).on_hover_text("the video runs at 30 images per second: with 2, one second of video is 60 frames of the simulation");
         ui.small(&st.rec_info);
     }
     ui.separator();
     if ui
-        .button("mundo novo com os valores por omissão")
-        .on_hover_text("esquece os parâmetros da cena/autosave: valores do código e o terreno de arranque")
+        .button("new world with the default values")
+        .on_hover_text("forgets the scene/autosave parameters: code values and the startup terrain")
         .clicked()
     {
         st.scene_action = Some(SceneAction::NewWorld);
@@ -500,23 +500,23 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
 }
 
 fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
-    egui::ComboBox::from_label("vista").selected_text(VIEW_NAMES[st.view_mode as usize]).show_ui(ui, |ui| {
+    egui::ComboBox::from_label("view").selected_text(VIEW_NAMES[st.view_mode as usize]).show_ui(ui, |ui| {
         for (i, n) in VIEW_NAMES.iter().enumerate() {
             ui.selectable_value(&mut st.view_mode, i as u32, *n);
         }
     });
-    ui.add(egui::Slider::new(&mut st.monomer_brightness, 0.0..=1.0).text("brilho dos monómeros"));
-    ui.add(egui::Slider::new(&mut st.coc_radius, 0.0..=1.0).text("círculo de confusão dos monómeros (células)"))
-        .on_hover_text("de perto, cada monómero desenha-se como um disco suave deste raio, numa posição própria dentro da célula (só para o desenho: a simulação conta monómeros por célula). Pequeno = moléculas soltas; grande = névoa contínua; 0 = quadrados, uma cor por célula");
+    ui.add(egui::Slider::new(&mut st.monomer_brightness, 0.0..=1.0).text("monomer brightness"));
+    ui.add(egui::Slider::new(&mut st.coc_radius, 0.0..=1.0).text("monomer circle of confusion (cells)"))
+        .on_hover_text("up close, each monomer is drawn as a soft disc of this radius, at its own position inside the cell (drawing only: the simulation counts monomers per cell). Small = loose molecules; large = continuous haze; 0 = squares, one color per cell");
     const SIGNAL_VIEWS: [&str; 6] = [
-        "química",
-        "sinal α",
-        "sinal β",
-        "α (vermelho) + β (verde)",
-        "parentesco com o selecionado",
-        "γ (vermelho) + δ (verde)",
+        "chemistry",
+        "α signal",
+        "β signal",
+        "α (red) + β (green)",
+        "kinship with the selected one",
+        "γ (red) + δ (green)",
     ];
-    egui::ComboBox::from_label("cor dos agentes").selected_text(SIGNAL_VIEWS[st.signal_view as usize]).show_ui(
+    egui::ComboBox::from_label("agent color").selected_text(SIGNAL_VIEWS[st.signal_view as usize]).show_ui(
         ui,
         |ui| {
             for (i, n) in SIGNAL_VIEWS.iter().enumerate() {
@@ -525,30 +525,30 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
         },
     );
     if st.signal_view == 4 {
-        ui.label("clica num organismo: bola verde = genoma próximo, amarela = meio, vermelha = distante (8-meros partilhados; o filho conta como parente)");
+        ui.label("click an organism: green ball = close genome, yellow = intermediate, red = distant (shared 8-mers; the child counts as kin)");
     }
     let names = crate::life::organs::ORGAN_NAMES;
     let current = match st.mark_organ {
-        0 => "nenhum",
-        MARK_BONDED => "ligados por âncora",
+        0 => "none",
+        MARK_BONDED => "bonded by anchor",
         m => names[(m as usize - 1).min(names.len() - 1)],
     };
-    egui::ComboBox::from_label("marcar quem tem o órgão").selected_text(current).show_ui(ui, |ui| {
-        ui.selectable_value(&mut st.mark_organ, 0, "nenhum");
-        ui.selectable_value(&mut st.mark_organ, MARK_BONDED, "ligados por âncora");
+    egui::ComboBox::from_label("mark who has the organ").selected_text(current).show_ui(ui, |ui| {
+        ui.selectable_value(&mut st.mark_organ, 0, "none");
+        ui.selectable_value(&mut st.mark_organ, MARK_BONDED, "bonded by anchor");
         for (i, n) in names.iter().enumerate() {
             ui.selectable_value(&mut st.mark_organ, i as u32 + 1, *n);
         }
     });
     if st.mark_organ == MARK_BONDED {
-        ui.small("bola dourada = agente com uma ligação viva a outro. De perto, a ligação é um fio: azul-claro = de nascimento (pai e filho), dourado = feita ao tocar");
+        ui.small("golden ball = agent with a live bond to another. Up close, the bond is a thread: light blue = from birth (parent and child), golden = made on touching");
     } else if st.mark_organ != 0 {
-        ui.small("bola ciano = agente com este órgão (do mesmo tamanho no ecrã a qualquer zoom)");
+        ui.small("cyan ball = agent with this organ (the same size on screen at any zoom)");
     }
     ui.separator();
     if ui
-        .button("editor dos aminoácidos e órgãos (browser)")
-        .on_hover_text("http://127.0.0.1:8787 — mudanças aplicadas ao vivo")
+        .button("amino acid and organ editor (browser)")
+        .on_hover_text("http://127.0.0.1:8787 — changes applied live")
         .clicked()
     {
         st.open_editor = true;
@@ -557,20 +557,20 @@ fn tab_view(ui: &mut egui::Ui, st: &mut UiState) {
 
 fn tab_matter(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     let p = &mut world.params;
-    ui.strong("Sopa inicial e ativação");
-    ui.add(egui::Slider::new(&mut world.seed_density, 0.05..=1.0).text("densidade inicial (na próxima semente)"));
-    ui.add(egui::Slider::new(&mut world.seed_active, 0.0..=1.0).text("fração ativada inicial (na próxima semente)"))
-        .on_hover_text("fração dos monómeros que nascem ativados quando se semeia um mundo novo (0,5 = metade)");
+    ui.strong("Initial soup and activation");
+    ui.add(egui::Slider::new(&mut world.seed_density, 0.05..=1.0).text("initial density (on the next seed)"));
+    ui.add(egui::Slider::new(&mut world.seed_active, 0.0..=1.0).text("initial activated fraction (on the next seed)"))
+        .on_hover_text("fraction of the monomers that are born activated when a new world is seeded (0.5 = half)");
     ui.horizontal(|ui| {
-        ui.add(egui::Slider::new(&mut st.activate_frac, 0.0..=1.0).text("ativar já"));
-        if ui.button("ativar").on_hover_text("ativa agora esta fração dos monómeros gastos livres (a matéria não muda)").clicked() {
+        ui.add(egui::Slider::new(&mut st.activate_frac, 0.0..=1.0).text("activate now"));
+        if ui.button("activate").on_hover_text("activates this fraction of the free spent monomers now (matter does not change)").clicked() {
             st.activate_now = true;
         }
     });
     ui.add(
         egui::Slider::new(&mut p.activation_decay, 0.0..=0.002)
             .logarithmic(true)
-            .text("decaimento da ativação (por passo)"),
+            .text("activation decay (per step)"),
     );
     // Reativação uniforme: probabilidade por passo de um gasto voltar a
     // ativado; escala logarítmica para afinar valores pequenos.
@@ -578,66 +578,66 @@ fn tab_matter(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         egui::Slider::new(&mut p.reactivation_rate, 0.0..=0.02)
             .logarithmic(true)
             .smallest_positive(1e-5)
-            .text("reativação dos gastos"),
+            .text("reactivation of spent monomers"),
     );
     if p.reactivation_rate > 0.0 {
-        ui.label(format!("  pousio médio de um gasto: {:.0} passos", 1.0 / p.reactivation_rate));
+        ui.label(format!("  mean fallow time of a spent monomer: {:.0} steps", 1.0 / p.reactivation_rate));
     }
-    ui.strong("Ativação abiótica (sem vida)");
-    ui.add(egui::Slider::new(&mut p.direct_photoactivation, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("pelo sol (fotoativação dos gastos)"))
-        .on_hover_text("a luz reativa gastos sozinha (segue o dia e a noite e as sombras). 1 = ~1,8% dos gastos por passo em sol pleno; 0,02 = um pingo. 0 = só os fotossistemas");
-    ui.add(egui::Slider::new(&mut p.thermal_activation, 0.0..=2.0).logarithmic(true).smallest_positive(0.01).text("pelo calor (acima de T = 2)"))
-        .on_hover_text("o calor reativa gastos sozinho, só na água acima de T = 2 (fumarolas). 0 = só os quimiossintéticos aproveitam as fumarolas");
+    ui.strong("Abiotic activation (without life)");
+    ui.add(egui::Slider::new(&mut p.direct_photoactivation, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("by the sun (photoactivation of spent monomers)"))
+        .on_hover_text("light reactivates spent monomers on its own (it follows day and night and the shadows). 1 = ~1.8% of the spent ones per step in full sun; 0.02 = a trickle. 0 = photosystems only");
+    ui.add(egui::Slider::new(&mut p.thermal_activation, 0.0..=2.0).logarithmic(true).smallest_positive(0.01).text("by heat (above T = 2)"))
+        .on_hover_text("heat reactivates spent monomers on its own, only in water above T = 2 (vents). 0 = only chemosynthesizers make use of the vents");
     ui.separator();
-    ui.strong("Transporte dos monómeros");
-    ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("difusão ×"));
-    ui.add(egui::Slider::new(&mut p.transport_every, 1..=4).text("transporte de N em N passos"))
-        .on_hover_text("o transporte dos monómeros (corrente, difusão, agregação, reações) é a parte mais cara de cada passo. Com 2, corre passo sim, passo não, com o dobro do deslocamento de cada vez: a simulação fica ~15% mais rápida e os monómeros andam em saltos maiores e menos frequentes. Os agentes comem em todos os passos. A difusão máxima possível baixa na mesma proporção. 1 = como sempre");
-    ui.add(egui::Slider::new(&mut p.monomer_pressure, 0.0..=20.0).text("pressão dos monómeros"))
-        .on_hover_text("a difusão empurra das zonas cheias para as vazias");
-    ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("coesão dos ativados do mesmo tipo"))
-        .on_hover_text("um ativado sai menos de uma célula quando os vizinhos têm ativados do mesmo tipo: junta cada tipo em manchas");
+    ui.strong("Monomer transport");
+    ui.add(egui::Slider::new(&mut p.diffusion, 0.0..=50.0).text("diffusion ×"));
+    ui.add(egui::Slider::new(&mut p.transport_every, 1..=4).text("transport every N steps"))
+        .on_hover_text("monomer transport (current, diffusion, aggregation, reactions) is the most expensive part of each step. With 2, it runs every other step, with twice the displacement each time: the simulation gets ~15% faster and the monomers move in larger, less frequent jumps. Agents eat on every step. The maximum possible diffusion drops in the same proportion. 1 = as always");
+    ui.add(egui::Slider::new(&mut p.monomer_pressure, 0.0..=20.0).text("monomer pressure"))
+        .on_hover_text("diffusion pushes from full areas to empty ones");
+    ui.add(egui::Slider::new(&mut p.cohesion, 0.0..=2.0).text("cohesion of activated monomers of the same type"))
+        .on_hover_text("an activated monomer leaves a cell less readily when the neighbors hold activated monomers of the same type: it gathers each type into patches");
     ui.add(
-        egui::Slider::new(&mut p.aggregation, 0.0..=1.0).logarithmic(true).smallest_positive(0.01).text("agregação dos ativados"),
+        egui::Slider::new(&mut p.aggregation, 0.0..=1.0).logarithmic(true).smallest_positive(0.01).text("aggregation of activated monomers"),
     )
-        .on_hover_text("energia de ligação entre ativados vizinhos (÷ temperatura): formam grumos que a corrente leva inteiros; o calor dissolve-os");
+        .on_hover_text("binding energy between neighboring activated monomers (÷ temperature): they form clumps that the current carries whole; heat dissolves them");
     ui.separator();
-    ui.strong("Gravidade");
-    ui.add(egui::Slider::new(&mut p.settle, 0.0..=100.0).logarithmic(true).smallest_positive(0.1).text("gravidade dos MONÓMEROS ×"))
-        .on_hover_text("probabilidade por passo de um monómero descer uma célula = 0,002 × isto (10 = 0,02 células/passo)");
-    ui.add(egui::Slider::new(&mut p.sediment_settle, 0.0..=5.0).text("gravidade dos GRÃOS de entulho ×"))
-        .on_hover_text("velocidade de queda (×0,5 células do fluido/s): um grão solto anda com a corrente menos a queda — sobe onde a corrente a subir é mais forte (suspensão) e assenta onde ela abranda. 0 = flutuam");
-    ui.add(egui::Slider::new(&mut p.sedimentation, 0.0..=0.5).text("gravidade dos AGENTES × (∝ √n)"))
-        .on_hover_text("os agentes afundam ∝ √(nº de resíduos): os grandes descem mais depressa. 0 = não afundam");
+    ui.strong("Gravity");
+    ui.add(egui::Slider::new(&mut p.settle, 0.0..=100.0).logarithmic(true).smallest_positive(0.1).text("gravity on MONOMERS ×"))
+        .on_hover_text("probability per step of a monomer dropping one cell = 0.002 × this (10 = 0.02 cells/step)");
+    ui.add(egui::Slider::new(&mut p.sediment_settle, 0.0..=5.0).text("gravity on rubble GRAINS ×"))
+        .on_hover_text("fall speed (×0.5 fluid cells/s): a loose grain moves with the current minus the fall — it rises where the upward current is stronger (suspension) and settles where it slows down. 0 = they float");
+    ui.add(egui::Slider::new(&mut p.sedimentation, 0.0..=0.5).text("gravity on AGENTS × (∝ √n)"))
+        .on_hover_text("agents sink ∝ √(number of residues): large ones go down faster. 0 = they do not sink");
 }
 
 fn tab_light(ui: &mut egui::Ui, world: &mut World) {
     let p = &mut world.params;
-    ui.add(egui::Slider::new(&mut p.uv_strength, 0.0..=10.0).text("força UV (sol)"));
-    ui.add(egui::Slider::new(&mut p.sun_heat, 0.0..=5.0).text("aquecimento solar"))
-        .on_hover_text("o sol aquece a superfície (infravermelho absorvido pela água) e o que absorve luz (rocha, agentes, monómeros). Segue o dia e a noite");
-    ui.add(egui::Slider::new(&mut p.day_period, 0.0..=200_000.0).text("dia e noite: período (epochs; 0 = sempre dia)"))
-        .on_hover_text("durante o dia o sol sobe e desce como meio seno (amanhecer e anoitecer); no resto do ciclo é noite");
+    ui.add(egui::Slider::new(&mut p.uv_strength, 0.0..=10.0).text("UV strength (sun)"));
+    ui.add(egui::Slider::new(&mut p.sun_heat, 0.0..=5.0).text("solar heating"))
+        .on_hover_text("the sun heats the surface (infrared absorbed by the water) and whatever absorbs light (rock, agents, monomers). It follows day and night");
+    ui.add(egui::Slider::new(&mut p.day_period, 0.0..=200_000.0).text("day and night: period (epochs; 0 = always day)"))
+        .on_hover_text("during the day the sun rises and sets as a half sine (dawn and dusk); for the rest of the cycle it is night");
     if p.day_period >= 1.0 {
-        ui.add(egui::Slider::new(&mut p.day_fraction, 0.05..=1.0).text("fração do ciclo que é dia"))
-            .on_hover_text("0,5 = dia e noite iguais; 0,75 = dia de 3/4 do ciclo; 1 = sem noite (mas o sol ainda sobe e desce)");
-        ui.add(egui::Slider::new(&mut p.sun_angle, 0.0..=85.0).text("sol: ângulo máximo ao nascer/pôr (graus)"))
-            .on_hover_text("0 = sempre a pique; 85 = luz quase rasante de manhã e à tarde (sombras compridas)");
+        ui.add(egui::Slider::new(&mut p.day_fraction, 0.05..=1.0).text("fraction of the cycle that is day"))
+            .on_hover_text("0.5 = equal day and night; 0.75 = day lasts 3/4 of the cycle; 1 = no night (but the sun still rises and sets)");
+        ui.add(egui::Slider::new(&mut p.sun_angle, 0.0..=85.0).text("sun: maximum angle at sunrise/sunset (degrees)"))
+            .on_hover_text("0 = always overhead; 85 = almost grazing light in the morning and evening (long shadows)");
         let d = p.daylight(p.epoch);
-        ui.label(format!("  agora: {} ({:.0}% do sol)", if d > 0.0 { "dia" } else { "noite" }, d * 100.0));
+        ui.label(format!("  now: {} ({:.0}% of the sun)", if d > 0.0 { "day" } else { "night" }, d * 100.0));
     }
     let light_changed =
-        ui.add(egui::Slider::new(&mut p.uv_depth, 0.0..=30.0).text("atenuação UV pela água")).changed();
-    ui.add(egui::Slider::new(&mut p.monomer_uv_absorb, 0.0..=5.0).text("absorção UV pelos monómeros"));
-    ui.add(egui::Slider::new(&mut p.photo_yield, 0.0..=0.5).logarithmic(true).smallest_positive(0.005).text("rendimento fotossintético"))
-        .on_hover_text("energia por unidade de luz absorvida por um fotossistema (o reciclador converte a mesma energia em ativados)");
-    ui.add(egui::Slider::new(&mut p.uv_damage, 1.0..=50.0).text("dano UV"))
-        .on_hover_text("risco de morte por passo à luz = mortalidade base × (isto − 1) × luz × 0,01, e cai com a fração de aminoácidos aromáticos do corpo (triptofano, tirosina: o protetor solar). 30 em sol pleno e sem proteção dá cerca de 140 passos de vida; 1 = sem dano");
+        ui.add(egui::Slider::new(&mut p.uv_depth, 0.0..=30.0).text("UV attenuation by water")).changed();
+    ui.add(egui::Slider::new(&mut p.monomer_uv_absorb, 0.0..=5.0).text("UV absorption by monomers"));
+    ui.add(egui::Slider::new(&mut p.photo_yield, 0.0..=0.5).logarithmic(true).smallest_positive(0.005).text("photosynthetic yield"))
+        .on_hover_text("energy per unit of light absorbed by a photosystem (the recycler converts the same energy into activated monomers)");
+    ui.add(egui::Slider::new(&mut p.uv_damage, 1.0..=50.0).text("UV damage"))
+        .on_hover_text("risk of death per step in the light = base mortality × (this − 1) × light × 0.01, and it falls with the fraction of aromatic amino acids in the body (tryptophan, tyrosine: the sunscreen). 30 in full sun with no protection gives about 140 steps of life; 1 = no damage");
     ui.add(
         egui::Slider::new(&mut world.settings.light_rows_per_step, 0..=16)
-            .text("velocidade da luz (linhas/passo; 0 = varredura)"),
+            .text("speed of light (rows/step; 0 = sweep)"),
     )
-    .on_hover_text("a luz e as sombras descem N linhas por passo; 0 = varredura inteira de N em N passos");
+    .on_hover_text("light and shadows descend N rows per step; 0 = a full sweep every N steps");
     if light_changed {
         world.invalidate_light();
     }
@@ -646,68 +646,68 @@ fn tab_light(ui: &mut egui::Ui, world: &mut World) {
 fn tab_water(ui: &mut egui::Ui, world: &mut World) {
     let p = &mut world.params;
     let st = &mut world.settings;
-    ui.strong("Fluido");
-    ui.checkbox(&mut st.fluid_enabled, "fluido ligado");
-    ui.checkbox(&mut st.multigrid, "pressão por multigrid (senão Jacobi)");
+    ui.strong("Fluid");
+    ui.checkbox(&mut st.fluid_enabled, "fluid on");
+    ui.checkbox(&mut st.multigrid, "pressure by multigrid (otherwise Jacobi)");
     if st.multigrid {
-        ui.add(egui::Slider::new(&mut st.mg_cycles, 1..=4).text("ciclos V"));
+        ui.add(egui::Slider::new(&mut st.mg_cycles, 1..=4).text("V cycles"));
     } else {
-        ui.add(egui::Slider::new(&mut st.jacobi_iters, 2..=256).text("iterações Jacobi"));
+        ui.add(egui::Slider::new(&mut st.jacobi_iters, 2..=256).text("Jacobi iterations"));
     }
-    ui.add(egui::Slider::new(&mut st.fluid_substep, 1..=4).text("resolve de N em N passos"));
-    ui.add(egui::Slider::new(&mut p.fluid_vorticity, 0.0..=10.0).text("vorticidade"));
-    ui.add(egui::Slider::new(&mut p.fluid_viscosity, 0.0..=5.0).text("viscosidade"));
-    ui.add(egui::Slider::new(&mut p.fluid_decay, 0.9..=1.0).text("decay por frame"));
+    ui.add(egui::Slider::new(&mut st.fluid_substep, 1..=4).text("solve every N steps"));
+    ui.add(egui::Slider::new(&mut p.fluid_vorticity, 0.0..=10.0).text("vorticity"));
+    ui.add(egui::Slider::new(&mut p.fluid_viscosity, 0.0..=5.0).text("viscosity"));
+    ui.add(egui::Slider::new(&mut p.fluid_decay, 0.9..=1.0).text("decay per frame"));
     ui.separator();
-    ui.strong("Fumarolas");
-    ui.add(egui::Slider::new(&mut world.fumarole_gain, 0.0..=5.0).text("força das fumarolas ×"));
+    ui.strong("Vents");
+    ui.add(egui::Slider::new(&mut world.fumarole_gain, 0.0..=5.0).text("vent strength ×"));
     if world.heat_image.is_some() {
-        ui.small("+ calor dos píxeis vermelhos do terreno carregado");
+        ui.small("+ heat from the red pixels of the loaded terrain");
     }
-    ui.add(egui::Slider::new(&mut p.chemo_yield, 0.0..=5.0).text("rendimento da quimiossíntese"))
-        .on_hover_text("energia por unidade de redutor consumido");
-    ui.add(egui::Slider::new(&mut p.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("oxidação do redutor (1/s)"))
-        .on_hover_text("quanto mais lento, mais longe o redutor chega (vista 'redutor das fumarolas')");
+    ui.add(egui::Slider::new(&mut p.chemo_yield, 0.0..=5.0).text("chemosynthesis yield"))
+        .on_hover_text("energy per unit of reductant consumed");
+    ui.add(egui::Slider::new(&mut p.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("reductant oxidation (1/s)"))
+        .on_hover_text("the slower, the farther the reductant reaches ('vent reductant' view)");
     for (i, f) in world.fumaroles.iter_mut().enumerate() {
         ui.push_id(i, |ui| {
             let mut on = f.enabled != 0;
-            ui.checkbox(&mut on, format!("fumarola {i}"));
+            ui.checkbox(&mut on, format!("vent {i}"));
             f.enabled = on as u32;
             ui.add(egui::Slider::new(&mut f.x_frac, 0.0..=1.0).text("x"));
             ui.add(egui::Slider::new(&mut f.y_frac, 0.0..=1.0).text("y"));
-            ui.add(egui::Slider::new(&mut f.strength, 0.0..=20000.0).text("força"));
-            ui.add(egui::Slider::new(&mut f.spread, 60.0..=4000.0).text("raio (mundo)"));
+            ui.add(egui::Slider::new(&mut f.strength, 0.0..=20000.0).text("strength"));
+            ui.add(egui::Slider::new(&mut f.spread, 60.0..=4000.0).text("radius (world)"));
         });
     }
 }
 
 fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
-    ui.small("PNG: AZUL = terreno (0 água, fraco entulho, forte rocha, 255 rocha maciça); VERMELHO = calor e VERDE = química (redutor) das fumarolas, por píxel e independentes (verde sem vermelho = exsudação fria). Sem verde na imagem, a química segue o calor. Cinzentos (r = g = b) só dão terreno.");
+    ui.small("PNG: BLUE = terrain (0 water, weak rubble, strong rock, 255 solid rock); RED = heat and GREEN = chemistry (reductant) of the vents, per pixel and independent (green without red = cold seep). With no green in the image, the chemistry follows the heat. Grays (r = g = b) give terrain only.");
     ui.horizontal(|ui| {
-        ui.label("ficheiro");
+        ui.label("file");
         ui.text_edit_singleline(&mut st.terrain_path);
     });
     ui.horizontal(|ui| {
         if ui
-            .button("carregar…")
-            .on_hover_text("escolhe um PNG; o terreno muda no mundo que está a correr (os agentes e os monómeros ficam; o que deixar de caber sai para o lado). Para começar do zero com ele, semeia de novo")
+            .button("load…")
+            .on_hover_text("choose a PNG; the terrain changes in the running world (agents and monomers stay; whatever no longer fits moves aside). To start from scratch with it, seed again")
             .clicked()
         {
             st.terrain_action = Some(TerrainAction::Load);
         }
-        if ui.button("gravar…").on_hover_text("grava o terreno atual (e o calor) num PNG").clicked() {
+        if ui.button("save…").on_hover_text("saves the current terrain (and the heat) to a PNG").clicked() {
             st.terrain_action = Some(TerrainAction::Save);
         }
-        if ui.button("terreno gerado").clicked() {
+        if ui.button("generated terrain").clicked() {
             st.terrain_action = Some(TerrainAction::Generated);
         }
-        if ui.button("mundo vazio").on_hover_text("só água, sem fumarolas, semeado de novo: para pintar à mão").clicked() {
+        if ui.button("empty world").on_hover_text("water only, no vents, seeded again: for painting by hand").clicked() {
             st.terrain_action = Some(TerrainAction::Empty);
         }
     });
     ui.separator();
-    ui.strong("Pincel");
-    ui.checkbox(&mut st.paint_on, "pintar com o botão esquerdo (o direito continua a arrastar a vista)");
+    ui.strong("Brush");
+    ui.checkbox(&mut st.paint_on, "paint with the left button (the right one still drags the view)");
     egui::ComboBox::from_label("material")
         .selected_text(PAINT_MATERIALS[st.paint_material.min(PAINT_MATERIALS.len() - 1)])
         .show_ui(ui, |ui| {
@@ -715,207 +715,207 @@ fn tab_terrain(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
                 ui.selectable_value(&mut st.paint_material, i, *name);
             }
         });
-    ui.add(egui::Slider::new(&mut st.paint_radius, 1.0..=200.0).logarithmic(true).text("raio (células)"));
+    ui.add(egui::Slider::new(&mut st.paint_radius, 1.0..=200.0).logarithmic(true).text("radius (cells)"));
     if st.paint_material == 4 || st.paint_material == 5 {
-        ui.add(egui::Slider::new(&mut st.paint_strength, 0.05..=1.0).text("força da fumarola"));
+        ui.add(egui::Slider::new(&mut st.paint_strength, 0.05..=1.0).text("vent strength"));
     }
-    ui.small("pinta-se também em pausa; os monómeros saem para o lado quando se põe rocha (a matéria conserva-se)");
+    ui.small("you can also paint while paused; monomers move aside when rock is placed (matter is conserved)");
     if !st.terrain_msg.is_empty() {
         ui.label(&st.terrain_msg);
     }
     ui.separator();
-    ui.checkbox(&mut world.settings.terrain_enabled, "física do terreno ligada");
-    ui.strong("Sedimentos (entulho solto)");
-    ui.add(egui::Slider::new(&mut world.params.sediment_transport, 0.0..=5.0).text("arrasto pela corrente ×"))
-        .on_hover_text("quanto a corrente leva o entulho solto (1 = o do v3)");
-    ui.add(egui::Slider::new(&mut world.params.sediment_threshold, 0.0..=5.0).text("velocidade crítica de arranque"))
-        .on_hover_text("critério de Shields: abaixo desta velocidade (células do fluido/s) a corrente não arranca grãos; acima, arranca ∝ ao excesso");
-    ui.add(egui::Slider::new(&mut world.params.bioturbation, 0.0..=0.5).text("bioturbação (empurrar entulho)"));
-    ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("custo por grão empurrado"));
+    ui.checkbox(&mut world.settings.terrain_enabled, "terrain physics on");
+    ui.strong("Sediments (loose rubble)");
+    ui.add(egui::Slider::new(&mut world.params.sediment_transport, 0.0..=5.0).text("drag by the current ×"))
+        .on_hover_text("how much the current carries loose rubble (1 = as in v3)");
+    ui.add(egui::Slider::new(&mut world.params.sediment_threshold, 0.0..=5.0).text("critical entrainment velocity"))
+        .on_hover_text("Shields criterion: below this velocity (fluid cells/s) the current does not lift grains; above it, it lifts them ∝ to the excess");
+    ui.add(egui::Slider::new(&mut world.params.bioturbation, 0.0..=0.5).text("bioturbation (pushing rubble)"));
+    ui.add(egui::Slider::new(&mut world.params.bioturbation_cost, 0.0..=1.0).text("cost per grain pushed"));
 }
 
 fn tab_life(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
-    ui.strong("Semear");
-    ui.add(egui::Slider::new(&mut st.seed_count, 1..=20000).text("sementes"));
+    ui.strong("Seed");
+    ui.add(egui::Slider::new(&mut st.seed_count, 1..=20000).text("seeds"));
     ui.horizontal(|ui| {
         ui.label("bases");
         ui.add(egui::DragValue::new(&mut st.seed_len[0]).range(3..=256));
-        ui.label("a");
+        ui.label("to");
         ui.add(egui::DragValue::new(&mut st.seed_len[1]).range(3..=256));
     });
-    ui.checkbox(&mut st.seed_aug, "começar por AUG (tirado da sopa)");
-    if ui.button("semear (geração 0, montada da sopa)").clicked() {
+    ui.checkbox(&mut st.seed_aug, "start with AUG (taken from the soup)");
+    if ui.button("seed (generation 0, assembled from the soup)").clicked() {
         st.seed_now = true;
     }
     ui.separator();
-    ui.strong("Agentes guardados");
+    ui.strong("Saved agents");
     ui.horizontal(|ui| {
-        if ui.button("gravar o selecionado…").on_hover_text("grava o genoma do agente selecionado num ficheiro de texto (letras A, U, G, C) em saves/agentes/").clicked() {
+        if ui.button("save the selected one…").on_hover_text("saves the genome of the selected agent to a text file (letters A, U, G, C) in saves/agentes/").clicked() {
             st.agent_action = Some(AgentAction::Save);
         }
-        if ui.button("carregar…").on_hover_text("carrega um genoma gravado; depois podes espalhá-lo ou pô-lo com o rato").clicked() {
+        if ui.button("load…").on_hover_text("loads a saved genome; you can then spread it or place it with the mouse").clicked() {
             st.agent_action = Some(AgentAction::Load);
         }
     });
     if !st.agent_info.is_empty() {
         ui.small(&st.agent_info);
         ui.horizontal(|ui| {
-            if ui.button("espalhar").on_hover_text("põe este número de cópias em sítios ao acaso do mundo (cada uma montada com bases da sopa à volta; onde não houver bases, não nasce)").clicked() {
+            if ui.button("spread").on_hover_text("puts this number of copies at random places in the world (each one assembled from bases in the surrounding soup; where there are no bases, it is not born)").clicked() {
                 st.agent_action = Some(AgentAction::Spread);
             }
-            ui.add(egui::DragValue::new(&mut st.agent_copies).range(1..=20000).suffix(" cópias"));
+            ui.add(egui::DragValue::new(&mut st.agent_copies).range(1..=20000).suffix(" copies"));
         });
-        ui.checkbox(&mut st.place_agent, "pôr com o rato").on_hover_text("ligado, um clique na vista põe lá uma cópia do agente carregado (em vez de selecionar o que lá estiver)");
+        ui.checkbox(&mut st.place_agent, "place with the mouse").on_hover_text("when on, a click in the view places a copy of the loaded agent there (instead of selecting whatever is there)");
     }
     ui.separator();
-    ui.strong("Metabolismo");
+    ui.strong("Metabolism");
     let p = &mut world.params;
-    ui.add(egui::Slider::new(&mut p.food_power, 0.0..=20.0).text("energia por monómero"));
+    ui.add(egui::Slider::new(&mut p.food_power, 0.0..=20.0).text("energy per monomer"));
     ui.add(
-        egui::Slider::new(&mut p.uptake_rate, 0.0..=0.01).logarithmic(true).smallest_positive(1e-5).text("taxa de hidrólise"),
+        egui::Slider::new(&mut p.uptake_rate, 0.0..=0.01).logarithmic(true).smallest_positive(1e-5).text("hydrolysis rate"),
     )
-    .on_hover_text("quanto os agentes comem; a 0 ninguém come");
+    .on_hover_text("how much the agents eat; at 0 nobody eats");
     let mut hunger = p.hunger_regulation != 0;
-    ui.checkbox(&mut hunger, "regulação pela carga energética (cheio não come)");
+    ui.checkbox(&mut hunger, "regulation by energy charge (a full agent does not eat)");
     p.hunger_regulation = hunger as u32;
-    ui.add(egui::Slider::new(&mut p.maintenance_cost, 0.0..=0.01).text("manutenção por resíduo"));
-    ui.add(egui::Slider::new(&mut p.leak_base, 0.0..=1.0).text("fuga base (corpo sem boca) ×"))
-        .on_hover_text("a manutenção é multiplicada por isto + a fuga das bocas. 0,1 = um corpo sem boca paga um décimo; 1 com a fuga por boca a 0 = como era antes");
-    ui.add(egui::Slider::new(&mut p.mouth_leak, 0.0..=2.0).text("fuga por boca aberta ×"))
-        .on_hover_text("o que deixa entrar também deixa sair: cada boca padrão aberta soma isto ao multiplicador da manutenção (bocas mais fortes somam mais; uma boca fechada não soma). Com 0,3, um corpo de três bocas paga o mesmo que antes");
-    ui.add(egui::Slider::new(&mut p.skin_uptake, 0.0..=5.0).text("absorção sem boca ×"))
-        .on_hover_text("quanto os resíduos sem boca absorvem (× a catálise do aminoácido; uma boca vale 20 a 80×). 0,2 = um corpo de 30 resíduos sem boca come cerca de um décimo de uma boca fraca; 0 = só as bocas comem");
-    ui.add(egui::Slider::new(&mut p.metabolic_q10, 1.0..=4.0).text("metabolismo: Q10"))
-        .on_hover_text("quanto a química da vida acelera por cada 'escala' de temperatura (1 = não depende da temperatura). Multiplica manutenção, comer, quimiossíntese e emparelhamento; a luz não");
-    ui.add(egui::Slider::new(&mut p.metabolic_span, 0.5..=12.0).text("metabolismo: escala (unidades de T por Q10)"));
-    ui.add(egui::Slider::new(&mut p.metabolic_ref, 0.0..=8.0).text("metabolismo: temperatura de referência (m = 1)"));
+    ui.add(egui::Slider::new(&mut p.maintenance_cost, 0.0..=0.01).text("maintenance per residue"));
+    ui.add(egui::Slider::new(&mut p.leak_base, 0.0..=1.0).text("base leak (body without a mouth) ×"))
+        .on_hover_text("maintenance is multiplied by this + the leak of the mouths. 0.1 = a body without a mouth pays one tenth; 1 with the leak per mouth at 0 = as it was before");
+    ui.add(egui::Slider::new(&mut p.mouth_leak, 0.0..=2.0).text("leak per open mouth ×"))
+        .on_hover_text("what lets things in also lets them out: each open standard mouth adds this to the maintenance multiplier (stronger mouths add more; a closed mouth adds nothing). With 0.3, a body with three mouths pays the same as before");
+    ui.add(egui::Slider::new(&mut p.skin_uptake, 0.0..=5.0).text("uptake without a mouth ×"))
+        .on_hover_text("how much residues without a mouth absorb (× the amino acid's catalysis; a mouth is worth 20 to 80×). 0.2 = a 30-residue body without a mouth eats about one tenth of a weak mouth; 0 = only mouths eat");
+    ui.add(egui::Slider::new(&mut p.metabolic_q10, 1.0..=4.0).text("metabolism: Q10"))
+        .on_hover_text("how much the chemistry of life speeds up for each temperature 'span' (1 = does not depend on temperature). It multiplies maintenance, eating, chemosynthesis and pairing; not light");
+    ui.add(egui::Slider::new(&mut p.metabolic_span, 0.5..=12.0).text("metabolism: span (T units per Q10)"));
+    ui.add(egui::Slider::new(&mut p.metabolic_ref, 0.0..=8.0).text("metabolism: reference temperature (m = 1)"));
     ui.separator();
-    ui.strong("Reprodução");
-    ui.add(egui::Slider::new(&mut p.spawn_energy, 0.1..=50.0).text("energia inicial"));
-    ui.add(egui::Slider::new(&mut p.pairing_rate, 0.0..=8.0).text("emparelhamento (bases/passo)"));
-    ui.add(egui::Slider::new(&mut p.pairing_cost, 0.0..=2.0).text("custo por base copiada"))
-        .on_hover_text("energia gasta por cada base do genoma que se copia. Na pista de corridas é o custo de um FILHO que conta: este valor vale para um genoma de 33 bases, e um genoma mais comprido paga menos por base (o mesmo total), para não castigar os corpos complexos");
+    ui.strong("Reproduction");
+    ui.add(egui::Slider::new(&mut p.spawn_energy, 0.1..=50.0).text("initial energy"));
+    ui.add(egui::Slider::new(&mut p.pairing_rate, 0.0..=8.0).text("pairing (bases/step)"));
+    ui.add(egui::Slider::new(&mut p.pairing_cost, 0.0..=2.0).text("cost per base copied"))
+        .on_hover_text("energy spent for each base of the genome that is copied. On the race track it is the cost of a CHILD that counts: this value holds for a 33-base genome, and a longer genome pays less per base (the same total), so as not to punish complex bodies");
     let mut salvage = p.salvage > 0.0;
-    ui.checkbox(&mut salvage, "recarga: os produtores copiam-se com monómeros gastos")
-        .on_hover_text("a energia que transborda de um fotossistema ou de uma quimiossíntese carrega primeiro um monómero gasto para a cópia do próprio genoma (construir com matéria-prima); só o que não servir para isso vai reativar monómeros no meio. Desligado = o transbordo vai todo para o meio (como era)");
+    ui.checkbox(&mut salvage, "recharge: producers copy themselves with spent monomers")
+        .on_hover_text("the energy that overflows from a photosystem or a chemosynthesis organ first charges a spent monomer for the copy of its own genome (building with raw material); only what is of no use for that goes on to reactivate monomers in the medium. Off = all the overflow goes to the medium (as it was)");
     p.salvage = salvage as u32 as f32;
-    ui.add(egui::Slider::new(&mut p.mutation_rate, 0.0..=0.05).text("taxa de mutação"));
+    ui.add(egui::Slider::new(&mut p.mutation_rate, 0.0..=0.05).text("mutation rate"));
     let mut aug = p.require_start != 0;
-    ui.checkbox(&mut aug, "tradução começa no AUG (nascimentos novos)");
+    ui.checkbox(&mut aug, "translation starts at AUG (new births)");
     p.require_start = aug as u32;
     ui.separator();
-    ui.strong("Morte");
-    ui.add(egui::Slider::new(&mut p.death_probability, 0.0..=0.2).text("mortalidade base"));
-    ui.add(egui::Slider::new(&mut p.death_metab, 0.0..=1.0).text("mortalidade segue o ritmo de vida"))
-        .on_hover_text("1 = a mortalidade base é multiplicada pelo ritmo do agente (metabolismo × fuga): dormência, bocas fechadas, corpos sem boca e água fria fazem viver mais (cistos, esporos). 0 = a mortalidade não depende do ritmo");
-    ui.add(egui::Slider::new(&mut p.death_energy_cap, 0.0..=200.0).text("teto da proteção pela energia"))
-        .on_hover_text("a mortalidade base é ÷ energia só até este valor (uma reserva protege, acumular mais não); 0 = sem teto (v3)");
-    ui.add(egui::Slider::new(&mut p.denature_temp, 0.0..=12.0).text("temperatura de desnaturação"))
-        .on_hover_text("acima disto o calor mata (vista 7 = temperatura; o miolo das fumarolas chega a 12)");
-    ui.add(egui::Slider::new(&mut p.heat_kill, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("desnaturação pelo calor"))
-        .on_hover_text("risco de morrer na água quente (acima do limiar das fumarolas), × (1 − termoestabilidade do corpo; coluna da tabela dos aminoácidos)");
+    ui.strong("Death");
+    ui.add(egui::Slider::new(&mut p.death_probability, 0.0..=0.2).text("base mortality"));
+    ui.add(egui::Slider::new(&mut p.death_metab, 0.0..=1.0).text("mortality follows the pace of life"))
+        .on_hover_text("1 = base mortality is multiplied by the agent's pace (metabolism × leak): dormancy, closed mouths, bodies without a mouth and cold water make it live longer (cysts, spores). 0 = mortality does not depend on the pace");
+    ui.add(egui::Slider::new(&mut p.death_energy_cap, 0.0..=200.0).text("cap on the protection by energy"))
+        .on_hover_text("base mortality is ÷ energy only up to this value (a reserve protects, hoarding more does not); 0 = no cap (v3)");
+    ui.add(egui::Slider::new(&mut p.denature_temp, 0.0..=12.0).text("denaturation temperature"))
+        .on_hover_text("above this, heat kills (view 7 = temperature; the core of the vents reaches 12)");
+    ui.add(egui::Slider::new(&mut p.heat_kill, 0.0..=1.0).logarithmic(true).smallest_positive(0.001).text("denaturation by heat"))
+        .on_hover_text("risk of dying in hot water (above the vent threshold), × (1 − thermostability of the body; a column of the amino acid table)");
     ui.separator();
-    ui.strong("Predação");
-    ui.add(egui::Slider::new(&mut p.protease_power, 0.0..=30.0).logarithmic(true).smallest_positive(0.1).text("força das proteases ×"))
-        .on_hover_text("multiplica a energia que as proteases tiram à vítima por passo de contacto (base: 0,2 × força × intensidade para uma vítima com 10% de resíduos-alvo). Quando a energia da vítima chega a zero, morre. Cada família corta certos aminoácidos e a prolina defende. 0 = sem predação");
-    ui.add(egui::Slider::new(&mut p.protease_direct, 0.0..=1.0).text("fração direta para o predador"))
-        .on_hover_text("parte da energia tirada que entra diretamente no atacante. O resto vai para o meio (ver o slider seguinte). 0 = o predador tem de comer os restos; 1 = aspira tudo");
-    ui.add(egui::Slider::new(&mut p.lysis_yield, 0.0..=1.0).text("rendimento dos restos"))
-        .on_hover_text("da energia que não vai direta para o predador, a fração que fica no meio como monómeros ativados junto da vítima (um por cada 'energia por monómero'); o resto perde-se");
+    ui.strong("Predation");
+    ui.add(egui::Slider::new(&mut p.protease_power, 0.0..=30.0).logarithmic(true).smallest_positive(0.1).text("protease strength ×"))
+        .on_hover_text("multiplies the energy that proteases take from the victim per step of contact (base: 0.2 × strength × intensity for a victim with 10% target residues). When the victim's energy reaches zero, it dies. Each family cuts certain amino acids and proline defends. 0 = no predation");
+    ui.add(egui::Slider::new(&mut p.protease_direct, 0.0..=1.0).text("direct fraction to the predator"))
+        .on_hover_text("share of the energy taken that goes straight into the attacker. The rest goes to the medium (see the next slider). 0 = the predator has to eat the remains; 1 = it sucks up everything");
+    ui.add(egui::Slider::new(&mut p.lysis_yield, 0.0..=1.0).text("yield of the remains"))
+        .on_hover_text("of the energy that does not go straight to the predator, the fraction that stays in the medium as activated monomers next to the victim (one for each 'energy per monomer'); the rest is lost");
     ui.separator();
-    ui.strong("Ligações entre agentes (órgão âncora: + liga a −)");
-    ui.add(egui::Slider::new(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formação"))
-        .on_hover_text("probabilidade por passo de um agente com uma âncora livre a tentar ligar a uma âncora oposta de um vizinho; a duração vem da variante da âncora (editor)");
-    ui.add(egui::Slider::new(&mut p.bond_energy_share, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("difusão da energia pela ligação"))
-        .on_hover_text("a energia corre pela ligação do agente mais cheio (energia ÷ capacidade) para o mais vazio, até ficarem com o mesmo enchimento. É a fração da diferença que passa por passo: 0,1 = a diferença cai para metade em ~7 passos; 0,01 = em ~70 (o valor antigo)");
-    ui.add(egui::Slider::new(&mut p.bond_matter_share, 0.0..=1.0).text("partilha de matéria pela ligação"))
-        .on_hover_text("probabilidade por passo de um agente ligado receber do parceiro um complemento que este já capturou, do que tem a cópia do genoma mais adiantada para o que a tem mais atrasada (uma folha a alimentar a raiz). Só passa quando a base serve ao que recebe, uma vez em quatro em média. 0 = não partilham matéria");
-    ui.add(egui::Slider::new(&mut p.bond_signal, 0.0..=1.0).text("sinais pela ligação"));
+    ui.strong("Bonds between agents (anchor organ: + binds to −)");
+    ui.add(egui::Slider::new(&mut p.bond_rate, 0.0..=1.0).logarithmic(true).smallest_positive(1e-3).text("formation"))
+        .on_hover_text("probability per step of an agent with a free anchor trying to bind to an opposite anchor of a neighbor; the duration comes from the anchor's variant (editor)");
+    ui.add(egui::Slider::new(&mut p.bond_energy_share, 0.0..=0.5).logarithmic(true).smallest_positive(0.001).text("energy diffusion through the bond"))
+        .on_hover_text("energy flows through the bond from the fuller agent (energy ÷ capacity) to the emptier one, until both are equally full. It is the fraction of the difference that passes per step: 0.1 = the difference halves in ~7 steps; 0.01 = in ~70 (the old value)");
+    ui.add(egui::Slider::new(&mut p.bond_matter_share, 0.0..=1.0).text("matter sharing through the bond"))
+        .on_hover_text("probability per step of a bonded agent receiving from its partner a complement the partner has already captured, from the one whose genome copy is further ahead to the one that is further behind (a leaf feeding the root). It only passes when the base is useful to the receiver, one time in four on average. 0 = they do not share matter");
+    ui.add(egui::Slider::new(&mut p.bond_signal, 0.0..=1.0).text("signals through the bond"));
 }
 
 fn tab_motion(ui: &mut egui::Ui, world: &mut World) {
     let p = &mut world.params;
-    ui.strong("Sinais internos");
-    ui.add(egui::Slider::new(&mut p.signal_mode, 0.0..=4.0).step_by(1.0).text("modo dos sinais"))
-        .on_hover_text("como os sinais α/β andam pela cadeia e dobram as juntas. 0: condução e sensibilidade de cada aminoácido (v3). 1: difusão igual para os dois lados e todas as juntas respondem igual (α dobra para um lado, β para o outro). 2: o sinal só anda do lado N para o C, mesma resposta. 3: anda do N para o C e cada junta responde conforme o seu aminoácido (o corpo decide para que lado vira). 4: transporte da tabela (condução de cada aminoácido e órgão, como no 0) mas todas as juntas respondem igual");
-    ui.add(egui::Slider::new(&mut p.signal_crosstalk, 0.0..=0.5).text("resíduo nos outros canais"))
-        .on_hover_text("um órgão que emite num canal deixa escapar esta fração da emissão para cada um dos outros três (especificidade imperfeita): um sensor de α também põe um pouco em β, γ e δ. Os relés não têm resíduo (servem para separar canais). 0 = emissão limpa");
+    ui.strong("Internal signals");
+    ui.add(egui::Slider::new(&mut p.signal_mode, 0.0..=4.0).step_by(1.0).text("signal mode"))
+        .on_hover_text("how the α/β signals travel along the chain and bend the joints. 0: conduction and sensitivity of each amino acid (v3). 1: equal diffusion to both sides and all joints respond alike (α bends one way, β the other). 2: the signal only travels from the N side to the C side, same response. 3: it travels from N to C and each joint responds according to its amino acid (the body decides which way it turns). 4: transport from the table (conduction of each amino acid and organ, as in 0) but all joints respond alike");
+    ui.add(egui::Slider::new(&mut p.signal_crosstalk, 0.0..=0.5).text("leakage into the other channels"))
+        .on_hover_text("an organ that emits on one channel lets this fraction of the emission leak into each of the other three (imperfect specificity): an α sensor also puts a little into β, γ and δ. Relays have no leakage (they serve to separate channels). 0 = clean emission");
     if p.track_mode != 0 {
-        ui.strong("Pista de corridas");
-        ui.add(egui::Slider::new(&mut p.track_gain, 0.0..=1.0).logarithmic(true).text("energia por unidade avançada"))
-            .on_hover_text("energia que um agente ganha por cada unidade do mundo de avanço LÍQUIDO na pista (só rende passar do ponto mais avançado a que já chegou). Quem recua mais de 150 unidades paga o excesso ao mesmo preço. Um agente de 20 resíduos gasta ~0,04 por passo só a manter-se");
-        ui.add(egui::Slider::new(&mut p.wall_damage, 0.0..=1.0).logarithmic(true).text("dano das paredes"))
-            .on_hover_text("energia perdida por passo com o centro do agente em cima de uma parede (proporcional a quanto o seu raio entra nela)");
-        ui.add(egui::Slider::new(&mut p.track_pop, 20..=20000).logarithmic(true).text("teto da população"))
-            .on_hover_text("número máximo de agentes na pista: cheia, ninguém nasce. Enquanto houver menos de metade, entram genomas ao acaso (imigração), para nunca se extinguir; a outra metade é para os filhos de quem avança");
-        ui.add(egui::Slider::new(&mut p.track_lifespan, 0..=200000).logarithmic(true).text("vida média (passos)"))
-            .on_hover_text("em cada passo cada agente morre com probabilidade 1 / este valor, seja bom ou mau nadador: as vidas duram em média este número de passos. Serve para haver sempre lugares novos mesmo com a pista cheia de bons nadadores. 0 = sem limite");
+        ui.strong("Race track");
+        ui.add(egui::Slider::new(&mut p.track_gain, 0.0..=1.0).logarithmic(true).text("energy per unit advanced"))
+            .on_hover_text("energy an agent gains for each world unit of NET advance along the track (only going past the farthest point it has already reached pays). Whoever goes back more than 150 units pays for the excess at the same price. A 20-residue agent spends ~0.04 per step just to stay alive");
+        ui.add(egui::Slider::new(&mut p.wall_damage, 0.0..=1.0).logarithmic(true).text("wall damage"))
+            .on_hover_text("energy lost per step with the agent's center on top of a wall (proportional to how far its radius goes into it)");
+        ui.add(egui::Slider::new(&mut p.track_pop, 20..=20000).logarithmic(true).text("population cap"))
+            .on_hover_text("maximum number of agents on the track: when full, nobody is born. While there are fewer than half, random genomes come in (immigration), so it never goes extinct; the other half is for the children of those that advance");
+        ui.add(egui::Slider::new(&mut p.track_lifespan, 0..=200000).logarithmic(true).text("mean lifespan (steps)"))
+            .on_hover_text("on each step every agent dies with probability 1 / this value, whether a good or a bad swimmer: lives last this number of steps on average. It makes sure there are always new places even with the track full of good swimmers. 0 = no limit");
         let mut same = p.copy_same != 0;
-        if ui.checkbox(&mut same, "filhos iguais ao pai").on_hover_text("o filho é uma cópia do genoma do pai em vez do complemento reverso (uma só forma por linhagem)").changed() {
+        if ui.checkbox(&mut same, "children identical to the parent").on_hover_text("the child is a copy of the parent's genome instead of the reverse complement (a single form per lineage)").changed() {
             p.copy_same = same as u32;
         }
     }
-    ui.add(egui::Slider::new(&mut p.clock_mute, 0.0..=1.0).text("silenciar relógios"))
-        .on_hover_text("experiência: tira amplitude a todos os relógios (1 = mudos). O órgão continua no corpo e continua a pagar o custo; serve para ver se os agentes se mexem sem ele (sensores, emissão por contacto)");
+    ui.add(egui::Slider::new(&mut p.clock_mute, 0.0..=1.0).text("mute clocks"))
+        .on_hover_text("experiment: removes amplitude from all clocks (1 = mute). The organ stays in the body and keeps paying its cost; it is for seeing whether the agents move without it (sensors, emission by contact)");
     ui.small(match p.signal_mode.round() as i32 {
-        0 => "  0 = por aminoácido (cada junta responde à sua maneira)",
-        1 => "  1 = isotrópico (difusão para os dois lados, resposta igual)",
-        2 => "  2 = direcional (do lado N para o C, resposta igual)",
-        3 => "  3 = direcional, resposta de cada aminoácido (o corpo decide)",
-        _ => "  4 = transporte da tabela (aminoácidos e órgãos), resposta igual",
+        0 => "  0 = per amino acid (each joint responds in its own way)",
+        1 => "  1 = isotropic (diffusion to both sides, equal response)",
+        2 => "  2 = directional (from the N side to the C side, equal response)",
+        3 => "  3 = directional, response of each amino acid (the body decides)",
+        _ => "  4 = transport from the table (amino acids and organs), equal response",
     });
     ui.separator();
-    ui.strong("Natação");
+    ui.strong("Swimming");
     let mut rft = p.rft_enabled != 0;
-    ui.checkbox(&mut rft, "natação (RFT)");
+    ui.checkbox(&mut rft, "swimming (RFT)");
     p.rft_enabled = rft as u32;
-    ui.add(egui::Slider::new(&mut p.swim_grip, 1.0..=30.0).logarithmic(true).text("aderência da natação (2 = água)"))
-        .on_hover_text("quanto mais o meio trava um segmento a andar de lado do que ao comprido. 2 = água, o limite físico de um corpo fino. Mais = um meio que agarra de lado (gel, muco): cada batida rende mais avanço, NA HORA; quando o corpo pára de bater, pára. 5 dá cerca de 6 vezes o avanço da água num nadador ondulante");
-    ui.add(egui::Slider::new(&mut p.swim_gain, 0.0..=50.0).text("ganho da natação (com memória; 1 = desligado)"))
-        .on_hover_text("multiplica a MÉDIA do avanço dos últimos passos (ver a memória, a seguir): acima de 1 os agentes continuam a deslizar na direção antiga depois de pararem ou virarem (não é físico). 1 = só a física das batidas");
-    ui.add(egui::Slider::new(&mut p.swim_memory, 1.0..=200.0).logarithmic(true).text("memória do ganho (passos)"))
-        .on_hover_text("quantos passos dura o deslizar quando o ganho é maior que 1. 20 = como no v3 (a velocidade perdia 5% por passo); 100 = o que o v4 tinha até agora. Com o ganho a 1 não faz nada");
-    ui.add(egui::Slider::new(&mut p.swim_wobble, 0.0..=1.0).text("vaivém da natação"))
-        .on_hover_text("1 = balanço físico de cada batida; 0 = só o avanço médio");
-    ui.add(egui::Slider::new(&mut p.motion_cost, 0.0..=2.0).logarithmic(true).smallest_positive(0.001).text("custo do movimento"))
-        .on_hover_text("energia gasta a mexer o corpo: a dissipação na água (isto × Σ √arrasto·dθ² das juntas: bater depressa custa ao quadrado) e o dobrar das juntas pelos sinais, que segue o mesmo valor. 0,02 = nadar custa cerca de um terço da manutenção de um corpo sem boca; 0,1 = o valor antigo (nadar custava mais do que estar vivo)");
-    ui.add(egui::Slider::new(&mut p.inertia, 0.0..=10.0).text("inércia dos pesados (não física)"))
-        .on_hover_text("0 = físico: à escala molecular a água amortece tudo, um corpo que pára de bater pára logo. Acima de 0 a velocidade aproxima-se da pedida com peso 1/(1 + isto × massa/massa de um corpo médio): os pesados deslizam e aceleram devagar, como nadadores grandes");
-    ui.add(egui::Slider::new(&mut p.flow_coupling, 0.0..=1.0).text("arrasto pela corrente"))
-        .on_hover_text("1 = físico (um corpo livre segue a água); menos = experiência: as correntes levam-nos menos e eles também empurram menos a água");
-    ui.add(egui::Slider::new(&mut p.flow_mass, 0.0..=4.0).text("pesados seguem menos a corrente"))
-        .on_hover_text("o arrasto pela corrente de cada agente divide-se por 1 + este valor × (massa média por resíduo ÷ a de um resíduo normal − 1): um corpo com órgãos pesados (depósitos, proteases de alcance) é menos levado pela água. Conta a densidade, não o comprimento. 0 = todos seguem a água por igual");
-    ui.add(egui::Slider::new(&mut p.agent_fluid_push, -1.0..=1.0).text("agentes empurram a água"))
-        .on_hover_text("cada resíduo devolve ao fluido o seu arrasto (só no mundo com fluido)");
+    ui.add(egui::Slider::new(&mut p.swim_grip, 1.0..=30.0).logarithmic(true).text("swimming grip (2 = water)"))
+        .on_hover_text("how much more the medium resists a segment moving sideways than lengthwise. 2 = water, the physical limit for a thin body. More = a medium that grips sideways (gel, mucus): each stroke yields more advance, IMMEDIATELY; when the body stops beating, it stops. 5 gives about 6 times the advance of water for an undulating swimmer");
+    ui.add(egui::Slider::new(&mut p.swim_gain, 0.0..=50.0).text("swimming gain (with memory; 1 = off)"))
+        .on_hover_text("multiplies the AVERAGE of the advance over the last steps (see the memory, next): above 1 the agents keep gliding in the old direction after stopping or turning (it is not physical). 1 = just the physics of the strokes");
+    ui.add(egui::Slider::new(&mut p.swim_memory, 1.0..=200.0).logarithmic(true).text("gain memory (steps)"))
+        .on_hover_text("how many steps the gliding lasts when the gain is greater than 1. 20 = as in v3 (speed lost 5% per step); 100 = what v4 had until now. With the gain at 1 it does nothing");
+    ui.add(egui::Slider::new(&mut p.swim_wobble, 0.0..=1.0).text("swimming sway"))
+        .on_hover_text("1 = physical sway of each stroke; 0 = only the mean advance");
+    ui.add(egui::Slider::new(&mut p.motion_cost, 0.0..=2.0).logarithmic(true).smallest_positive(0.001).text("movement cost"))
+        .on_hover_text("energy spent moving the body: dissipation in the water (this × Σ √drag·dθ² of the joints: beating fast costs quadratically) and the bending of the joints by the signals, which follows the same value. 0.02 = swimming costs about one third of the maintenance of a body without a mouth; 0.1 = the old value (swimming cost more than being alive)");
+    ui.add(egui::Slider::new(&mut p.inertia, 0.0..=10.0).text("inertia of heavy bodies (non-physical)"))
+        .on_hover_text("0 = physical: at the molecular scale water damps everything, a body that stops beating stops at once. Above 0 the velocity approaches the requested one with weight 1/(1 + this × mass/mass of an average body): heavy ones glide and accelerate slowly, like large swimmers");
+    ui.add(egui::Slider::new(&mut p.flow_coupling, 0.0..=1.0).text("drag by the current"))
+        .on_hover_text("1 = physical (a free body follows the water); less = experiment: currents carry them less and they also push the water less");
+    ui.add(egui::Slider::new(&mut p.flow_mass, 0.0..=4.0).text("heavy bodies follow the current less"))
+        .on_hover_text("each agent's drag by the current is divided by 1 + this value × (mean mass per residue ÷ that of a normal residue − 1): a body with heavy organs (stores, proteases with reach) is carried less by the water. Density counts, not length. 0 = all follow the water equally");
+    ui.add(egui::Slider::new(&mut p.agent_fluid_push, -1.0..=1.0).text("agents push the water"))
+        .on_hover_text("each residue gives its drag back to the fluid (only in the world with fluid)");
     let mut fso = p.fluid_swim_only != 0;
     if ui
-        .checkbox(&mut fso, "experiência: natação só pelo fluido")
-        .on_hover_text("sem RFT: a forma empurra a água e a água leva o agente")
+        .checkbox(&mut fso, "experiment: swimming through the fluid only")
+        .on_hover_text("without RFT: the shape pushes the water and the water carries the agent")
         .changed()
     {
         p.fluid_swim_only = fso as u32;
     }
     ui.separator();
-    ui.strong("Juntas e contacto");
-    ui.add(egui::Slider::new(&mut p.chain_stiffness, 1.0..=100.0).text("rigidez das juntas"));
-    ui.add(egui::Slider::new(&mut p.joint_load, 0.0..=5.0).text("carga das juntas (arrasto a rodar)"))
-        .on_hover_text("quanto a água trava a dobra de cada junta. Cada junta roda os dois lados do corpo em sentidos opostos e o que a trava é o arrasto do lado que roda mais facilmente (comprimento dos segmentos × arrasto dos órgãos × distância²). As pontas dobram depressa, o tronco de um corpo comprido dobra devagar e um órgão volumoso numa ponta torna essa ponta lenta. 0 = todas as juntas ao mesmo ritmo; 1 = a junta do meio de um corpo médio dobra a metade");
-    ui.add(egui::Slider::new(&mut p.rest_angle_mult, 0.0..=6.0).text("× ângulos de repouso"))
-        .on_hover_text("multiplica o ângulo de repouso de todas as juntas (aminoácidos e órgãos). 1 = os da tabela (corpos quase direitos); 3–4 dá dobras de 50–90° como numa proteína real: corpos enrolados, com mais contactos entre resíduos");
-    ui.add(egui::Slider::new(&mut p.thermal_kt, 0.0..=5.0).text("agitação térmica (kT)"));
-    ui.add(egui::Slider::new(&mut p.motor_amplitude, 0.0..=1.0).text("curso do motor (rad)"));
-    ui.add(egui::Slider::new(&mut p.joint_coupling, 0.0..=0.95).text("acoplamento entre juntas"));
-    ui.add(egui::Slider::new(&mut p.brownian, 0.0..=20.0).text("movimento browniano"));
-    ui.add(egui::Slider::new(&mut p.brownian_rot, 0.0..=5.0).text("rotação browniana"))
-        .on_hover_text("a agitação térmica também roda os corpos ao acaso: 0,15 rad por passo ÷ raio^1,5 (o raio conta-se em resíduos, √n), vezes isto. Um RNA nu roda muito; um corpo de 16 resíduos, ~0,02 rad por passo. 1 = o valor de sempre; 0 = só rodam por nadar, pela água ou por contacto");
-    ui.add(egui::Slider::new(&mut p.phoretic_gain, 0.0..=500.0).text("difusioforese"));
-    ui.checkbox(&mut world.settings.contact_enabled, "repulsão entre agentes");
+    ui.strong("Joints and contact");
+    ui.add(egui::Slider::new(&mut p.chain_stiffness, 1.0..=100.0).text("joint stiffness"));
+    ui.add(egui::Slider::new(&mut p.joint_load, 0.0..=5.0).text("joint load (rotational drag)"))
+        .on_hover_text("how much the water resists the bending of each joint. Each joint rotates the two sides of the body in opposite directions, and what resists it is the drag of the side that rotates more easily (segment length × organ drag × distance²). The tips bend fast, the trunk of a long body bends slowly and a bulky organ at a tip makes that tip slow. 0 = all joints at the same pace; 1 = the middle joint of an average body bends at half speed");
+    ui.add(egui::Slider::new(&mut p.rest_angle_mult, 0.0..=6.0).text("× rest angles"))
+        .on_hover_text("multiplies the rest angle of all joints (amino acids and organs). 1 = those in the table (almost straight bodies); 3–4 gives bends of 50–90° as in a real protein: coiled bodies, with more contacts between residues");
+    ui.add(egui::Slider::new(&mut p.thermal_kt, 0.0..=5.0).text("thermal agitation (kT)"));
+    ui.add(egui::Slider::new(&mut p.motor_amplitude, 0.0..=1.0).text("motor stroke (rad)"));
+    ui.add(egui::Slider::new(&mut p.joint_coupling, 0.0..=0.95).text("coupling between joints"));
+    ui.add(egui::Slider::new(&mut p.brownian, 0.0..=20.0).text("Brownian motion"));
+    ui.add(egui::Slider::new(&mut p.brownian_rot, 0.0..=5.0).text("Brownian rotation"))
+        .on_hover_text("thermal agitation also rotates bodies at random: 0.15 rad per step ÷ radius^1.5 (the radius is counted in residues, √n), times this. A naked RNA rotates a lot; a 16-residue body, ~0.02 rad per step. 1 = the usual value; 0 = they only rotate by swimming, by the water or by contact");
+    ui.add(egui::Slider::new(&mut p.phoretic_gain, 0.0..=500.0).text("diffusiophoresis"));
+    ui.checkbox(&mut world.settings.contact_enabled, "repulsion between agents");
 }
 
 fn tab_info(ui: &mut egui::Ui, st: &mut UiState, prof: &mut Profiler) {
     conservation(ui, st);
     ui.separator();
-    ui.checkbox(&mut prof.enabled, "profiler (submit+wait por segmento)");
+    ui.checkbox(&mut prof.enabled, "profiler (submit+wait per segment)");
     if prof.enabled {
         egui::Grid::new("prof").striped(true).show(ui, |ui| {
             for s in prof.stats() {
@@ -923,7 +923,7 @@ fn tab_info(ui: &mut egui::Ui, st: &mut UiState, prof: &mut Profiler) {
                 if s.name == "world" && !st.paused {
                     // O "world" inclui todos os passos do frame.
                     let n = st.steps_per_frame.max(1);
-                    ui.label(format!("{:.3} ms  ({n} passos, {:.3} ms/passo)", s.avg_ms, s.avg_ms / n as f64));
+                    ui.label(format!("{:.3} ms  ({n} steps, {:.3} ms/step)", s.avg_ms, s.avg_ms / n as f64));
                 } else {
                     ui.label(format!("{:.3} ms", s.avg_ms));
                 }
@@ -934,9 +934,9 @@ fn tab_info(ui: &mut egui::Ui, st: &mut UiState, prof: &mut Profiler) {
 }
 
 fn conservation(ui: &mut egui::Ui, st: &UiState) {
-    ui.strong("Conservação da matéria");
+    ui.strong("Conservation of matter");
     let Some(l) = st.ledger else {
-        ui.label("à espera da primeira leitura…");
+        ui.label("waiting for the first reading…");
         return;
     };
     let base = st.baseline.total() as i64;
@@ -945,12 +945,12 @@ fn conservation(ui: &mut egui::Ui, st: &UiState) {
     let pct = if base > 0 { d as f64 / base as f64 * 100.0 } else { 0.0 };
     let color = if d == 0 { egui::Color32::LIGHT_GREEN } else { egui::Color32::LIGHT_RED };
     ui.colored_label(color, format!("total {now}  Δ {d:+} ({pct:+.4}%)"));
-    ui.label(format!("livre {}  presa em agentes {}", l.free_total(), l.held_total()));
-    ui.label(format!("(leitura do epoch ~{}, assíncrona)", st.ledger_epoch));
+    ui.label(format!("free {}  held in agents {}", l.free_total(), l.held_total()));
+    ui.label(format!("(reading from epoch ~{}, asynchronous)", st.ledger_epoch));
     egui::Grid::new("ledger").striped(true).show(ui, |ui| {
         ui.label("");
-        ui.label("ativ.");
-        ui.label("gastos");
+        ui.label("act.");
+        ui.label("spent");
         ui.label("Δ");
         ui.end_row();
         for (ch, name) in CH.iter().enumerate() {

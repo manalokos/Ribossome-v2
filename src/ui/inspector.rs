@@ -406,32 +406,32 @@ fn signal_bars(ui: &mut egui::Ui, d: &InspectData) {
             p.rect_filled(egui::Rect::from_min_size(egui::pos2(x0 + k as f32 * cell, y), egui::vec2((cell - 1.0).max(1.0), row_h)), 0.0, col);
         }
     }
-    ui.small("sinais por resíduo (ponta N à esquerda): α laranja + / azul −, β verde + / magenta −, γ vermelho + / azul −, δ ciano + / amarelo −; traço branco = órgão");
+    ui.small("signals per residue (N end on the left): α orange + / blue −, β green + / magenta −, γ red + / blue −, δ cyan + / yellow −; white mark = organ");
 }
 
 /// O inspetor, na barra fixa da direita (só existe com um organismo escolhido).
 pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life::table::OrganRow], amino: &[crate::life::table::AminoRow]) {
     let mut open = true;
     ui.horizontal(|ui| {
-        ui.heading("Inspetor");
-        if ins.data.is_some() && ui.button("largar").on_hover_text("deixa de seguir este organismo").clicked() {
+        ui.heading("Inspector");
+        if ins.data.is_some() && ui.button("release").on_hover_text("stop following this organism").clicked() {
             open = false;
         }
     });
     ui.separator();
     egui::ScrollArea::vertical().show(ui, |ui| {
         if ins.dead {
-            ui.colored_label(egui::Color32::LIGHT_RED, "o organismo selecionado morreu");
+            ui.colored_label(egui::Color32::LIGHT_RED, "the selected organism died");
         }
         let Some(d) = &ins.data else {
-            ui.label("clica num organismo (clique esquerdo sem arrastar)");
+            ui.label("click an organism (left click without dragging)");
             return;
         };
         let a = &d.agent;
         if let Some(t) = ins.preview_tex {
             ui.image((t, egui::vec2(256.0, 256.0)));
         }
-        ui.checkbox(&mut ins.follow, "câmara segue este organismo");
+        ui.checkbox(&mut ins.follow, "camera follows this organism");
         signal_bars(ui, d);
         egui::Grid::new("ins").striped(true).show(ui, |ui| {
             let mut row = |k: &str, v: String| {
@@ -441,14 +441,14 @@ pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life:
             };
             row(
                 "id",
-                format!("{}  (pai {})", a.id, if a.parent == u32::MAX { "—".into() } else { a.parent.to_string() }),
+                format!("{}  (parent {})", a.id, if a.parent == u32::MAX { "—".into() } else { a.parent.to_string() }),
             );
-            row("geração", a.generation.to_string());
+            row("generation", a.generation.to_string());
             if !d.bonds.is_empty() {
-                let list: Vec<String> = d.bonds.iter().map(|(id, birth)| format!("{id}{}", if *birth { " (nascimento)" } else { " (contacto)" })).collect();
-                row("ligado a", list.join(", "));
+                let list: Vec<String> = d.bonds.iter().map(|(id, birth)| format!("{id}{}", if *birth { " (birth)" } else { " (contact)" })).collect();
+                row("bonded to", list.join(", "));
             }
-            row("idade", format!("{} passos", a.age));
+            row("age", format!("{} steps", a.age));
             // Capacidade (energy_capacity em lifecycle.wgsl): o volume dos
             // aminoácidos do corpo (0,5 por resíduo médio) + os órgãos de
             // armazenamento (capacidade da variante × intensidade).
@@ -468,19 +468,19 @@ pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life:
             }
             store += merge(run, run_cap);
             let cap = (body_cap + store).max(1.0);
-            row("energia", format!("{:.2} / {:.1}", a.energy, cap));
-            row("cópia", format!("{} / {} bases", a.pair_count, a.gene_len));
+            row("energy", format!("{:.2} / {:.1}", a.energy, cap));
+            row("copy", format!("{} / {} bases", a.pair_count, a.gene_len));
             row(
-                "corpo",
-                if a.body_len == 0 { "RNA nu (não codifica)".into() } else { format!("{} resíduos", a.body_len) },
+                "body",
+                if a.body_len == 0 { "naked RNA (non-coding)".into() } else { format!("{} residues", a.body_len) },
             );
-            row("raio", format!("{:.1}", a.radius));
+            row("radius", format!("{:.1}", a.radius));
         });
         ui.separator();
-        ui.strong(format!("Genoma ({} bases)", d.genome.len()));
+        ui.strong(format!("Genome ({} bases)", d.genome.len()));
         colored_seq(ui, d.genome.iter().map(|&b| (BASES[b as usize], base_color(b))));
         if !d.body.is_empty() {
-            ui.strong(format!("Proteína ({} resíduos; órgãos a branco)", d.body.len()));
+            ui.strong(format!("Protein ({} residues; organs in white)", d.body.len()));
             colored_seq(
                 ui,
                 d.body.iter().zip(&d.organs).map(|(&aa, &o)| {
@@ -499,20 +499,20 @@ pub fn panel(ui: &mut egui::Ui, ins: &mut Inspector, organ_table: &[crate::life:
                 .map(|(k, &o)| {
                     let t = ((o & 0x1F) - 1) as u8;
                     format!(
-                        "{}  posição {k}: {}",
+                        "{}  position {k}: {}",
                         ORGAN_SYMBOLS[t as usize],
                         describe(t, ((o >> 5) & 0x7) as u8, (o >> 8) as u8, organ_table)
                     )
                 })
                 .collect();
             if list.is_empty() {
-                ui.label("sem órgãos");
+                ui.label("no organs");
             } else {
-                ui.strong("Órgãos (símbolo na proteína, posição: o que faz)");
+                ui.strong("Organs (symbol in the protein, position: what it does)");
                 for l in list {
                     ui.label(l);
                 }
-                ui.small("posição 0 = ponta N (início da proteína); esquerdo/direito = lados da cadeia de N para C");
+                ui.small("position 0 = N end (start of the protein); left/right = sides of the chain from N to C");
             }
         }
     });

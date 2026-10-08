@@ -170,7 +170,7 @@ impl History {
             writeln!(f, "{epoch},{}", row.join(","))
         })();
         if let Err(e) = r {
-            log::error!("{CSV_PATH}: {e} (deixo de escrever o CSV)");
+            log::error!("{CSV_PATH}: {e} (no longer writing the CSV)");
             self.csv_ok = false;
         }
     }
@@ -209,7 +209,7 @@ impl History {
         let n = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
         let m = names.len();
         if data.len() != 4 + n * 4 + n * m * 4 {
-            log::warn!("estatísticas gravadas com tamanho errado: ignoradas");
+            log::warn!("saved statistics have the wrong size: ignored");
             return h;
         }
         let epochs: Vec<u32> = bytemuck::pod_collect_to_vec(&data[4..4 + n * 4]);
@@ -247,13 +247,13 @@ impl History {
 /// Grupos de séries por gráfico (índices em `series_names`).
 fn groups() -> Vec<(&'static str, Vec<usize>)> {
     vec![
-        ("População", vec![0]),
-        ("Nascimentos e mortes", vec![1, 2]),
-        ("Órgãos (agentes com cada um)", (BASE.len()..BASE.len() + ORGAN_TYPES).collect()),
-        ("Predação", vec![12]),
-        ("Corpo e genoma", vec![4, 5, 9]),
-        ("Energia, gerações e ligações", vec![3, 6, 7, 8]),
-        ("Matéria", vec![10, 11]),
+        ("Population", vec![0]),
+        ("Births and deaths", vec![1, 2]),
+        ("Organs (agents with each one)", (BASE.len()..BASE.len() + ORGAN_TYPES).collect()),
+        ("Predation", vec![12]),
+        ("Body and genome", vec![4, 5, 9]),
+        ("Energy, generations and bonds", vec![3, 6, 7, 8]),
+        ("Matter", vec![10, 11]),
     ]
 }
 
@@ -274,14 +274,14 @@ impl Default for ChartSel {
 
 /// Controlos da amostragem (separador "Gráficos" da barra da esquerda).
 pub fn controls(ui: &mut egui::Ui, h: &mut History) {
-    ui.label("os gráficos estão no painel do meio (por cima da simulação, que continua a correr). Muda de separador para a voltar a ver.");
+    ui.label("the charts are in the middle panel (on top of the simulation, which keeps running). Switch tabs to see it again.");
     ui.horizontal(|ui| {
-        ui.label("amostra de");
+        ui.label("sample every");
         ui.add(egui::DragValue::new(&mut h.every).range(100..=1_000_000).speed(100));
-        ui.label("em epochs");
+        ui.label("epochs");
     });
     ui.label(format!(
-        "{} amostras guardadas (uma em cada {}; máximo {MAX_POINTS}); CSV completo em {CSV_PATH}",
+        "{} samples stored (one in every {}; maximum {MAX_POINTS}); full CSV in {CSV_PATH}",
         h.len(),
         h.stride
     ));
@@ -297,7 +297,7 @@ fn series_color(k: usize) -> egui::Color32 {
 /// da última amostra; um clique num nome esconde ou mostra a série.
 pub fn draw(ui: &mut egui::Ui, h: &mut History, sel: &mut ChartSel) {
     if h.len() < 2 {
-        ui.label("à espera de amostras…");
+        ui.label("waiting for samples…");
         return;
     }
     let last: Vec<f32> = h.last_rows(1).first().map(|(_, v)| v.to_vec()).unwrap_or_default();
@@ -340,10 +340,10 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History, sel: &mut ChartSel) {
                 }
             });
             if groups[sel.group[slot]].1.first().is_some_and(|i| organs.contains(i)) {
-                ui.checkbox(&mut sel.organ_counts, "em número de agentes")
-                    .on_hover_text("ligado: quantos agentes têm cada órgão (uma linha não mexe nas outras). Desligado: em % da população, que faz todas as linhas ondular juntas quando um grupo grande cresce ou encolhe");
+                ui.checkbox(&mut sel.organ_counts, "as number of agents")
+                    .on_hover_text("on: how many agents have each organ (one line does not move the others). Off: as % of the population, which makes all the lines ripple together when a large group grows or shrinks");
             }
-            ui.small("clica num nome para esconder ou mostrar a linha");
+            ui.small("click a name to hide or show the line");
         });
         let idx = &groups[sel.group[slot]].1;
         ui.horizontal_wrapped(|ui| {

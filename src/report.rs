@@ -175,7 +175,7 @@ fn cap_size(cap: &Capture) -> f32 {
 fn inferred_tree(species: &[&Species], total: usize) -> String {
     let n = species.len();
     if n < 2 {
-        return "<p>Só há uma espécie acima de 1%.</p>".into();
+        return "<p>There is only one species above 1%.</p>".into();
     }
     // Cada grupo: (folhas, altura, posição vertical média, svg já desenhado).
     struct Node {
@@ -245,7 +245,7 @@ fn inferred_tree(species: &[&Species], total: usize) -> String {
         let s = species[leaf];
         write!(
             svg,
-            "<text x=\"{:.0}\" y=\"{:.0}\">E{} · {:.1}% · {} bases</text>",
+            "<text x=\"{:.0}\" y=\"{:.0}\">S{} · {:.1}% · {} bases</text>",
             left + width + 8.0,
             18.0 + r as f32 * row,
             leaf + 1,
@@ -255,7 +255,7 @@ fn inferred_tree(species: &[&Species], total: usize) -> String {
         .unwrap();
     }
     format!(
-        "<svg class=\"tree\" width=\"760\" height=\"{:.0}\">{svg}</svg><p class=\"note\">Comprimento dos ramos = distância entre genomas (o máximo desenhado é {:.0}% de diferença). É uma estimativa feita só com as espécies vivas.</p>",
+        "<svg class=\"tree\" width=\"760\" height=\"{:.0}\">{svg}</svg><p class=\"note\">Branch length = distance between genomes (the maximum drawn is {:.0}% difference). It is an estimate made from the living species only.</p>",
         28.0 + n as f32 * row,
         max_h * 200.0
     )
@@ -347,7 +347,7 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     let mut h = String::new();
     write!(
         h,
-        "<!doctype html><html lang=\"pt\"><meta charset=\"utf-8\"><title>{t}</title><style>{CSS}{}</style><h1>{t}</h1>",
+        "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>{t}</title><style>{CSS}{}</style><h1>{t}</h1>",
         crate::tree_view::CSS,
         t = esc(title)
     )
@@ -355,7 +355,7 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     let changed: Vec<String> = w.params.changed_from_default().iter().filter(|c| c.0 != "epoch").map(|(n, v, _)| format!("{n} = {}", (*v * 1e4).round() / 1e4)).collect();
     write!(
         h,
-        "<p>Epoch <b>{}</b> · <b>{}</b> agentes vivos · <b>{}</b> grupos genéticos (limiar 15%), <b>{}</b> com pelo menos 1% dos agentes.</p><details><summary>Parâmetros diferentes dos valores por omissão ({})</summary><p class=\"note\">{}</p></details>",
+        "<p>Epoch <b>{}</b> · <b>{}</b> living agents · <b>{}</b> genetic groups (15% threshold), <b>{}</b> with at least 1% of the agents.</p><details><summary>Parameters differing from the default values ({})</summary><p class=\"note\">{}</p></details>",
         w.params.epoch,
         total,
         species.len(),
@@ -368,15 +368,15 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     // Mundo inteiro.
     let big = Capture::new(gpu, w, 768);
     let rgba = big.render(gpu, w, &Camera { center: [0.5 * sim, 0.5 * sim], zoom: 768.0 / sim }, 0, 0.5);
-    write!(h, "<h2>O mundo</h2>{}", img(&big.encode_png(&rgba).unwrap_or_default(), 768, "mundo")).unwrap();
+    write!(h, "<h2>The world</h2>{}", img(&big.encode_png(&rgba).unwrap_or_default(), 768, "world")).unwrap();
 
     // Árvores.
-    h += "<h2>Linhagens registadas (árvore da vida)</h2>";
+    h += "<h2>Recorded lineages (tree of life)</h2>";
     h += &match lineages {
         Some(l) => crate::tree_view::viewer(l, w, Some(&crate::tree_view::portraits(gpu, w, l))),
-        None => "<p>Sem registo de linhagens (cena aberta fora da aplicação).</p>".to_string(),
+        None => "<p>No lineage record (scene opened outside the application).</p>".to_string(),
     };
-    h += "<h2>Parentesco entre as espécies vivas (árvore inferida)</h2>";
+    h += "<h2>Kinship between the living species (inferred tree)</h2>";
     let card_species: Vec<&Species> = cards.iter().map(|&i| &species[i]).collect();
     h += &inferred_tree(&card_species, total);
 
@@ -385,13 +385,13 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
         cards.iter().map(|&i| [translate_organs(&species[i].leader, rs, &code), translate_organs(&reverse_complement(&species[i].leader), rs, &code)]).collect();
 
     // Quem pode atacar quem.
-    h += "<h2>Quem pode atacar quem</h2><p>Energia que uma espécie (linha) tira a outra (coluna) por passo de contacto, pelas regras: força das proteases de cada família × fração de resíduos-alvo da vítima × defesa da prolina. É o melhor caso entre as duas fitas de cada uma; a diagonal é canibalismo.</p><table class=\"m\"><tr><th></th>";
+    h += "<h2>Who can attack whom</h2><p>Energy that one species (row) takes from another (column) per step of contact, by the rules: strength of the proteases of each family × fraction of target residues in the victim × proline defense. It is the best case between the two strands of each one; the diagonal is cannibalism.</p><table class=\"m\"><tr><th></th>";
     for k in 0..cards.len() {
-        write!(h, "<th>E{}</th>", k + 1).unwrap();
+        write!(h, "<th>S{}</th>", k + 1).unwrap();
     }
     h += "</tr>";
     for (a, ba) in bodies.iter().enumerate() {
-        write!(h, "<tr><th>E{}</th>", a + 1).unwrap();
+        write!(h, "<tr><th>S{}</th>", a + 1).unwrap();
         for bv in &bodies {
             let mut v = 0.0f32;
             for x in ba {
@@ -413,11 +413,11 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     let bite: Vec<[f32; 4]> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.contact_disp_buf)).to_vec();
     let mut victims: Vec<u32> = slots.iter().copied().filter(|&s| bite[s as usize][0] > 0.0).collect();
     victims.sort_by(|&a, &b| bite[b as usize][0].total_cmp(&bite[a as usize][0]));
-    h += "<h2>Ataques a decorrer</h2>";
+    h += "<h2>Attacks in progress</h2>";
     if victims.is_empty() {
-        h += "<p>Nenhum agente estava a ser atacado no último passo (ou a cena foi aberta sem correr passos).</p>";
+        h += "<p>No agent was being attacked on the last step (or the scene was opened without running any steps).</p>";
     } else {
-        write!(h, "<p>{} agentes estavam a perder energia para uma protease no último passo. Os mais atacados (a vítima fica vermelha, a protease que ataca fica amarela):</p><div class=\"row\">", victims.len()).unwrap();
+        write!(h, "<p>{} agents were losing energy to a protease on the last step. The most attacked (the victim turns red, the attacking protease turns yellow):</p><div class=\"row\">", victims.len()).unwrap();
         let shot = Capture::new(gpu, w, 384);
         let mut seen: Vec<u32> = Vec::new();
         for &v in &victims {
@@ -430,8 +430,8 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
             let rgba = shot.render(gpu, w, &Camera { center: [a.pos_x, a.pos_y], zoom: 384.0 / 420.0 }, 0, 0.25);
             write!(
                 h,
-                "<figure>{}<figcaption>vítima: {} · perde {:.2} de energia por passo</figcaption></figure>",
-                img(&shot.encode_png(&rgba).unwrap_or_default(), 300, "ataque"),
+                "<figure>{}<figcaption>victim: {} · loses {:.2} energy per step</figcaption></figure>",
+                img(&shot.encode_png(&rgba).unwrap_or_default(), 300, "attack"),
                 species_name(sv, &cards),
                 bite[v as usize][0]
             )
@@ -441,21 +441,21 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
     }
 
     // Ligações entre espécies.
-    h += "<h2>Ligações por âncora</h2>";
+    h += "<h2>Anchor bonds</h2>";
     if pairs.is_empty() {
-        h += "<p>Não há agentes ligados.</p>";
+        h += "<p>There are no bonded agents.</p>";
     } else {
         let mut list: Vec<(&(u32, u32), &u32)> = pairs.iter().collect();
         list.sort_by(|a, b| b.1.cmp(a.1));
         h += "<ul>";
         for ((a, b), n) in list.into_iter().take(10) {
-            write!(h, "<li>{n} ligações entre {} e {}</li>", species_name(*a, &cards), species_name(*b, &cards)).unwrap();
+            write!(h, "<li>{n} bonds between {} and {}</li>", species_name(*a, &cards), species_name(*b, &cards)).unwrap();
         }
         h += "</ul>";
     }
 
     // Fichas.
-    h += "<h2>As espécies</h2><p>Cada espécie tem duas formas: o filho é lido da fita complementar do pai, por isso a forma A gera a B e a B gera a A. O \"ciclo de vida\" é essa alternância.</p>";
+    h += "<h2>The species</h2><p>Each species has two forms: the child is read from the strand complementary to the parent's, so form A produces B and B produces A. The \"life cycle\" is that alternation.</p>";
     let cap = Capture::new(gpu, w, 256);
     for (k, &i) in cards.iter().enumerate() {
         let s = &species[i];
@@ -463,7 +463,7 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
         let n = st.n.max(1) as f64;
         write!(
             h,
-            "<section><h3>E{} · {:.1}% dos agentes ({}) · {} bases · {} genomas distintos</h3><div class=\"row\">",
+            "<section><h3>S{} · {:.1}% of the agents ({}) · {} bases · {} distinct genomes</h3><div class=\"row\">",
             k + 1,
             100.0 * s.count as f32 / total.max(1) as f32,
             s.count,
@@ -476,12 +476,12 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
             let share = if strand == 0 { s.same_strand } else { s.count - s.same_strand };
             h += "<figure>";
             match st.rep[strand] {
-                Some((slot, _)) => h += &img(&portrait(gpu, w, &cap, slot, &agents[slot as usize], 0.15), 256, "retrato"),
-                None => h += "<div class=\"none\">nenhum vivo nesta forma</div>",
+                Some((slot, _)) => h += &img(&portrait(gpu, w, &cap, slot, &agents[slot as usize], 0.15), 256, "portrait"),
+                None => h += "<div class=\"none\">none alive in this form</div>",
             }
             write!(
                 h,
-                "<figcaption><b>forma {}</b> · {:.0}% do grupo · {} resíduos<br><span class=\"seq\">{}</span></figcaption>",
+                "<figcaption><b>form {}</b> · {:.0}% of the group · {} residues<br><span class=\"seq\">{}</span></figcaption>",
                 if strand == 0 { "A" } else { "B" },
                 100.0 * share as f32 / s.count.max(1) as f32,
                 body.len(),
@@ -491,17 +491,17 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
             h += "<ul class=\"org\">";
             for (pos, r) in body.iter().enumerate() {
                 if let Some((t, p, g)) = r.organ {
-                    write!(h, "<li><b>{}</b> posição {pos}: {}</li>", ORGAN_SYMBOLS[t as usize], esc(&describe(t, p, g, &w.organ_table))).unwrap();
+                    write!(h, "<li><b>{}</b> position {pos}: {}</li>", ORGAN_SYMBOLS[t as usize], esc(&describe(t, p, g, &w.organ_table))).unwrap();
                 }
             }
             if body.iter().all(|r| r.organ.is_none()) {
-                h += "<li>sem órgãos</li>";
+                h += "<li>no organs</li>";
             }
             h += "</ul></figure>";
         }
         write!(
             h,
-            "<div class=\"facts\"><table><tr><td>energia média</td><td>{:.1}</td></tr><tr><td>idade média</td><td>{:.0} passos</td></tr><tr><td>geração média</td><td>{:.0}</td></tr><tr><td>cópia do genoma</td><td>{:.0}% feita, em média</td></tr><tr><td>resíduos (média)</td><td>{:.1}</td></tr><tr><td>ligados por âncora</td><td>{:.1}%</td></tr></table><div class=\"row\"><div>onde vivem{}</div><div>altura (cima → baixo){}</div></div></div></div></section>",
+            "<div class=\"facts\"><table><tr><td>mean energy</td><td>{:.1}</td></tr><tr><td>mean age</td><td>{:.0} steps</td></tr><tr><td>mean generation</td><td>{:.0}</td></tr><tr><td>genome copy</td><td>{:.0}% done, on average</td></tr><tr><td>residues (mean)</td><td>{:.1}</td></tr><tr><td>bonded by anchor</td><td>{:.1}%</td></tr></table><div class=\"row\"><div>where they live{}</div><div>height (top → bottom){}</div></div></div></div></section>",
             st.energy / n,
             st.age / n,
             st.generation / n,
@@ -514,14 +514,14 @@ pub fn generate(gpu: &Gpu, w: &World, lineages: Option<&Lineages>, title: &str) 
         .unwrap();
     }
     let rest = total as i64 - cards.iter().map(|&i| species[i].count as i64).sum::<i64>();
-    write!(h, "<p class=\"note\">Os restantes {} agentes ({:.1}%) estão em {} grupos com menos de 1% cada.</p></html>", rest, 100.0 * rest as f32 / total.max(1) as f32, species.len() - cards.len()).unwrap();
+    write!(h, "<p class=\"note\">The remaining {} agents ({:.1}%) are in {} groups with less than 1% each.</p></html>", rest, 100.0 * rest as f32 / total.max(1) as f32, species.len() - cards.len()).unwrap();
     h
 }
 
 fn species_name(s: u32, cards: &[usize]) -> String {
     match cards.iter().position(|&i| i as u32 == s) {
-        Some(k) => format!("E{}", k + 1),
-        None => "uma espécie rara".into(),
+        Some(k) => format!("S{}", k + 1),
+        None => "a rare species".into(),
     }
 }
 
