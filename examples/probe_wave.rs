@@ -1,0 +1,79 @@
+//! ONDE ESTÁ A ONDA? Um nadador (relógio + TAIL glicinas) parado no
+//! laboratório: amplitude do sinal α e do movimento LATERAL de cada resíduo
+//! (no referencial do corpo) ao longo da cadeia, durante 3 períodos do
+//! relógio. Num flagelo a amplitude cresce para a ponta da cauda; aqui vê-se
+//! se é a cabeça ou a cauda que abana. Modos de sinais 0 e 2.
+use ribossome::gpu::Gpu;
+use ribossome::params::{SpawnRequest, WorldConfig};
+use ribossome::world::World;
+
+fn bases(s: &str) -> Vec<u8> {
+    s.chars().filter(|c| !c.is_whitespace()).map(|c| "AUGC".find(c).unwrap() as u8).collect()
+}
+
+fn main() {
+    let tail: usize = std::env::var("TAIL").ok().and_then(|v| v.parse().ok()).unwrap_or(15);
+    let gpu = Gpu::new_headless().unwrap();
+    let cfg = WorldConfig::DEFAULT;
+    let genome = bases(&format!("AUG CAU CUU GAA {} UAA", "GGU ".repeat(tail)));
+    for mode in [0.0f32, 2.0] {
+        let mut w = World::new(&gpu, cfg, 3);
+        w.custom_terrain = Some((vec![0; cfg.cells() as usize], vec![0.0; cfg.cells() as usize]));
+        w.fumaroles.clear();
+        w.seed_matter(&gpu, 3);
+        w.settings.fluid_enabled = false;
+        w.settings.contact_enabled = false;
+        w.params.death_probability = 0.0;
+        w.params.maintenance_cost = 0.0;
+        w.params.pairing_rate = 0.0;
+        w.params.uptake_rate = 0.0;
+        w.params.uv_strength = 0.0;
+        w.params.sedimentation = 0.0;
+        w.params.brownian_rot = 0.0;
+        w.params.thermal_kt = 0.0;
+        w.params.spawn_energy = 60.0;
+        w.params.signal_mode = mode;
+        w.request_seeds(&[SpawnRequest::with_genome(8000.0, 8000.0, &genome)]);
+        let step = |w: &mut World, k: u32| {
+            let mut enc = gpu.device.create_command_encoder(&Default::default());
+            w.encode_steps(&gpu.queue, &mut enc, k);
+            gpu.queue.submit([enc.finish()]);
+            gpu.wait_idle();
+        };
+        // Deixa assentar (dobragem ao nascer) antes de medir.
+        for _ in 0..4 {
+            step(&mut w, 64);
+        }
+        let agents = w.read_agents_blocking(&gpu);
+        let Some((slot, a)) = agents.iter().enumerate().find(|(_, a)| a.alive != 0) else {
+            println!("modo {mode}: o nadador não nasceu");
+            continue;
+        };
+        let n = a.body_len as usize;
+        let (mut smin, mut smax) = (vec![f32::MAX; n], vec![f32::MIN; n]);
+        let (mut ymin, mut ymax) = (vec![f32::MAX; n], vec![f32::MIN; n]);
+        let start = [a.pos_x, a.pos_y];
+        for _ in 0..210 {
+            step(&mut w, 1);
+            let sig: Vec<[f32; 4]> = bytemuck::cast_slice(&gpu.read_ranges_blocking(&w.signals_buf, &[(slot as u64 * 64 * 16, 64 * 16)])).to_vec();
+            let pos: Vec<[f32; 2]> = bytemuck::cast_slice(&gpu.read_ranges_blocking(&w.body_pos_buf, &[(slot as u64 * 64 * 8, 64 * 8)])).to_vec();
+            // Eixo do corpo: do primeiro ao último resíduo; lateral = distância a esse eixo.
+            let ax = [pos[n - 1][0] - pos[0][0], pos[n - 1][1] - pos[0][1]];
+            let len = (ax[0] * ax[0] + ax[1] * ax[1]).sqrt().max(1e-6);
+            for k in 0..n {
+                smin[k] = smin[k].min(sig[k][0]);
+                smax[k] = smax[k].max(sig[k][0]);
+                let d = [pos[k][0] - pos[0][0], pos[k][1] - pos[0][1]];
+                let lat = (ax[0] * d[1] - ax[1] * d[0]) / len;
+                ymin[k] = ymin[k].min(lat);
+                ymax[k] = ymax[k].max(lat);
+            }
+        }
+        let end = w.read_agents_blocking(&gpu)[slot];
+        let moved = ((end.pos_x - start[0]).powi(2) + (end.pos_y - start[1]).powi(2)).sqrt();
+        println!("modo dos sinais {mode}: corpo de {n} resíduos (0 = M, 1 = relógio), avançou {moved:.1} em 210 passos");
+        println!("  resíduo:            {}", (0..n).map(|k| format!("{k:5}")).collect::<String>());
+        println!("  amplitude do sinal α{}", (0..n).map(|k| format!("{:5.2}", (smax[k] - smin[k]) / 2.0)).collect::<String>());
+        println!("  vaivém lateral      {}", (0..n).map(|k| format!("{:5.1}", (ymax[k] - ymin[k]) / 2.0)).collect::<String>());
+    }
+}
