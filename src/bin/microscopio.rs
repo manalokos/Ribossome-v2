@@ -402,7 +402,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             let cell = floor(p.xy / 13.0);
             let hs = hash3(vec3<u32>(vec2<u32>(vec2<i32>(cell) + vec2<i32>(32768)), 17u));
             let speck = step(0.8, hs.z) * (1.0 - smoothstep(0.2, 1.0, length(p.xy / 13.0 - cell - 0.1 - 0.8 * hs.xy) * (5.0 + 6.0 * hs.x)));
-            albedo = max(albedo, vec3<f32>(0.2 + 0.06 * grain + 0.2 * speck));
+            albedo = max(albedo, vec3<f32>(0.3 + 0.07 * grain + 0.2 * speck));
             albedo = max(albedo, vec3<f32>(0.36, 0.35, 0.34) * smoothstep(0.5, 6.0, s.g));
         } else {
             // A peça é a mesma forma para cima e para baixo do seu meio: onde

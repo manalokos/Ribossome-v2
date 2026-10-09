@@ -186,8 +186,12 @@ struct Soup {
     // sprites e quantos são (a média dá o sombreado, à parte da quantidade).
     lum: f32,
     cover: f32,
-    // Altura (em células) da molécula mais alta que cobre o ponto.
+    // Altura (em células) da molécula mais alta que cobre o ponto, e a que
+    // cota (0..1, ao acaso por molécula) ela paira: no microscópio 3D as
+    // moléculas não ficam todas no mesmo plano.
     h: f32,
+    lift: f32,
+    top: f32,
 }
 
 // Densidade de monómeros (por célula de área) no ponto pc (em células),
@@ -199,6 +203,8 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     s.lum = 0.0;
     s.cover = 0.0;
     s.h = 0.0;
+    s.lift = 0.0;
+    s.top = 0.0;
     let r = clamp(radius, 0.05, 1.0);
     // Núcleo GAUSSIANO, σ = r / DOT_SIGMAS, cortado em r e descido para
     // acabar em zero aí (sem degrau na borda). O integral sobre o disco é
@@ -242,7 +248,13 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                                 sum += cov;
                                 s.lum += cov * t.r;
                                 s.cover += cov;
-                                s.h = max(s.h, cov * t.b * r);
+                                let lf = f32((h >> 12u) & 0xFFu) / 255.0;
+                                let top = cov * (t.b * r + MOL_LIFT * lf);
+                                if (top > s.top) {
+                                    s.top = top;
+                                    s.h = cov * t.b * r;
+                                    s.lift = lf;
+                                }
                             }
                         }
                         let dens = sum * f32(count) / f32(max(shown, 1u));
@@ -266,6 +278,9 @@ const GRAIN_PIXEL_FULL: f32 = 0.5;
 const GRAIN_PIXEL_NONE: f32 = 1.0;
 const ROCK_SIGMA: f32 = 0.5;
 const PEBBLE_SIGMA: f32 = 0.17;
+
+// Até onde (em células) uma molécula solta paira acima do fundo.
+const MOL_LIFT: f32 = 0.35;
 
 struct Ground {
     rock: f32,
@@ -413,12 +428,14 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     var mol_relief = 1.0;
     var mol_edge = 0.0;
     var mol_h = 0.0;
+    var mol_lift = 0.0;
     if (dots > 0.0 && view.view_mode <= 5u) {
         let soup = soup_at(world / f32(WORLD_UNITS_PER_CELL), view.coc_radius, pixel_cells);
         act = mix(act, soup.act, dots);
         spent = mix(spent, soup.spent, dots);
         // RELEVO das moléculas: escurece os vales e aclara as arestas.
         mol_h = soup.h;
+        mol_lift = soup.lift;
         if (soup.cover > 0.0) {
             let l = pow(clamp(soup.lum / soup.cover, 0.0, 1.0), 0.8);
             mol_relief = mix(1.0, 0.15 + 1.6 * l, dots);
@@ -536,7 +553,8 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
             if (vol.x > 0.0) {
                 vol.x += 0.7 * mol_h * cell;
             } else {
-                vol = vec2<f32>(3.0 + mol_h * cell, 3.0 - mol_h * cell);
+                let mid = 3.0 + MOL_LIFT * mol_lift * cell;
+                vol = vec2<f32>(mid + mol_h * cell, mid - mol_h * cell);
             }
         }
         // Modo 2: quanto terreno há aqui e o cimo das pedras. O microscópio
