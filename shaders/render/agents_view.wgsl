@@ -31,6 +31,31 @@
 // Mordidas do último passo por agente: .x = energia que lhe tiraram, .z = a
 // que ganhou a morder (shaders/life/contact.wgsl).
 @group(0) @binding(13) var<storage, read> bite_view: array<vec4<f32>>;
+// SPRITES dos órgãos (teste do aspeto "microscopia eletrónica"): uma fila de
+// mosaicos com a luminância em R e a máscara no alfa (assets/sprites.png,
+// feito por scripts/sprites_atlas.py). A cor é a do órgão.
+@group(0) @binding(14) var sprites_tex: texture_2d<f32>;
+@group(0) @binding(15) var sprites_samp: sampler;
+const SPRITE_TILES: f32 = 3.0;
+const SPRITE_STORAGE: f32 = 0.0;
+const SPRITE_SENSOR: f32 = 1.0;
+const SPRITE_SENSOR_SIDE: f32 = 2.0;
+// Raio da esfera central de cada sprite de sensor, em fração de meio mosaico.
+const SPRITE_SENSOR_BODY: f32 = 0.29;
+const SPRITE_SENSOR_SIDE_BODY: f32 = 0.209;
+// (luminância, máscara) do mosaico em q (-1..1, y para cima); qx, qy são as
+// derivadas de q no ecrã (para escolher o mipmap sem depender do ramo).
+fn sprite(tile: f32, q: vec2<f32>, qx: vec2<f32>, qy: vec2<f32>) -> vec2<f32> {
+    let sc = vec2<f32>(0.5 / SPRITE_TILES, -0.5);
+    let qc = clamp(q, vec2<f32>(-1.0), vec2<f32>(1.0));
+    let s = textureSampleGrad(sprites_tex, sprites_samp, vec2<f32>((tile + 0.5) / SPRITE_TILES, 0.5) + qc * sc, qx * sc, qy * sc);
+    let inside = step(max(abs(q.x), abs(q.y)), 0.995);
+    return vec2<f32>(s.r, s.a * inside);
+}
+// Cinzento do microscópio pintado com a cor do órgão, com as arestas claras.
+fn sem_color(tint: vec3<f32>, lum: f32) -> vec3<f32> {
+    return clamp(tint * (0.2 + 1.3 * lum) + vec3<f32>(0.4) * pow(lum, 3.0), vec3<f32>(0.0), vec3<f32>(1.0));
+}
 
 // FLASH DAS PROTEASES: quem está a atacar fica com as proteases ligadas
 // amarelo-claras (só a cor, a forma é a do momento); a vítima fica vermelha.
@@ -84,7 +109,8 @@ const LOD_ORGAN_THICK: f32 = 2.2;
 const KIN_DOT_PX: f32 = 5.0;
 const NO_ORGAN: u32 = 0xFFu;
 // Tamanho de um órgão em relação a um resíduo estrutural.
-const ORGAN_SCALE: f32 = 2.2;
+const ORGAN_SCALE: f32 = 1.47;
+const TUBE_FAT: f32 = 1.5;
 
 struct AgentVsOut {
     @builtin(position) pos: vec4<f32>,
@@ -212,8 +238,9 @@ fn is_storage(slot: u32, k: u32) -> bool {
 // Tamanho do quadrado em múltiplos do raio do disco, por tipo de órgão.
 fn organ_extent(t: u32) -> f32 {
     switch t {
-        case ORGAN_FOOD_SENSOR, ORGAN_LIGHT_SENSOR: { return 2.6; }
-        case ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: { return 3.4; }
+        // (Sensores: o quadrado cobre o sprite inteiro, com a esfera do raio do órgão.)
+        case ORGAN_FOOD_SENSOR, ORGAN_LIGHT_SENSOR: { return 1.0 / SPRITE_SENSOR_BODY; }
+        case ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: { return 1.0 / SPRITE_SENSOR_SIDE_BODY; }
         case ORGAN_MUSCLE: { return 1.6; }
         case ORGAN_STORAGE: { return 1.9; }
         case ORGAN_PHOTOSYSTEM: { return 1.8; }
@@ -349,7 +376,9 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         // Estruturais finos (a cadeia); os órgãos destacam-se (ORGAN_SCALE).
         // (Contraste forte de propósito: o volume é a capacidade de energia
         // do resíduo; glicina ~2, alanina ~2,6, médio ~4, triptofano ~7,5.)
-        r_world = 0.9 + 3.0 * pow(aa_props_view[aa].volume / 130.0, 1.4);
+        // (TUBE_FAT: tubos 1,5x mais grossos para os bichos se verem melhor;
+        // ORGAN_SCALE desceu na mesma proporção, os órgãos ficam do mesmo tamanho.)
+        r_world = TUBE_FAT * (0.9 + 3.0 * pow(aa_props_view[aa].volume / 130.0, 1.4));
         col = class_color(aa);
         let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
         if (oc != 0u) {
@@ -747,6 +776,13 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
     // Coordenadas ao longo (u) e através (v) da cadeia.
     let u = dot(p, t);
     let v = dot(p, nrm);
+    // Coordenadas dos sprites: (ao longo, através) em raios do órgão, e as
+    // suas derivadas no ecrã (calculadas aqui, antes de qualquer ramo).
+    let ldx = dpdx(in.local);
+    let ldy = dpdy(in.local);
+    let uv_l = vec2<f32>(u, v) / core;
+    let uv_x = vec2<f32>(dot(ldx, t), dot(ldx, nrm)) / core;
+    let uv_y = vec2<f32>(dot(ldy, t), dot(ldy, nrm)) / core;
     let white = vec3<f32>(1.0);
     let rim_mix = smoothstep(core * 0.6, core * 0.8, d);
 
@@ -772,22 +808,18 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
         case ORGAN_FOOD_SENSOR, ORGAN_LIGHT_SENSOR, ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: {
             let is_light = in.organ == ORGAN_LIGHT_SENSOR || in.organ == ORGAN_LIGHT_SENSOR_DIR;
             let ant_col = select(vec3<f32>(0.45, 1.0, 0.45), vec3<f32>(1.0, 0.95, 0.4), is_light);
-            if (d < core) { return vec4<f32>(mix(in.color, ant_col, rim_mix), 1.0); }
-            var hit = 0.0;
+            // SPRITE: esfera com uma coroa de antenas, ou com UMA antena do
+            // lado que o sensor lê (core_phase.y = +1 esquerda, -1 direita).
+            var sp = vec2<f32>(0.0);
             if (in.organ == ORGAN_FOOD_SENSOR_DIR || in.organ == ORGAN_LIGHT_SENSOR_DIR) {
-                // UMA antena, do lado que o sensor le (core_phase.y = +1 esquerda, -1 direita).
                 let side = select(-1.0, 1.0, in.core_phase.y >= 0.0);
-                hit = antenna(p, nrm * (0.92 * side), core);
+                let m = vec2<f32>(1.0, side);
+                sp = sprite(SPRITE_SENSOR_SIDE, uv_l * m, uv_x * m, uv_y * m);
             } else {
-                // Coroa de 6 antenas curtas (amostra à volta toda).
-                for (var i = 0u; i < 6u; i++) {
-                    let ang = f32(i) * 1.0471976;
-                    let dir = t * cos(ang) + nrm * sin(ang);
-                    hit = max(hit, antenna(p, dir * 0.82, core));
-                }
+                sp = sprite(SPRITE_SENSOR, uv_l, uv_x, uv_y);
             }
-            if (hit < 0.5) { discard; }
-            return vec4<f32>(ant_col, 1.0);
+            if (sp.y < 0.5) { discard; }
+            return vec4<f32>(sem_color(mix(in.color, ant_col, 0.6), sp.x), 1.0);
         }
         case ORGAN_ENERGY_SENSOR: {
             if (d > core) { discard; }
@@ -890,13 +922,11 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             // Deposito: oval ao longo da cadeia (alongamento em core_phase.y,
             // pela capacidade), cheio, com aneis e um brilho de gota.
             let asp = clamp(in.core_phase.y, 1.0, 40.0);
-            let dd = length(vec2<f32>(u / asp, v));
-            if (dd > core) { discard; }
-            let x = dd / core;
-            let rings = step(0.5, fract(x * 3.0));
-            let shade = sqrt(max(1.0 - x * x, 0.0));
-            let c = mix(in.color, vec3<f32>(0.15, 0.1, 0.0), rings * 0.45) * (0.55 + 0.45 * shade) + vec3<f32>(0.2) * pow(shade, 6.0);
-            return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+            // SPRITE esticado ao comprimento real do depósito.
+            let m = vec2<f32>(1.0 / asp, 1.0);
+            let sp = sprite(SPRITE_STORAGE, uv_l * m, uv_x * m, uv_y * m);
+            if (sp.y < 0.5) { discard; }
+            return vec4<f32>(sem_color(in.color, sp.x), 1.0);
         }
         default: {
             // Outros: disco com anéis concêntricos.

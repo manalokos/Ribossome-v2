@@ -279,7 +279,7 @@ impl Running {
                 }
             }
         }
-        let view = WorldView::new(&gpu.device, &world, format);
+        let view = WorldView::new(&gpu.device, &gpu.queue, &world, format);
         let cam = Camera::fit(&cfg, [surface_cfg.width as f32, surface_cfg.height as f32]);
 
         let egui_ctx = egui::Context::default();

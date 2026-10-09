@@ -76,6 +76,49 @@ const AGENT_INSTANCES: u32 = 197;
 pub const MSAA: u32 = 4;
 
 /// Textura de cor com MSAA amostras, para desenhar e resolver para o alvo.
+/// Atlas de sprites dos órgãos (`assets/sprites.png`, feito por
+/// `scripts/sprites_atlas.py`), com mipmaps feitos aqui por médias de 2×2.
+fn sprites_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
+    let mut reader = png::Decoder::new(&include_bytes!("../../assets/sprites.png")[..]).read_info().expect("assets/sprites.png");
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).expect("assets/sprites.png");
+    assert!(info.color_type == png::ColorType::Rgba && info.bit_depth == png::BitDepth::Eight, "sprites.png must be 8-bit RGBA");
+    buf.truncate(info.buffer_size());
+    let (mut w, mut h) = (info.width, info.height);
+    // Até mosaicos de 16 px: abaixo disso os mosaicos vizinhos misturavam-se.
+    let levels = (h / 16).max(1).ilog2() + 1;
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("sprites"),
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: levels,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for level in 0..levels {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: level, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &buf,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        let (nw, nh) = (w / 2, h / 2);
+        let mut next = vec![0u8; (nw * nh * 4) as usize];
+        for y in 0..nh {
+            for x in 0..nw {
+                for c in 0..4 {
+                    let at = |dx: u32, dy: u32| buf[(((2 * y + dy) * w + 2 * x + dx) * 4 + c) as usize] as u32;
+                    next[((y * nw + x) * 4 + c) as usize] = ((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4) as u8;
+                }
+            }
+        }
+        (buf, w, h) = (next, nw, nh);
+    }
+    texture
+}
+
 pub fn msaa_texture(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("msaa"),
@@ -97,7 +140,7 @@ const LOD_MID_PX: f32 = 0.35;
 const LOD_FAR_PX: f32 = 0.2;
 
 impl WorldView {
-    pub fn new(device: &wgpu::Device, world: &World, format: wgpu::TextureFormat) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, world: &World, format: wgpu::TextureFormat) -> Self {
         let cfg = &world.cfg;
         let view_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("view params"),
@@ -258,7 +301,31 @@ impl WorldView {
                 vertex_storage(11),
                 vertex_storage(12),
                 vertex_storage(13),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 15,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
+        });
+        let sprites = sprites_texture(device, queue).create_view(&Default::default());
+        let sprites_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("sprites"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
         });
         let agents_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("agents view bg"),
@@ -278,6 +345,8 @@ impl WorldView {
                 wgpu::BindGroupEntry { binding: 11, resource: world.bonds_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 12, resource: world.kin_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 13, resource: world.contact_disp_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&sprites) },
+                wgpu::BindGroupEntry { binding: 15, resource: wgpu::BindingResource::Sampler(&sprites_sampler) },
             ],
         });
         let agents_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

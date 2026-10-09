@@ -24,7 +24,7 @@ impl Capture {
     /// wgpu recusar a cópia e a app ir abaixo).
     pub fn new(gpu: &Gpu, world: &World, size: u32) -> Self {
         let size = size.max(64).div_ceil(64) * 64;
-        let view = WorldView::new(&gpu.device, world, FORMAT);
+        let view = WorldView::new(&gpu.device, &gpu.queue, world, FORMAT);
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("capture"),
             size: wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
