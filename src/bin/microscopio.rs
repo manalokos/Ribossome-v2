@@ -483,6 +483,11 @@ struct Scope {
     ss: u32,
     /// Exposição: multiplica a imagem final.
     exposure: f32,
+    /// CÂMARA LENTA: passos da simulação por segundo (0 = `steps` em cada
+    /// frame, a toda a velocidade). Entre dois passos a imagem continua a
+    /// acumular amostras, por isso fica limpa mesmo com a cena a mexer.
+    rate: f32,
+    last_step: std::time::Instant,
 }
 
 /// Alvo de várias amostras de onde também se lê (uma amostra de cada vez).
@@ -743,6 +748,8 @@ impl Scope {
             monomers: env("MONOMERS", 0.7),
             ss: 1,
             exposure: env("EXPOSURE", 1.0),
+            rate: env("RATE", 2.0),
+            last_step: std::time::Instant::now(),
             world,
         }
     }
@@ -796,7 +803,17 @@ impl Scope {
         }
         // Parada, a média vai convergindo; a correr, pesa mais o presente (o
         // que se mexe deixa um rasto curto).
-        let weight = if moving { (1.0 / (self.samples + 1) as f32).max(0.12) } else { 1.0 / (self.samples + 1) as f32 };
+        // Em câmara lenta só alguns frames dão um passo. Nesse frame a média
+        // não recomeça do zero (piscava com o grão de uma só amostra): fica a
+        // valer por 3 amostras, e a imagem do passo anterior dissolve-se na
+        // nova em poucos frames, o que também suaviza o salto entre passos.
+        let slow = moving && self.rate > 0.0;
+        let step_now = moving && (!slow || self.last_step.elapsed().as_secs_f32() >= 1.0 / self.rate);
+        if slow && step_now {
+            self.last_step = std::time::Instant::now();
+            self.samples = self.samples.min(3);
+        }
+        let weight = if moving && !slow { (1.0 / (self.samples + 1) as f32).max(0.12) } else { 1.0 / (self.samples + 1) as f32 };
         self.samples += 1;
         self.frame += 1;
 
@@ -832,8 +849,9 @@ impl Scope {
             self.height_view.height_pass.set(1);
         }
         let mut enc = gpu.device.create_command_encoder(&Default::default());
-        if moving {
-            self.world.encode_steps(&gpu.queue, &mut enc, self.steps.min(ribossome::world::MAX_STEPS_PER_FRAME));
+        if step_now {
+            // (Em câmara lenta, um passo de cada vez.)
+            self.world.encode_steps(&gpu.queue, &mut enc, if slow { 1 } else { self.steps.min(ribossome::world::MAX_STEPS_PER_FRAME) });
         }
         self.world.set_draw_rect(&gpu.queue, Some(([o.centre[0] - r, o.centre[1] - r], [o.centre[0] + r, o.centre[1] + r])));
         self.world.encode_draw_list(&mut enc);
@@ -1059,6 +1077,13 @@ fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: Optio
             s.orbit.focus_shift = focus / NM_PER_UNIT - eye_dist;
         }
         ui.add(egui::Slider::new(&mut s.exposure, 0.05..=16.0).logarithmic(true).text("Exposure"));
+        let mut full = s.rate <= 0.0;
+        ui.horizontal(|ui| {
+            ui.add_enabled(!full, egui::Slider::new(&mut s.rate, 0.5..=60.0).logarithmic(true).suffix(" steps/s").text("Speed"));
+            if ui.checkbox(&mut full, "full").changed() {
+                s.rate = if full { 0.0 } else { 2.0 };
+            }
+        });
         ui.horizontal(|ui| {
             for (k, name) in ["Grey", "False colour", "Colour"].into_iter().enumerate() {
                 if ui.selectable_label(s.colour == k as u32, name).clicked() {
