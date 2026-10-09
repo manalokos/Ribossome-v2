@@ -151,6 +151,8 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
         var em_found = false;
         let rr = rng_u4(idx, params.epoch, S_RELAX + phase);
         var tie_h = rr.x;
+        var comp_idx = idx;
+        var comp_c = 0u;
         for (var dy = -1i; dy <= 1i; dy++) {
             for (var dx = -1i; dx <= 1i; dx++) {
                 if (dx == 0i && dy == 0i) { continue; }
@@ -160,6 +162,11 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
                 let ni = u32(ny) * GRID_SIZE + u32(nx);
                 let c = gamma_count(ni);
                 if (c >= 1u) { bonds += 1u; }
+                // Para a compactação: a vizinha SOLTA mais cheia.
+                if (c >= 1u && c < GAMMA_SOLID_THRESHOLD && (c > comp_c || (c == comp_c && (hash(tie_h ^ (ni * 31u)) & 1u) == 1u))) {
+                    comp_c = c;
+                    comp_idx = ni;
+                }
                 if (c <= n) {
                     var score = 0i;
                     for (var sy = -1i; sy <= 1i; sy++) {
@@ -190,6 +197,14 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
             }
         }
         let mob = pow(0.25, f32(bonds));
+        // COMPACTAÇÃO (litificação): entulho enterrado, com grãos em quase
+        // todas as vizinhas, vai passando grãos à vizinha solta mais cheia.
+        // Juntam-se três a três (3 grãos = rocha) e ficam poros entre eles:
+        // o entulho denso vira rocha porosa. Conserva os grãos.
+        if (bonds >= 7u && comp_idx != idx && f32(hash(rr.x ^ 0x5bd1e995u) >> 8u) * (1.0 / 16777216.0) < params.sediment_compaction) {
+            gamma_move_one(idx, comp_idx);
+            return;
+        }
 
         // A corrente que o grão SENTE é a da água ao lado (a mais forte dos
         // 4 vizinhos sem grãos): dentro do entulho o fluido quase não anda.
@@ -230,8 +245,10 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
         // JACTO DA FUMAROLA: o entulho que está mesmo na saída de uma
         // fumarola é soprado para cima e para um lado (ao acaso), por mais
         // agarrado que esteja; assim a saída não fica entupida e a fumarola
-        // não perde força. Cai depois à volta (grain_fall), como o monte que
-        // as fumarolas reais fazem. Só os grãos soltos: a rocha não se move.
+        // não perde força. Só os grãos soltos: a rocha não se move. (Medido:
+        // empurrar só para os lados limpava três vezes pior e punha tantos
+        // grãos em suspensão como isto; quem os mantém em suspensão é a
+        // pluma, e quem os faz descer é a gravidade dos grãos.)
         let vent = heat_src[fgrid(min((x * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u), min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u))];
         let blow = VENT_BLOW * max(vent.x, vent.y);
         if (blow > 0.0) {

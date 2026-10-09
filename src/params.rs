@@ -404,7 +404,12 @@ gpu_struct! {
         /// velocidade crítica de arranque (um grão agarrado precisa de mais
         /// corrente, mas não fica imune). Só resiste à corrente, não à queda.
         pub sediment_cohesion: f32,
-        pub _pad_s1: u32,
+        /// COMPACTAÇÃO DO ENTULHO: probabilidade por passo de uma célula de
+        /// entulho ENTERRADA (com grãos em 7 ou 8 das vizinhas) passar um
+        /// grão à vizinha solta mais cheia. Os grãos juntam-se três a três
+        /// (uma célula com 3 é rocha) e deixam poros: o entulho denso vira
+        /// rocha porosa. Os grãos conservam-se. 0 = desligada.
+        pub sediment_compaction: f32,
         pub _pad_s2: u32,
         pub _pad_s3: u32,
     }
@@ -592,7 +597,7 @@ impl Default for SimParams {
             vent_cycle_period: 7000.0,
             vent_cycle_amp: 0.91,
             sediment_cohesion: 0.5,
-            _pad_s1: 0,
+            sediment_compaction: 0.001,
             _pad_s2: 0,
             _pad_s3: 0,
         }

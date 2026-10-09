@@ -142,16 +142,16 @@ pub enum Tab {
     Info,
 }
 
-const TABS: [(Tab, &str); 9] = [
-    (Tab::Vista, "View"),
+// (A cena e o diagnóstico vivem no separador da vista: Tab::Cena e Tab::Info
+// ficam só para cenas antigas que os tenham guardado, e mostram o mesmo.)
+const TABS: [(Tab, &str); 7] = [
+    (Tab::Vista, "View & scene"),
     (Tab::Mundo, "World"),
     (Tab::Sopa, "Soup"),
     (Tab::Energia, "Energy"),
     (Tab::Ciclo, "Life cycle"),
     (Tab::Corpo, "Body"),
-    (Tab::Cena, "Scene"),
     (Tab::Graficos, "Charts"),
-    (Tab::Info, "Info"),
 ];
 
 /// O que fazer com um agente guardado em ficheiro.
@@ -533,15 +533,19 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
             return;
         }
         match st.tab {
-            Tab::Vista => tab_view(ui, &b, st),
+            Tab::Vista | Tab::Cena | Tab::Info => {
+                tab_view(ui, &b, st);
+                ui.separator();
+                tab_scene(ui, st, world);
+                ui.separator();
+                egui::CollapsingHeader::new("Diagnostics (conservation of matter, profiler)").show(ui, |ui| tab_info(ui, st, prof));
+            }
             Tab::Mundo => tab_world(ui, &b, st, world),
             Tab::Sopa => tab_soup(ui, &b, st, world),
             Tab::Energia => tab_energy(ui, &b, world),
             Tab::Ciclo => tab_cycle(ui, &b, st, world),
             Tab::Corpo => tab_body(ui, &b, world),
-            Tab::Cena => tab_scene(ui, st, world),
             Tab::Graficos => crate::stats::controls(ui, &mut st.history),
-            Tab::Info => tab_info(ui, st, prof),
         }
     });
 }
@@ -963,6 +967,8 @@ fn tab_world(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
             .tip("Shields criterion: below this velocity (fluid cells/s) the current does not lift grains; above it, it lifts them ∝ to the excess");
         c.slider("rubble cohesion", slider(&mut p.sediment_cohesion, 0.0..=3.0))
             .tip("each neighbouring grain adds this fraction to the critical entrainment velocity: 0.5 = a grain with two neighbours needs twice the current to be lifted. It only resists the current, not falling. 0 = no cohesion");
+        c.slider("rubble compaction into rock", slider(&mut p.sediment_compaction, 0.0..=0.05).logarithmic(true).smallest_positive(0.0001))
+            .tip("buried rubble (grains in 7 or 8 of the cells around it) slowly packs: each step, with this probability, a cell hands one grain to its fullest loose neighbour. Three grains in a cell are rock, so dense rubble turns into porous rock (the grains are conserved, pores open between them). 0 = off. This is not the monomer aggregation of the Soup tab");
         c.slider("gravity on rubble GRAINS ×", slider(&mut p.sediment_settle, 0.0..=5.0))
             .tip("fall speed (×0.5 fluid cells/s): a loose grain moves with the current minus the fall — it rises where the upward current is stronger (suspension) and settles where it slows down. 0 = they float");
         c.slider("bioturbation (pushing rubble)", slider(&mut p.bioturbation, 0.0..=0.5));
