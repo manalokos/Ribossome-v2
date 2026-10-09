@@ -71,7 +71,7 @@ const REGION_PER_DIST: f32 = 1.7;
 /// Raio de uma molécula de monómero, em células (o desenho normal usa mais).
 const MOLECULE_R: f32 = 0.1;
 /// Raio do desfoque do chão, em unidades do mundo.
-const GROUND_BLUR: f32 = 55.0;
+const GROUND_BLUR: f32 = 24.0;
 
 const MARCH_WGSL: &str = r#"
 struct U {
