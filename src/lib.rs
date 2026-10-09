@@ -6,6 +6,7 @@ pub mod gpu;
 pub mod life;
 pub mod lineage;
 pub mod mcp;
+pub mod microscope;
 pub mod names;
 pub mod params;
 pub mod presets;
