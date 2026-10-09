@@ -72,6 +72,8 @@ const SPRITE_STALK_BODY: f32 = 0.3;
 // microscópio 3D: cada sítio que lê um sprite deixa-a aqui (a altura do
 // atlas vezes o tamanho da peça).
 var<private> g_h: f32 = 0.0;
+// Cota do meio dos corpos acima do chão, no microscópio 3D.
+const AGENT_Z: f32 = 11.0;
 // ...e a altura do CENTRO da peça acima do chão: o volume vai de g_c - g_h
 // a g_c + g_h (a mesma forma para cima e para baixo: uma cúpula fica uma
 // bola, meio tubo um tubo).
@@ -1034,9 +1036,14 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
     g_c = g_h;
     let c = agent_frag(in);
     if (c.a < 0.99) { discard; }
-    // VOLUME (cimo, fundo) acima do chão; in.lift é a ondulação vertical do
-    // corpo. (O +0,5 garante um cimo positivo: zero quer dizer "nada aqui".)
-    if (view.height_pass != 0u) { return vec4<f32>(g_c + g_h + in.lift + 0.5, g_c - g_h + in.lift + 0.5, 0.0, 1.0); }
+    // VOLUME (cimo, fundo) acima do chão. O corpo INTEIRO tem o meio à mesma
+    // cota (AGENT_Z, mais a ondulação in.lift): os troços e os órgãos ficam
+    // enfiados uns nos outros como contas num fio, a pairar um pouco acima do
+    // fundo; um órgão grande que chegasse ao chão fica achatado por baixo.
+    if (view.height_pass != 0u) {
+        let mid = AGENT_Z + in.lift;
+        return vec4<f32>(mid + g_h, max(mid - g_h, 0.4), 0.0, 1.0);
+    }
     return c;
 }
 

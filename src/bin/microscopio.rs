@@ -79,6 +79,11 @@ struct U {
 // versão resolvida faz a média das bordas com o vazio, e essa média (um cimo
 // e um fundo a meio caminho de zero) aparecia como cortinas por baixo das peças.
 @group(0) @binding(6) var vol_tex: texture_multisampled_2d<f32>;
+// DUAS CAMADAS: a de cima (6) são os agentes; esta é o mundo por baixo deles
+// (pedras e monómeros), com a sua cor à parte. Assim o que está debaixo de um
+// bicho continua a existir.
+@group(0) @binding(7) var world_vol: texture_multisampled_2d<f32>;
+@group(0) @binding(8) var world_color: texture_2d<f32>;
 
 // Altura do chão onde há rocha maciça (unidades do mundo).
 const GROUND_H: f32 = 24.0;
@@ -127,26 +132,43 @@ fn ground_at(xy: vec2<f32>) -> f32 {
     return GROUND_H * g * g * (3.0 - 2.0 * g);
 }
 
-// (cimo, fundo, chão) no ponto xy, em alturas absolutas. Sem peça nenhuma,
-// cimo = fundo = chão.
-fn surf(xy: vec2<f32>) -> vec3<f32> {
-    let g = ground_at(xy);
+// O que há no ponto xy, em alturas absolutas: o volume dos agentes e o do
+// mundo (cimo, fundo; sem peça, um intervalo vazio) e o chão.
+struct Surf {
+    a: vec2<f32>,
+    w: vec2<f32>,
+    g: f32,
+}
+const NONE: vec2<f32> = vec2<f32>(-1000.0, 1000.0);
+
+fn surf(xy: vec2<f32>) -> Surf {
+    var s: Surf;
+    s.g = ground_at(xy);
+    s.a = NONE;
+    s.w = NONE;
     let uv = region_uv(xy);
-    if (any(uv < vec2<f32>(0.0)) || any(uv >= vec2<f32>(1.0))) { return vec3<f32>(g, g, g); }
-    let dim = vec2<f32>(textureDimensions(vol_tex));
-    let t = textureLoad(vol_tex, vec2<i32>(uv * dim), 0).rg * u.lens.w;
-    if (t.x <= 0.25) { return vec3<f32>(g, g, g); }
-    return vec3<f32>(g + t.x, g + t.y, g);
+    if (all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0))) {
+        let c = vec2<i32>(uv * vec2<f32>(textureDimensions(vol_tex)));
+        let ta = textureLoad(vol_tex, c, 0).rg * u.lens.w;
+        let tw = textureLoad(world_vol, c, 0).rg * u.lens.w;
+        if (ta.x > 0.25) { s.a = vec2<f32>(s.g + ta.x, s.g + ta.y); }
+        if (tw.x > 0.25) { s.w = vec2<f32>(s.g + tw.x, s.g + tw.y); }
+    }
+    return s;
 }
 
-fn solid(p: vec3<f32>, s: vec3<f32>) -> bool {
-    return p.z <= s.z || (s.x > s.z && p.z <= s.x && p.z >= s.y);
+fn within(z: f32, v: vec2<f32>, eps: f32) -> bool {
+    return z <= v.x + eps && z >= v.y - eps;
 }
 
-// A superfície de cima no ponto (o cimo da peça, ou o chão): para a oclusão.
+fn solid(p: vec3<f32>, s: Surf) -> bool {
+    return p.z <= s.g || within(p.z, s.a, 0.0) || within(p.z, s.w, 0.0);
+}
+
+// A superfície mais alta no ponto: para a oclusão.
 fn top_at(xy: vec2<f32>) -> f32 {
     let s = surf(xy);
-    return max(s.x, s.z);
+    return max(s.g, max(s.a.x, s.w.x));
 }
 
 @fragment
@@ -195,9 +217,10 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         let p = org + dir * hi;
         let s = surf(p.xy);
         let e = 2.0 * u.region.z / f32(textureDimensions(vol_tex).x) * 1.5;
-        let has = s.x > s.z;
-        // Onde bateu: no chão, ou numa peça (por cima ou por baixo)?
-        let on_ground = !has || p.z <= s.z + 0.05 || (p.z < s.y - 0.05);
+        // Onde bateu: num agente, numa peça do mundo, ou no chão?
+        let on_agent = within(p.z, s.a, 0.06);
+        let on_world = !on_agent && within(p.z, s.w, 0.06);
+        let on_ground = !on_agent && !on_world;
         var n = vec3<f32>(0.0, 0.0, 1.0);
         var albedo = vec3<f32>(0.0);
         if (on_ground) {
@@ -205,28 +228,31 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             let gx = ground_at(p.xy + vec2<f32>(eg, 0.0)) - ground_at(p.xy - vec2<f32>(eg, 0.0));
             let gy = ground_at(p.xy + vec2<f32>(0.0, eg)) - ground_at(p.xy - vec2<f32>(0.0, eg));
             n = normalize(vec3<f32>(-gx, -gy, 2.0 * eg));
-            // Por baixo de uma peça o chão não tem a cor dela (a cor vem de
-            // uma vista de cima): fica o do substrato, à sombra.
-            albedo = select(textureSampleLevel(color_tex, samp, region_uv(p.xy), 0.0).rgb, vec3<f32>(0.03), has);
-            // O monte de terreno, onde não há pedra à vista, é pó de rocha.
-            albedo = max(albedo, vec3<f32>(0.11, 0.105, 0.1) * smoothstep(0.5, 6.0, s.z));
+            // O chão tem a cor do mundo sem agentes (a água, o que lá houver);
+            // o monte de terreno, onde não há pedra à vista, é pó de rocha.
+            albedo = textureSampleLevel(world_color, samp, region_uv(p.xy), 0.0).rgb * 0.5;
+            albedo = max(albedo, vec3<f32>(0.11, 0.105, 0.1) * smoothstep(0.5, 6.0, s.g));
         } else {
             // A peça é a mesma forma para cima e para baixo do seu meio: onde
             // um vizinho já não tem peça, a superfície fecha no meio.
-            let mid = 0.5 * (s.x + s.y);
+            let v = select(s.w, s.a, on_agent);
+            let mid = 0.5 * (v.x + v.y);
             let upper = p.z >= mid;
             var d = vec4<f32>(0.0);
             var offs = array<vec2<f32>, 4>(vec2<f32>(e, 0.0), vec2<f32>(-e, 0.0), vec2<f32>(0.0, e), vec2<f32>(0.0, -e));
             for (var k = 0; k < 4; k++) {
                 let q = surf(p.xy + offs[k]);
-                d[k] = select(mid, select(q.y, q.x, upper), q.x > q.z);
+                let qv = select(q.w, q.a, on_agent);
+                d[k] = select(mid, select(qv.y, qv.x, upper), qv.x > -500.0);
             }
             n = normalize(vec3<f32>(-(d[0] - d[1]), -(d[2] - d[3]), 2.0 * e));
             if (!upper) { n = vec3<f32>(-n.x, -n.y, -n.z); }
             // Numa parede (a borda de uma peça) lê-se a cor um pouco para dentro.
             let wall = clamp(1.0 - abs(n.z), 0.0, 1.0);
             let inward = -n.xy / max(length(n.xy), 1e-4) * (2.5 * e * wall);
-            albedo = textureSampleLevel(color_tex, samp, region_uv(p.xy + inward), 0.0).rgb;
+            let uv = region_uv(p.xy + inward);
+            albedo = textureSampleLevel(color_tex, samp, uv, 0.0).rgb;
+            if (on_world) { albedo = textureSampleLevel(world_color, samp, uv, 0.0).rgb; }
         }
         let ndv = clamp(dot(n, -dir), 0.0, 1.0);
         // MICROSCÓPIO ELETRÓNICO: as superfícies de lado para o observador
@@ -283,6 +309,10 @@ struct Scope {
     height_msaa: wgpu::Texture,
     height_depth: wgpu::Texture,
     height_tex: wgpu::Texture,
+    /// A camada do mundo por baixo dos agentes: volumes e cor.
+    world_vol_msaa: wgpu::Texture,
+    world_col_msaa: wgpu::Texture,
+    world_col_tex: wgpu::Texture,
     pres_msaa: wgpu::Texture,
     pres_depth: wgpu::Texture,
     pres_tex: wgpu::Texture,
@@ -306,6 +336,20 @@ struct Scope {
     colour: bool,
     /// Brilho dos monómeros na zona (0 = não se desenham).
     monomers: f32,
+}
+
+/// Alvo de várias amostras de onde também se lê (uma amostra de cada vez).
+fn readable_msaa(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("volume msaa"),
+        size: wgpu::Extent3d { width: TEX, height: TEX, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: ribossome::render::MSAA,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
 }
 
 /// Textura quadrada de vírgula flutuante onde se desenha e de onde se lê.
@@ -446,6 +490,17 @@ impl Scope {
                 tex_entry(2),
                 tex_entry(3),
                 tex_entry(5),
+                tex_entry(8),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: true,
+                    },
+                    count: None,
+                },
                 wgpu::BindGroupLayoutEntry {
                     binding: 6,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -488,13 +543,16 @@ impl Scope {
         Self {
             cap,
             height_view,
-            height_msaa: device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("volume msaa"),
+            height_msaa: readable_msaa(device, HEIGHT_FORMAT),
+            world_vol_msaa: readable_msaa(device, HEIGHT_FORMAT),
+            world_col_msaa: msaa_texture(device, wgpu::TextureFormat::Rgba8Unorm, TEX, TEX),
+            world_col_tex: device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("world colour"),
                 size: wgpu::Extent3d { width: TEX, height: TEX, depth_or_array_layers: 1 },
                 mip_level_count: 1,
-                sample_count: ribossome::render::MSAA,
+                sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: HEIGHT_FORMAT,
+                format: wgpu::TextureFormat::Rgba8Unorm,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             }),
@@ -592,24 +650,34 @@ impl Scope {
         self.height_view.ghost_steps.set(60.0);
         // (Com monómeros: no passo dos volumes cada molécula é um grãozinho.)
         self.height_view.update(&gpu.queue, &cam, [TEX as f32; 2], 0, self.monomers, 0);
+        // TRÊS desenhos da zona vista de cima: o volume dos agentes, o volume
+        // do mundo por baixo deles (pedras, monómeros) e a cor desse mundo
+        // sem agentes (a cor com agentes já está em self.cap).
         {
-            let many = self.height_msaa.create_view(&Default::default());
             let depth = self.height_depth.create_view(&Default::default());
-            let resolve = self.height_tex.create_view(&Default::default());
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("height"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &many,
-                    depth_slice: None,
-                    resolve_target: Some(&resolve),
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
-                })],
-                depth_stencil_attachment: Some(depth_attachment(&depth)),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            self.height_view.draw(&mut pass);
+            let agents_vol = self.height_msaa.create_view(&Default::default());
+            let world_vol = self.world_vol_msaa.create_view(&Default::default());
+            let world_col = self.world_col_msaa.create_view(&Default::default());
+            let world_col_resolve = self.world_col_tex.create_view(&Default::default());
+            let mut layer = |label: &'static str, view: &wgpu::TextureView, resolve: Option<&wgpu::TextureView>, draw: &dyn Fn(&mut wgpu::RenderPass<'_>)| {
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(label),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        depth_slice: None,
+                        resolve_target: resolve,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: Some(depth_attachment(&depth)),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                draw(&mut pass);
+            };
+            layer("agent volumes", &agents_vol, None, &|pass| self.height_view.draw_agents_only(pass));
+            layer("world volumes", &world_vol, None, &|pass| self.height_view.draw_world_only(pass));
+            layer("world colour", &world_col, Some(&world_col_resolve), &|pass| self.cap.view.draw_world_only(pass));
         }
         // Câmara: olha para o centro da zona, a meia altura do relevo.
         let target_pt = [o.centre[0], o.centre[1], 0.3 * HMAX];
@@ -641,6 +709,8 @@ impl Scope {
         let height = self.height_tex.create_view(&Default::default());
         let pres = self.pres_tex.create_view(&Default::default());
         let volume_msaa = self.height_msaa.create_view(&Default::default());
+        let world_volume = self.world_vol_msaa.create_view(&Default::default());
+        let world_colour = self.world_col_tex.create_view(&Default::default());
         let ground = self.ground_tex.create_view(&Default::default());
         let bind = |volume: &wgpu::TextureView, prev: &wgpu::TextureView, floor: &wgpu::TextureView| {
             gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -654,6 +724,8 @@ impl Scope {
                     wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.sampler) },
                     wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(floor) },
                     wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&volume_msaa) },
+                    wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&world_volume) },
+                    wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&world_colour) },
                 ],
             })
         };

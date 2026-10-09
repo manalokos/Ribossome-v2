@@ -592,6 +592,17 @@ impl WorldView {
         pass.draw(0..3, 0..1);
     }
 
+    /// Só os agentes (e os restos dos mortos), sem o fundo nem as sombras.
+    pub fn draw_agents_only(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_bind_group(0, &self.agents_bg, &[]);
+        pass.set_pipeline(&self.agents_pipeline);
+        self.draw_agents(pass);
+        if self.lod.get() == 0 && self.focus.get() == u32::MAX && self.ghost_steps.get() > 0.0 {
+            pass.set_pipeline(&self.ghosts_pipeline);
+            pass.draw(0..6, 0..GHOST_INSTANCES * crate::world::GHOST_MAX as u32);
+        }
+    }
+
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
