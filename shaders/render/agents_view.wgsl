@@ -200,6 +200,15 @@ fn cam_center() -> vec2<f32> {
 }
 
 // Tamanho do quadrado em múltiplos do raio do disco, por tipo de órgão.
+// Deposito: proporcao do oval (comprimento / largura) e meia largura maxima
+// (unidades do mundo), para uma fila comprida ficar um chourico e nao uma bola
+// que tapa o corpo.
+const STORAGE_ASPECT: f32 = 1.5;
+const STORAGE_MAX_HALF_WIDTH: f32 = 14.0;
+fn is_storage(slot: u32, k: u32) -> bool {
+    let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
+    return oc != 0u && (oc & 0x1Fu) - 1u == ORGAN_STORAGE;
+}
 fn organ_extent(t: u32) -> f32 {
     switch t {
         case ORGAN_FOOD_SENSOR, ORGAN_LIGHT_SENSOR: { return 2.6; }
@@ -316,6 +325,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     var organ = NO_ORGAN;
     var tangent = vec2<f32>(1.0, 0.0);
     var phase = 0.0;
+    var skip_glyph = false;
     let bite = bite_view[slot];
     var flash = vec3<f32>(-1.0);
     if (bite.x > 0.0) { flash = BITE_VICTIM_COLOR; }
@@ -378,17 +388,30 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 }
                 phase = side;
             }
-            if (organ == ORGAN_STORAGE) {
-                // DEPOSITO: um oval ao longo da cadeia com o COMPRIMENTO REAL
-                // do orgao (residue_len em body.wgsl, que cresce com o que
-                // guarda): mede-se pela distancia aos vizinhos. Depositos
-                // seguidos ficam como ovais encostados, e o resto do corpo
-                // continua a ver-se.
-                let sa = select(k - 1u, k, k == 0u);
-                let sb = select(k + 1u, k, k + 1u >= a.body_len);
-                let seg = length(body_pos_view[base + sb] - body_pos_view[base + sa]) / f32(max(sb - sa, 1u));
-                r_world = max(0.56 * seg / 1.1, 2.0);
-                phase = 1.1;
+            if (organ == ORGAN_STORAGE && glyph) {
+                // DEPOSITO: UM oval por fila de depositos seguidos, a todo o
+                // comprimento REAL da fila (o residuo k ocupa o troco k -> k+1,
+                // e residue_len em body.wgsl cresce com o que o deposito
+                // guarda). So o primeiro da fila desenha; dois depositos
+                // justapostos ficam uma peca com o dobro do comprimento.
+                var ks = k;
+                var ke = k;
+                for (var j = 0u; j < 16u; j++) {
+                    if (ks > 0u && is_storage(slot, ks - 1u)) { ks -= 1u; }
+                    if (ke + 1u < a.body_len && is_storage(slot, ke + 1u)) { ke += 1u; }
+                }
+                skip_glyph = k != ks;
+                let pa = body_pos_view[base + ks];
+                var pb = body_pos_view[base + ke] + tn * RESIDUE_UNITS * 1.8;
+                if (ke + 1u < a.body_len) { pb = body_pos_view[base + ke + 1u]; }
+                let mid = 0.5 * (pa + pb);
+                let ax = pb - pa;
+                let al = max(length(ax), 1e-3);
+                let half = max(0.5 * al, r_world);
+                centre = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * mid.x - sr * mid.y, sr * mid.x + cr * mid.y);
+                tangent = vec2<f32>(cr * ax.x - sr * ax.y, sr * ax.x + cr * ax.y) / al;
+                r_world = min(half / STORAGE_ASPECT, STORAGE_MAX_HALF_WIDTH);
+                phase = half / r_world;
             }
             if (organ == ORGAN_INHIBITOR) { col = vec3<f32>(0.95, 0.8, 0.9); }
             if (organ == ORGAN_HOLDFAST) { col = vec3<f32>(0.85, 0.6, 0.3); }
@@ -457,7 +480,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         o.organ = organ;
         return o;
     }
-    if (glyph && !naked && (organ == NO_ORGAN || organ == ORGAN_LINKER)) {
+    if (glyph && !naked && (organ == NO_ORGAN || organ == ORGAN_LINKER || skip_glyph)) {
         // Resíduo estrutural: só o tubo.
         o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         return o;
@@ -466,7 +489,9 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         return o;
     }
-    let ext = organ_extent(organ) + spike / max(r_world, 1e-3);
+    var ext = organ_extent(organ) + spike / max(r_world, 1e-3);
+    // O quadrado do deposito tem de cobrir o oval ao comprido.
+    if (organ == ORGAN_STORAGE) { ext = phase * 1.05; }
     let r = r_world * ext * detail_fat();
     let w = centre + c * r;
     let px = (w - cam_center()) * view.zoom;
@@ -863,7 +888,7 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
         case ORGAN_STORAGE: {
             // Deposito: oval ao longo da cadeia (alongamento em core_phase.y,
             // pela capacidade), cheio, com aneis e um brilho de gota.
-            let asp = clamp(in.core_phase.y, 1.0, 1.9);
+            let asp = clamp(in.core_phase.y, 1.0, 40.0);
             let dd = length(vec2<f32>(u / asp, v));
             if (dd > core) { discard; }
             let x = dd / core;
