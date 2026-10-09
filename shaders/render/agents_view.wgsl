@@ -199,16 +199,17 @@ fn cam_center() -> vec2<f32> {
     return c;
 }
 
-// Tamanho do quadrado em múltiplos do raio do disco, por tipo de órgão.
-// Deposito: proporcao do oval (comprimento / largura) e meia largura maxima
-// (unidades do mundo), para uma fila comprida ficar um chourico e nao uma bola
-// que tapa o corpo.
+// Deposito: proporcao do oval (comprimento / largura) ate a meia largura
+// STORAGE_MAX_HALF_WIDTH (unidades do mundo); dai para cima a largura so cresce
+// com a raiz do comprimento, para uma fila comprida ficar um fuso gordo e nao
+// uma bola que tapa o corpo.
 const STORAGE_ASPECT: f32 = 1.5;
 const STORAGE_MAX_HALF_WIDTH: f32 = 14.0;
 fn is_storage(slot: u32, k: u32) -> bool {
     let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
     return oc != 0u && (oc & 0x1Fu) - 1u == ORGAN_STORAGE;
 }
+// Tamanho do quadrado em múltiplos do raio do disco, por tipo de órgão.
 fn organ_extent(t: u32) -> f32 {
     switch t {
         case ORGAN_FOOD_SENSOR, ORGAN_LIGHT_SENSOR: { return 2.6; }
@@ -410,7 +411,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 let half = max(0.5 * al, r_world);
                 centre = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * mid.x - sr * mid.y, sr * mid.x + cr * mid.y);
                 tangent = vec2<f32>(cr * ax.x - sr * ax.y, sr * ax.x + cr * ax.y) / al;
-                r_world = min(half / STORAGE_ASPECT, STORAGE_MAX_HALF_WIDTH);
+                r_world = min(half / STORAGE_ASPECT, STORAGE_MAX_HALF_WIDTH * sqrt(half / (STORAGE_MAX_HALF_WIDTH * STORAGE_ASPECT)));
                 phase = half / r_world;
             }
             if (organ == ORGAN_INHIBITOR) { col = vec3<f32>(0.95, 0.8, 0.9); }
