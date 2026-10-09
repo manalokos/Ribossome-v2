@@ -75,7 +75,7 @@ var<private> g_h: f32 = 0.0;
 // ...e quanto esse ponto está levantado em relação ao meio do corpo.
 var<private> g_lift: f32 = 0.0;
 // Cota do meio dos corpos acima do chão, no microscópio 3D.
-const AGENT_Z: f32 = 11.0;
+const AGENT_Z: f32 = 6.0;
 // Altura dos sensores em relação à de uma bola do mesmo contorno.
 const SENSOR_FLAT: f32 = 0.45;
 // Altura dos troços do corpo em relação à forma insuflada do seu sprite.

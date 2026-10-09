@@ -211,7 +211,7 @@ fn fs_ground(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 // (Para as moléculas; os agentes usam agent_base, mais suave.)
 fn support_at(xy: vec2<f32>) -> f32 {
     let uv = clamp(region_uv(xy), vec2<f32>(0.0), vec2<f32>(1.0));
-    return 1.15 * textureSampleLevel(ground_tex, samp, uv, 0.0).g;
+    return textureSampleLevel(ground_tex, samp, uv, 0.0).g;
 }
 
 fn ground_at(xy: vec2<f32>) -> f32 {
@@ -227,7 +227,7 @@ const AGENT_SPREAD: f32 = 3.0;
 fn agent_base(xy: vec2<f32>, g: f32) -> f32 {
     let uv = clamp(region_uv(xy), vec2<f32>(0.0), vec2<f32>(1.0));
     let t = textureSampleLevel(ground_tex, samp, uv, 0.0);
-    return GROUND_H * t.a * t.a * (3.0 - 2.0 * t.a) + 1.15 * t.b;
+    return GROUND_H * t.a * t.a * (3.0 - 2.0 * t.a) + t.b;
 }
 
 // O que há no ponto xy, em alturas absolutas: o volume dos agentes e o do

@@ -597,7 +597,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         // uma molécula em cima de uma pedra deformava-a ao tremer.
         var mol = vec2<f32>(0.0);
         if (mol_h > 0.0 && view.monomer_brightness > 0.0 && view.height_pass == 1u) {
-            let mid = 3.0 + MOL_LIFT * mol_lift * cell;
+            let mid = 1.5 + MOL_LIFT * mol_lift * cell;
             // (MOL_RELIEF vezes a forma do sprite: senão os átomos mal se notam.)
             mol = vec2<f32>(mid + MOL_RELIEF * mol_h * cell, mid - MOL_RELIEF * mol_h * cell);
         }
