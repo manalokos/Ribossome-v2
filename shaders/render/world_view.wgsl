@@ -215,8 +215,12 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     let norm = min(1.1613 / (r * r), DOT_PEAK);
     let inv_2s2 = 0.5 * DOT_SIGMAS * DOT_SIGMAS / (r * r);
     let floor_g = exp(-0.5 * DOT_SIGMAS * DOT_SIGMAS);
-    let lo = vec2<i32>(floor(pc - vec2<f32>(r)));
-    let hi = vec2<i32>(floor(pc + vec2<f32>(r)));
+    // (Mais a folga do tremor: uma molécula pode entrar no raio vinda da
+    // célula ao lado.)
+    let lo = vec2<i32>(floor(pc - vec2<f32>(r + 1.6 * MOL_JITTER)));
+    let hi = vec2<i32>(floor(pc + vec2<f32>(r + 1.6 * MOL_JITTER)));
+    // Relógio do tremor (passos da simulação: parada, as moléculas param).
+    let jt = f32(view.epoch % 1048576u) * MOL_JITTER_RATE;
     for (var cy = lo.y; cy <= hi.y; cy++) {
         for (var cx = lo.x; cx <= hi.x; cx++) {
             if (cx >= 0 && cy >= 0 && cx < i32(GRID_SIZE) && cy < i32(GRID_SIZE)) {
@@ -229,12 +233,17 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                         let shown = min(count, DOTS_PER_KIND);
                         var sum = 0.0;
                         for (var k = 0u; k < shown; k++) {
-                            let d = pc - (origin + dot_pos(cell, ch * 2u + st, k));
+                            // TREMOR TÉRMICO (só desenho): cada molécula oscila
+                            // à volta do seu ponto, com a sua fase, menos do que
+                            // o salto mínimo real (uma célula), e roda um pouco.
+                            let h = dot_hash(cell * 131u + (ch * 2u + st) * 7919u + k * 104729u + 5u);
+                            let ph = f32(h >> 12u) * (6.2831853 / 1048576.0);
+                            let wob = vec2<f32>(sin(jt + ph) + 0.6 * sin(2.31 * jt + 1.7 * ph), cos(1.13 * jt + 2.1 * ph) + 0.6 * cos(2.71 * jt + ph));
+                            let d = pc - (origin + dot_pos(cell, ch * 2u + st, k) + MOL_JITTER * wob);
                             // MOLÉCULA: o sprite do nucleótido, rodado por um
                             // hash; pesa pela máscara e pelo relevo.
                             if (dot(d, d) < r * r) {
-                                let h = dot_hash(cell * 131u + (ch * 2u + st) * 7919u + k * 104729u + 5u);
-                                let ang = f32(h & 0xFFFu) * (6.2831853 / 4096.0);
+                                let ang = f32(h & 0xFFFu) * (6.2831853 / 4096.0) + MOL_SPIN * sin(0.83 * jt + 3.0 * ph);
                                 let cs = cos(ang);
                                 let sn = sin(ang);
                                 let q = vec2<f32>(d.x * cs - d.y * sn, d.x * sn + d.y * cs) / r;
@@ -282,6 +291,11 @@ const GRAIN_PIXEL_NONE: f32 = 1.0;
 const ROCK_SIGMA: f32 = 0.5;
 const PEBBLE_SIGMA: f32 = 0.17;
 
+// Tremor das moléculas: amplitude (células; até 1,6 vezes isto), rotação
+// (radianos) e ritmo (radianos por passo da simulação).
+const MOL_JITTER: f32 = 0.07;
+const MOL_SPIN: f32 = 0.6;
+const MOL_JITTER_RATE: f32 = 0.05;
 // Até onde (em células) uma molécula solta paira acima do fundo.
 const MOL_LIFT: f32 = 0.35;
 

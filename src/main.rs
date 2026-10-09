@@ -974,6 +974,8 @@ impl Running {
         let guide = 0.9 * self.viewport[2].min(self.viewport[3]).max(1.0);
         let cam = Camera { center: self.cam.center, zoom: self.cam.zoom * side as f32 / guide };
         cap.view.coc_radius.set(self.ui.coc_radius);
+        // (O relógio do tremor das moléculas, como na vista.)
+        cap.view.epoch.set(self.world.params.epoch);
         let rgba = cap.render(&self.gpu, &self.world, &cam, self.ui.view_mode, self.ui.monomer_brightness);
         if photo {
             let dir = std::path::Path::new(SAVES_DIR).join("capturas");

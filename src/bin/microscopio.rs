@@ -1498,11 +1498,24 @@ fn overlay(ctx: &egui::Context, screen: egui::Rect, s: &Scope, marker: Option<[f
                     painter.line_segment([k, k - egui::vec2(0.0, sy * arm)], st);
                 }
                 let top = egui::pos2(c.x, (c.y - r - 8.0).max(img.top() + 64.0));
-                let back = egui::Color32::from_black_alpha(210);
-                for (dd, col_a, col_b) in [(egui::vec2(1.0, 1.0), back, back), (egui::vec2(0.0, 0.0), egui::Color32::from_rgb(255, 240, 170), egui::Color32::from_gray(200))] {
-                    painter.text(top + dd - egui::vec2(0.0, 30.0), egui::Align2::CENTER_BOTTOM, &sub.name, egui::FontId::proportional(18.0), col_a);
-                    painter.text(top + dd - egui::vec2(0.0, 15.0), egui::Align2::CENTER_BOTTOM, format!("lineage {}", sub.lineage), egui::FontId::monospace(11.0), col_b);
-                    painter.text(top + dd, egui::Align2::CENTER_BOTTOM, &sub.detail, egui::FontId::monospace(11.0), col_b);
+                // Numa caixa escura com uma sombra leve, para se ler por cima
+                // de qualquer fundo.
+                let lines = [
+                    (sub.name.clone(), egui::FontId::proportional(18.0), egui::Color32::from_rgb(255, 240, 170)),
+                    (format!("lineage {}", sub.lineage), egui::FontId::monospace(11.0), egui::Color32::from_gray(215)),
+                    (sub.detail.clone(), egui::FontId::monospace(11.0), egui::Color32::from_gray(215)),
+                ];
+                let galleys: Vec<_> = lines.into_iter().map(|(t, f, c)| painter.layout_no_wrap(t, f, c)).collect();
+                let w = galleys.iter().map(|g| g.size().x).fold(0.0, f32::max);
+                let h: f32 = galleys.iter().map(|g| g.size().y + 2.0).sum();
+                let rect = egui::Rect::from_min_size(egui::pos2(top.x - 0.5 * w, top.y - h), egui::vec2(w, h)).expand2(egui::vec2(12.0, 7.0));
+                painter.rect_filled(rect.translate(egui::vec2(2.0, 3.0)).expand(1.0), 7.0, egui::Color32::from_black_alpha(70));
+                painter.rect_filled(rect, 6.0, egui::Color32::from_black_alpha(185));
+                let mut y = top.y - h;
+                for g in galleys {
+                    let size = g.size();
+                    painter.galley(egui::pos2(top.x - 0.5 * size.x, y), g, egui::Color32::WHITE);
+                    y += size.y + 2.0;
                 }
             }
         }
