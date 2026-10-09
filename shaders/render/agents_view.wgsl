@@ -162,6 +162,8 @@ struct AgentVsOut {
     @location(4) @interpolate(flat) core_phase: vec2<f32>,
     // Coluna do atlas de sprites (variante do aspeto); bit 8 = tubo com textura.
     @location(6) @interpolate(flat) sprite: u32,
+    // Meio lado do quadrado de um órgão, em unidades do mundo (para a altura).
+    @location(7) @interpolate(flat) size: f32,
 };
 
 // Classes (v3): alifáticos A I L M V, aromáticos F W Y, polares S T N Q,
@@ -427,6 +429,7 @@ fn vs_ghost(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         if (organ == ORGAN_STORAGE) { ext = phase * SHADOW_MARGIN; }
         if (organ != ORGAN_STORAGE && organ != ORGAN_PROTEASE) { ext *= SHADOW_MARGIN; }
         w = pk + c * (r_base * ORGAN_SCALE * fade * ext * detail_fat());
+        o.size = r_base * ORGAN_SCALE * fade * ext * detail_fat();
         o.mode = 1u;
         o.local = c;
         o.tangent = e;
@@ -766,6 +769,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
     o.tangent = tangent;
     o.core_phase = vec2<f32>(1.0 / ext, phase);
     o.sprite = sprite_col;
+    o.size = r;
     o.mode = 1u;
     return o;
 }
@@ -1007,7 +1011,39 @@ fn antenna(p: vec2<f32>, tip: vec2<f32>, core: f32) -> f32 {
 fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
     let c = agent_frag(in);
     if (c.a < 0.99) { discard; }
+    if (view.height_pass != 0u) { return vec4<f32>(agent_height(in), 0.0, 0.0, 1.0); }
     return c;
+}
+
+// ALTURA de uma peça (unidades do mundo), para o relevo do microscópio 3D: a
+// forma é a do desenho (o que o sprite recorta), "insuflada". Um troço é um
+// cilindro deitado no fundo; um órgão é uma cúpula sobre o seu contorno,
+// tanto mais alta quanto maior ele é (fica por cima dos troços).
+fn agent_height(in: AgentVsOut) -> f32 {
+    if (in.mode == 0u) {
+        let r = max(in.core_phase.x, 1e-3);
+        let x = clamp(seg_dist(in.local, vec2<f32>(0.0), in.tangent) / r, 0.0, 1.0);
+        return r * (1.0 + sqrt(1.0 - x * x));
+    }
+    // Raio do órgão (unidades do mundo) e, em raios do órgão, o do seu
+    // CORPO: o que fica fora dele mas dentro do desenho (antenas, espigões)
+    // é fino e baixo.
+    let core = in.core_phase.x;
+    let unit = in.size * core;
+    var body = 1.0 / (core * SHADOW_MARGIN);
+    if (in.organ == ORGAN_PROTEASE) { body = 0.62; }
+    if (in.organ == ORGAN_FOOD_SENSOR) { body = 1.24; }
+    if (in.organ == ORGAN_LIGHT_SENSOR) { body = 1.36; }
+    if (in.organ == ORGAN_FOOD_SENSOR_DIR || in.organ == ORGAN_LIGHT_SENSOR_DIR) { body = 1.2; }
+    if (in.organ == ORGAN_STORAGE) { body = 1.0; }
+    var d = length(in.local) / (core * body);
+    if (in.organ == ORGAN_STORAGE) {
+        // Oval ao longo da cadeia (alongamento em core_phase.y).
+        let t = in.tangent;
+        d = length(vec2<f32>(dot(in.local, t) / max(in.core_phase.y, 1.0), dot(in.local, vec2<f32>(-t.y, t.x)))) / core;
+    }
+    let dome = sqrt(max(1.0 - d * d, 0.0));
+    return unit * (0.45 + 1.5 * body * dome);
 }
 
 @fragment

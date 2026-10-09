@@ -54,6 +54,8 @@ pub struct WorldView {
     pub ghost_steps: std::cell::Cell<f32>,
     /// Marcar na vista onde há fumarolas (ao pintá-las).
     pub show_vents: std::cell::Cell<bool>,
+    /// Desenhar a altura das peças em vez da cor (para o microscópio 3D).
+    pub height_pass: std::cell::Cell<bool>,
     draw_args: wgpu::Buffer,
     /// Slot a desenhar sozinho (u32::MAX = todos).
     pub focus: std::cell::Cell<u32>,
@@ -516,6 +518,7 @@ impl WorldView {
             epoch: std::cell::Cell::new(0),
             ghost_steps: std::cell::Cell::new(0.0),
             show_vents: std::cell::Cell::new(false),
+            height_pass: std::cell::Cell::new(false),
             draw_args: world.draw_args_buf.clone(),
             focus: std::cell::Cell::new(u32::MAX),
             uv_depth: std::cell::Cell::new(11.0),
@@ -574,7 +577,7 @@ impl WorldView {
             epoch: self.epoch.get(),
             ghost_steps: self.ghost_steps.get(),
             show_vents: self.show_vents.get() as u32,
-            _pad_v0: 0,
+            height_pass: self.height_pass.get() as u32,
             _pad_v1: 0,
             _pad_v2: 0,
         };
@@ -588,7 +591,8 @@ impl WorldView {
         pass.set_bind_group(0, &self.agents_bg, &[]);
         // Opacos primeiro, depois as sombras (de longe não há sombras).
         for shadows in [false, true] {
-            if shadows && self.lod.get() != 0 {
+            // (Nem de longe nem no passo das alturas: uma sombra não tem altura.)
+            if shadows && (self.lod.get() != 0 || self.height_pass.get()) {
                 break;
             }
             pass.set_pipeline(if shadows { &self.shadows_pipeline } else { &self.agents_pipeline });
