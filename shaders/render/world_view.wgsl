@@ -321,7 +321,8 @@ fn mol_thickness(r: f32) -> f32 {
     // (0,3 raios: é a meia altura real da forma insuflada destes sprites, que
     // são finos. Com mais, cada camada ficava a pairar acima da de baixo e a
     // primeira acima do chão.)
-    return 2.0 * MOL_RELIEF * 0.3 * r;
+    // (Metade da espessura: as camadas ficam meio enfiadas umas nas outras.)
+    return MOL_RELIEF * 0.3 * r;
 }
 
 struct Ground {
