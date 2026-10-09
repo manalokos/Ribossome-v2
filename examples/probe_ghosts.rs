@@ -23,6 +23,19 @@ fn main() {
         .max_by_key(|a| alive.iter().filter(|b| (a.pos_x - b.pos_x).abs() < 400.0 && (a.pos_y - b.pos_y).abs() < 400.0).count())
         .map(|a| [a.pos_x, a.pos_y])
         .unwrap();
+    // FLOW=1: em vez disso, o agente (com corpo) onde a água corre mais.
+    let centre = if std::env::var("FLOW").is_ok() {
+        let vel: Vec<[f32; 2]> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.velocity_buf)).to_vec();
+        let fs = w.cfg.fluid_size as usize;
+        let cell = |p: f32| ((p / w.cfg.sim_size() * fs as f32) as usize).min(fs - 1);
+        let speed = |a: &&&ribossome::params::Agent| {
+            let v = vel[cell(a.pos_y) * fs + cell(a.pos_x)];
+            ((v[0] * v[0] + v[1] * v[1]).sqrt() * 1000.0) as u32
+        };
+        alive.iter().max_by_key(speed).map(|a| [a.pos_x, a.pos_y]).unwrap()
+    } else {
+        centre
+    };
     let cam = Camera { center: centre, zoom: size as f32 / 900.0 };
     let half = 450.0;
     let cap = Capture::new(&gpu, &w, size);
@@ -54,6 +67,14 @@ fn main() {
         }
         shot(&w, name);
     }
+    // A água ali: velocidade (células do fluido por segundo) na célula do centro
+    // e o que isso dá em unidades do mundo ao fim da animação.
+    let vel: Vec<[f32; 2]> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.velocity_buf)).to_vec();
+    let fs = w.cfg.fluid_size as usize;
+    let cell = |p: f32| ((p / w.cfg.sim_size() * fs as f32) as usize).min(fs - 1);
+    let v = vel[cell(centre[1]) * fs + cell(centre[0])];
+    let per_step = w.cfg.sim_size() / fs as f32 * w.params.dt;
+    println!("água no centro: ({:.2}, {:.2}) células/s = {:.1} unidades do mundo em 600 passos", v[0], v[1], (v[0] * v[0] + v[1] * v[1]).sqrt() * per_step * 600.0);
     let c = w.life_counters_blocking(&gpu);
     println!("mortes {} nascimentos {}", c.deaths, c.births);
 }

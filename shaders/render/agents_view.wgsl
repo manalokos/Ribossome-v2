@@ -308,8 +308,10 @@ const GHOST_DT: f32 = 0.017;
 fn water_at(w: vec2<f32>) -> vec2<f32> {
     let f = clamp(floor(w / SIM_SIZE * f32(FLUID_SIZE)), vec2<f32>(0.0), vec2<f32>(f32(FLUID_SIZE - 1u)));
     let v = velocity_view[u32(f.y) * FLUID_SIZE + u32(f.x)];
-    // (Um valor estragado na grelha não pode atirar a peça para o infinito.)
-    return select(vec2<f32>(0.0), clamp(v, vec2<f32>(-400.0), vec2<f32>(400.0)), v == v);
+    // A grelha guarda CÉLULAS DO FLUIDO por segundo: passa a unidades do mundo
+    // (como water_at em fold.wgsl). Um valor estragado na grelha não pode
+    // atirar a peça para o infinito.
+    return select(vec2<f32>(0.0), clamp(v, vec2<f32>(-50.0), vec2<f32>(50.0)), v == v) * (SIM_SIZE / f32(FLUID_SIZE));
 }
 // Instâncias por registo: 64 tubos e 64 órgãos (GHOST_INSTANCES em render/mod.rs).
 const GHOST_INSTANCES: u32 = 2u * MAX_BODY_V;
