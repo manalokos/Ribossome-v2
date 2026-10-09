@@ -632,7 +632,12 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         ao *= mix(1.0, mix(0.3, 0.6, clamp((p.z - s.g) / 12.0, 0.0, 1.0)), under);
         // PRETO E BRANCO, como uma micrografia: fica só o claro-escuro das
         // peças (opts.x repõe a cor).
-        let gray = vec3<f32>(dot(albedo, vec3<f32>(0.33, 0.45, 0.22)) * 1.35);
+        // (Nas peças do mundo o cinzento é o canal mais forte e não a
+        // luminância: os monómeros têm cores vivas, e um azul ou um vermelho
+        // puros davam um cinzento muito escuro ao lado das pedras.)
+        let lum_g = dot(albedo, vec3<f32>(0.33, 0.45, 0.22));
+        let val_g = max(albedo.r, max(albedo.g, albedo.b));
+        let gray = vec3<f32>(mix(lum_g, val_g, select(0.0, 1.0, on_world)) * 1.35);
         // COR FALSA (opts.x = 1): a micrografia continua a ser o cinzento, e
         // só os agentes levam por cima o TOM da sua cor (saturado), como nas
         // imagens de microscópio eletrónico coloridas depois.
@@ -1242,7 +1247,7 @@ impl Scope {
             last_frame: std::time::Instant::now(),
             layer_key: None,
             layer_age: 0,
-            smooth_motion: env("SMOOTH", 1.0) != 0.0,
+            smooth_motion: env("SMOOTH", 0.0) != 0.0,
             tween: Tween::new(device, &world),
             cam: [[0.0; 3]; 4],
             reticle: env("RETICLE", 0.0) != 0.0,

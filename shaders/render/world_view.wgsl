@@ -610,7 +610,10 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         var mol = vec2<f32>(0.0);
         if (mol_h > 0.0 && view.monomer_brightness > 0.0 && view.height_pass == 1u) {
             let thick = mol_thickness(clamp(view.coc_radius, 0.05, 1.0)) * cell;
-            let mid = (0.5 + mol_lift) * thick;
+            // (A primeira camada fica logo ACIMA do chão: meio enterrada, a
+            // parte de baixo de cada molécula contava como "por baixo" e
+            // ficava às escuras.)
+            let mid = 1.6 * thick + mol_lift * thick;
             // (MOL_RELIEF vezes a forma do sprite: senão os átomos mal se notam.)
             mol = vec2<f32>(mid + MOL_RELIEF * mol_h * cell, mid - MOL_RELIEF * mol_h * cell);
         }
