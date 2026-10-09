@@ -349,7 +349,10 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
                                 // a fronteira é a linha onde as duas bolas se
                                 // cruzam, sem degrau. No microscópio 3D isto
                                 // tira as paredes a pique entre pedras.
-                                let zh = r * s.z + 0.0005 * z;
+                                // (A altura que conta é a do CIMO do volume, 0,45 r + h,
+                                // a mesma que o microscópio usa: comparando só h, dois
+                                // seixos de raio diferente cruzavam-se com um degrau.)
+                                let zh = 0.45 * r + r * s.z + 0.0005 * z;
                                 if (s.y > 0.5 && zh > pebble_zh) {
                                     pebble_zh = zh;
                                     pebble_z = z;

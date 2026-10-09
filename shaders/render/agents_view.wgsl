@@ -1334,6 +1334,12 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
                 return vec4<f32>(0.0, 0.0, 0.0, sh);
             }
             let pale = mix(in.color, vec3<f32>(1.0, 0.8, 0.65), 0.3 + 0.5 * d / max(tip, 0.01));
+            // Por cima da base, o relevo é pelo menos o da base: senão cada
+            // espigão abria nela uma ranhura com a sua (pequena) espessura.
+            if (d <= hub) {
+                let bb = sprite(SPRITE_ROW_PROTEASE, col_f, vec2<f32>(u, v) / hub, uv_x * core / hub, uv_y * core / hub);
+                if (bb.y >= 0.5) { g_h = max(g_h, bb.z * in.size * hub); }
+            }
             return vec4<f32>(sem_color(pale, spike_l), 1.0);
         }
         case ORGAN_CHIRAL: {

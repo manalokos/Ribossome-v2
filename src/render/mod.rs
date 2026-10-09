@@ -49,6 +49,7 @@ pub struct WorldView {
     shadows_pipeline: wgpu::RenderPipeline,
     ghosts_pipeline: wgpu::RenderPipeline,
     agents_relief_pipeline: wgpu::RenderPipeline,
+    agents_low_pipeline: wgpu::RenderPipeline,
     ghosts_relief_pipeline: wgpu::RenderPipeline,
     /// Microscópio 3D: quem tapa quem é a altura real de cada peça
     /// (fs_agent_relief) e não a ordem fixa dos agentes; sem sombras.
@@ -486,7 +487,7 @@ impl WorldView {
         // as peças opacas escrevem a altura (cada agente tem a sua, fixa, e o
         // mais alto tapa o mais baixo seja qual for a ordem da lista); as
         // sombras são transparentes e só escurecem o que está mais baixo.
-        let agent_pipeline = |label: &str, vertex: &'static str, entry: &'static str, write: bool, blend: Option<wgpu::BlendState>| {
+        let agent_pipeline_cmp = |label: &str, vertex: &'static str, entry: &'static str, write: bool, blend: Option<wgpu::BlendState>, compare: wgpu::CompareFunction| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&agents_pl_layout),
@@ -497,7 +498,7 @@ impl WorldView {
                     buffers: &[],
                 },
                 primitive: Default::default(),
-                depth_stencil: Some(depth_state(write, wgpu::CompareFunction::Greater)),
+                depth_stencil: Some(depth_state(write, compare)),
                 multisample: wgpu::MultisampleState { count: MSAA, ..Default::default() },
                 fragment: Some(wgpu::FragmentState {
                     module: &amodule,
@@ -509,17 +510,23 @@ impl WorldView {
                 cache: None,
             })
         };
+        let agent_pipeline = |label: &str, vertex: &'static str, entry: &'static str, write: bool, blend: Option<wgpu::BlendState>| agent_pipeline_cmp(label, vertex, entry, write, blend, wgpu::CompareFunction::Greater);
         let agents_pipeline = agent_pipeline("agents view", "vs_agent", "fs_agent", true, None);
         let shadows_pipeline = agent_pipeline("agents view shadows", "vs_agent", "fs_agent_shadow", false, Some(wgpu::BlendState::ALPHA_BLENDING));
         // Restos de quem morreu: as peças a separarem-se (vs_ghost).
         let ghosts_pipeline = agent_pipeline("ghosts view", "vs_ghost", "fs_agent", true, None);
         let agents_relief_pipeline = agent_pipeline("agents view relief", "vs_agent", "fs_agent_relief", true, None);
         let ghosts_relief_pipeline = agent_pipeline("ghosts view relief", "vs_ghost", "fs_agent_relief", true, None);
+        // SEGUNDA CAMADA do microscópio: ganha a peça mais BAIXA em cada ponto
+        // (profundidade limpa a 1). Onde duas se sobrepõem é a que a primeira
+        // camada tapou; onde só há uma, é a mesma.
+        let agents_low_pipeline = agent_pipeline_cmp("agents view low", "vs_agent", "fs_agent_relief", true, None, wgpu::CompareFunction::Less);
         Self {
             view_buf,
             bind_group,
             pipeline,
             agents_bg,
+            agents_low_pipeline,
             agents_relief_pipeline,
             ghosts_relief_pipeline,
             relief_order: std::cell::Cell::new(false),
@@ -612,6 +619,14 @@ impl WorldView {
             pass.set_pipeline(if self.relief_order.get() { &self.ghosts_relief_pipeline } else { &self.ghosts_pipeline });
             pass.draw(0..6, 0..GHOST_INSTANCES * crate::world::GHOST_MAX as u32);
         }
+    }
+
+    /// Só os agentes vivos, ficando em cada ponto a peça mais BAIXA (para a
+    /// segunda camada do microscópio; a profundidade tem de vir limpa a 1).
+    pub fn draw_agents_lowest(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_bind_group(0, &self.agents_bg, &[]);
+        pass.set_pipeline(&self.agents_low_pipeline);
+        self.draw_agents(pass);
     }
 
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
