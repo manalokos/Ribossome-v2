@@ -275,8 +275,39 @@ fn organ_extent(t: u32) -> f32 {
     }
 }
 
+// ALTURA DE CADA PEÇA (profundidade): a lista de desenho sai da GPU por uma
+// ordem que muda de frame para frame, e dois agentes sobrepostos trocavam de
+// lugar (cintilavam). Cada agente tem uma altura fixa (um hash do slot) e,
+// dentro dele, os órgãos ficam por cima dos tubos e cada troço por cima do
+// anterior; o teste de profundidade decide quem tapa quem, e as sombras só
+// caem sobre o que está mais baixo. camada: 0 = fios, ligações e troços de
+// longe; 1 + k = tubo k; 80 + k = órgão k.
+fn agent_z(slot: u32, layer: u32) -> f32 {
+    var x = slot * 747796405u + 2891336453u;
+    x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+    x = (x >> 22u) ^ x;
+    return 0.02 + 0.96 * (f32(x & 0xFFFu) + f32(layer) / 256.0) / 4096.0;
+}
+
 @vertex
 fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) -> AgentVsOut {
+    var o = agent_vertex(vi, inst);
+    // (Os vértices postos fora do ecrã, com z = 2, ficam como estão.)
+    if (o.pos.z < 1.5) {
+        let far = view.lod != 0u;
+        let per = select(AGENT_INSTANCES, MAX_BODY_V / select(4u, 1u, view.lod == 1u) + 1u, far);
+        var slot = view.focus_slot;
+        if (slot == 0xFFFFFFFFu) { slot = draw_list_view[inst / per]; }
+        let local_i = inst % per;
+        var layer = 0u;
+        if (!far && local_i < MAX_BODY_V) { layer = 1u + local_i; }
+        if (!far && local_i >= MAX_BODY_V && local_i < 2u * MAX_BODY_V) { layer = 80u + local_i - MAX_BODY_V; }
+        o.pos.z = agent_z(slot, layer);
+    }
+    return o;
+}
+
+fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
     var o: AgentVsOut;
     // Instâncias por agente: 0..63 tubos, 64..127 órgãos (por cima),
     // 128..191 bases de RNA não traduzidas nas pontas.
@@ -790,8 +821,23 @@ fn antenna(p: vec2<f32>, tip: vec2<f32>, core: f32) -> f32 {
     return select(0.0, 1.0, (stalk && length(p) > core * 0.8) || knob);
 }
 
+// Dois passos com o mesmo desenho: primeiro as peças opacas (escrevem a
+// altura), depois as sombras (transparentes, só sobre o que está mais baixo).
 @fragment
 fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
+    let c = agent_frag(in);
+    if (c.a < 0.99) { discard; }
+    return c;
+}
+
+@fragment
+fn fs_agent_shadow(in: AgentVsOut) -> @location(0) vec4<f32> {
+    let c = agent_frag(in);
+    if (c.a >= 0.99) { discard; }
+    return c;
+}
+
+fn agent_frag(in: AgentVsOut) -> vec4<f32> {
     // Derivadas no ecrã das coordenadas locais (antes de qualquer ramo).
     let tdx = dpdx(in.local);
     let tdy = dpdy(in.local);

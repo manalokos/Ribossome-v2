@@ -46,6 +46,7 @@ pub struct WorldView {
     pipeline: wgpu::RenderPipeline,
     agents_bg: wgpu::BindGroup,
     agents_pipeline: wgpu::RenderPipeline,
+    shadows_pipeline: wgpu::RenderPipeline,
     draw_args: wgpu::Buffer,
     /// Slot a desenhar sozinho (u32::MAX = todos).
     pub focus: std::cell::Cell<u32>,
@@ -118,6 +119,33 @@ fn sprites_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture 
         (buf, w, h) = (next, nw, nh);
     }
     texture
+}
+
+/// Formato da profundidade (a altura das peças dos agentes).
+pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+fn depth_state(write: bool, compare: wgpu::CompareFunction) -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        format: DEPTH_FORMAT,
+        depth_write_enabled: Some(write),
+        depth_compare: Some(compare),
+        stencil: Default::default(),
+        bias: Default::default(),
+    }
+}
+
+/// Profundidade para um alvo de `msaa_texture` do mesmo tamanho.
+pub fn depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
+    msaa_texture(device, DEPTH_FORMAT, width, height)
+}
+
+/// Ligação da profundidade a um passo de desenho (limpa a 0 = o mais baixo).
+pub fn depth_attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthStencilAttachment<'_> {
+    wgpu::RenderPassDepthStencilAttachment {
+        view,
+        depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
+        stencil_ops: None,
+    }
 }
 
 pub fn msaa_texture(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) -> wgpu::Texture {
@@ -280,7 +308,8 @@ impl WorldView {
                 buffers: &[],
             },
             primitive: Default::default(),
-            depth_stencil: None,
+            // (O passo tem profundidade, para os agentes; o fundo não a usa.)
+            depth_stencil: Some(depth_state(false, wgpu::CompareFunction::Always)),
             multisample: wgpu::MultisampleState { count: MSAA, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
@@ -375,35 +404,42 @@ impl WorldView {
         });
         let adef = &shaders::AGENTS_VIEW;
         let amodule = shaders::create(device, adef, cfg);
-        let agents_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("agents view"),
-            layout: Some(&agents_pl_layout),
-            vertex: wgpu::VertexState {
-                module: &amodule,
-                entry_point: Some(shaders::entry(adef, "vs_agent")),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState { count: MSAA, ..Default::default() },
-            fragment: Some(wgpu::FragmentState {
-                module: &amodule,
-                entry_point: Some(shaders::entry(adef, "fs_agent")),
-                compilation_options: Default::default(),
-                // Com transparência: as sombras de contacto são auréolas pretas
-                // meio transparentes à volta de cada peça.
-                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        // Dois pipelines com o mesmo desenho (ver fs_agent em agents_view.wgsl):
+        // as peças opacas escrevem a altura (cada agente tem a sua, fixa, e o
+        // mais alto tapa o mais baixo seja qual for a ordem da lista); as
+        // sombras são transparentes e só escurecem o que está mais baixo.
+        let agent_pipeline = |label: &str, entry: &'static str, write: bool, blend: Option<wgpu::BlendState>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&agents_pl_layout),
+                vertex: wgpu::VertexState {
+                    module: &amodule,
+                    entry_point: Some(shaders::entry(adef, "vs_agent")),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: Some(depth_state(write, wgpu::CompareFunction::Greater)),
+                multisample: wgpu::MultisampleState { count: MSAA, ..Default::default() },
+                fragment: Some(wgpu::FragmentState {
+                    module: &amodule,
+                    entry_point: Some(shaders::entry(adef, entry)),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let agents_pipeline = agent_pipeline("agents view", "fs_agent", true, None);
+        let shadows_pipeline = agent_pipeline("agents view shadows", "fs_agent_shadow", false, Some(wgpu::BlendState::ALPHA_BLENDING));
         Self {
             view_buf,
             bind_group,
             pipeline,
             agents_bg,
             agents_pipeline,
+            shadows_pipeline,
             draw_args: world.draw_args_buf.clone(),
             focus: std::cell::Cell::new(u32::MAX),
             uv_depth: std::cell::Cell::new(11.0),
@@ -469,8 +505,18 @@ impl WorldView {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);
-        pass.set_pipeline(&self.agents_pipeline);
         pass.set_bind_group(0, &self.agents_bg, &[]);
+        // Opacos primeiro, depois as sombras (de longe não há sombras).
+        for shadows in [false, true] {
+            if shadows && self.lod.get() != 0 {
+                break;
+            }
+            pass.set_pipeline(if shadows { &self.shadows_pipeline } else { &self.agents_pipeline });
+            self.draw_agents(pass);
+        }
+    }
+
+    fn draw_agents(&self, pass: &mut wgpu::RenderPass<'_>) {
         // Só os vivos: a lista e o nº de instâncias vêm da GPU (build_draw_list).
         if self.focus.get() != u32::MAX {
             // Um só agente (imagem do inspetor): as instâncias dele e mais

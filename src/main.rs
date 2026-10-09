@@ -24,6 +24,8 @@ struct Running {
     /// Alvo com várias amostras onde o mundo é desenhado (do tamanho da
     /// janela; refeito quando ela muda). Resolve para a imagem da janela.
     msaa: Option<wgpu::Texture>,
+    /// Profundidade do desenho do mundo (do tamanho de `msaa`).
+    depth: Option<wgpu::Texture>,
     /// ECRÃ DE ENTRADA: a imagem (carregada no primeiro frame) e quando
     /// começou. Some ao fim de SPLASH_SECS ou com um clique ou tecla.
     splash: Option<(Option<egui::TextureHandle>, std::time::Instant)>,
@@ -319,6 +321,7 @@ impl Running {
             cam,
             egui_state,
             msaa: None,
+            depth: None,
             loaded_agent: None,
             // RIBO_NO_SPLASH=1 salta o ecrã de entrada.
             splash: std::env::var("RIBO_NO_SPLASH").is_err().then(|| (None, std::time::Instant::now())),
@@ -1438,7 +1441,7 @@ impl Running {
         let c = self.cam.center;
         self.world.set_draw_rect(&self.gpu.queue, Some(([c[0] - hw, c[1] - hh], [c[0] + hw, c[1] + hh])));
         let format = self.surface_cfg.format;
-        let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, msaa, .. } = self;
+        let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, msaa, depth, .. } = self;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {
             let n = n_steps;
@@ -1471,8 +1474,10 @@ impl Running {
         let (sw, sh) = (sd.size_in_pixels[0], sd.size_in_pixels[1]);
         if msaa.as_ref().is_none_or(|t| t.width() != sw || t.height() != sh) {
             *msaa = Some(ribossome::render::msaa_texture(&gpu.device, format, sw, sh));
+            *depth = Some(ribossome::render::depth_texture(&gpu.device, sw, sh));
         }
         let many = msaa.as_ref().unwrap().create_view(&Default::default());
+        let depth_view = depth.as_ref().unwrap().create_view(&Default::default());
         frame.segment("render", |enc| {
             {
                 let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1486,7 +1491,7 @@ impl Running {
                             store: wgpu::StoreOp::Discard,
                         },
                     })],
-                    depth_stencil_attachment: None,
+                    depth_stencil_attachment: Some(ribossome::render::depth_attachment(&depth_view)),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                     multiview_mask: None,

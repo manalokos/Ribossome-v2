@@ -13,6 +13,7 @@ pub struct Capture {
     texture: wgpu::Texture,
     /// Alvo com várias amostras; resolve para `texture`.
     msaa: wgpu::Texture,
+    depth: wgpu::Texture,
     readback: wgpu::Buffer,
     /// Cor dos agentes (0 química, 1 α, 2 β, 3 α e β).
     pub signal_view: std::cell::Cell<u32>,
@@ -44,7 +45,8 @@ impl Capture {
             mapped_at_creation: false,
         });
         let msaa = super::msaa_texture(&gpu.device, FORMAT, size, size);
-        Self { view, size, texture, msaa, readback, signal_view: std::cell::Cell::new(0) }
+        let depth = super::depth_texture(&gpu.device, size, size);
+        Self { view, size, texture, msaa, depth, readback, signal_view: std::cell::Cell::new(0) }
     }
 
     /// Lado da imagem, em píxeis.
@@ -71,6 +73,7 @@ impl Capture {
         self.view.update(queue, cam, [s, s], view_mode, brightness, self.signal_view.get());
         let target = self.texture.create_view(&Default::default());
         let many = self.msaa.create_view(&Default::default());
+        let depth = self.depth.create_view(&Default::default());
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("capture"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -79,7 +82,7 @@ impl Capture {
                 resolve_target: Some(&target),
                 ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Discard },
             })],
-            depth_stencil_attachment: None,
+            depth_stencil_attachment: Some(super::depth_attachment(&depth)),
             timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
@@ -99,6 +102,7 @@ impl Capture {
         world.set_draw_rect(&gpu.queue, Some(([cam.center[0] - half, cam.center[1] - half], [cam.center[0] + half, cam.center[1] + half])));
         world.encode_draw_list(&mut enc);
         let many = self.msaa.create_view(&Default::default());
+        let depth = self.depth.create_view(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("capture"),
@@ -111,7 +115,7 @@ impl Capture {
                         store: wgpu::StoreOp::Discard,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(super::depth_attachment(&depth)),
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,

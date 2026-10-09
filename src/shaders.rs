@@ -121,7 +121,7 @@ pub const WORLD_VIEW: ModuleDef = ModuleDef {
 pub const AGENTS_VIEW: ModuleDef = ModuleDef {
     name: "agents_view",
     files: wgsl_files!["render/agents_view.wgsl"],
-    entries: &[("vs_agent", Stage::Vertex), ("fs_agent", Stage::Fragment)],
+    entries: &[("vs_agent", Stage::Vertex), ("fs_agent", Stage::Fragment), ("fs_agent_shadow", Stage::Fragment)],
 };
 
 pub const MODULES: &[&ModuleDef] = &[&WORLD, &WORLD_VIEW, &AGENTS_VIEW];
