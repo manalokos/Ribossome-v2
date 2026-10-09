@@ -18,8 +18,12 @@
 //!   STEPS   passos de simulação por frame (por omissão 2; 0 = parada)
 //!   --foto ficheiro.png [amostras]   sem janela: acumula e grava a imagem
 //! Rato: arrastar com o botão esquerdo roda a câmara, com o direito desloca a
-//! zona, a roda aproxima. Espaço pausa a simulação (a imagem converge);
-//! F/G fecham e abrem o diafragma (profundidade de campo); Esc sai.
+//! zona, a roda aproxima. Começa PARADO (a imagem converge e fica nítida);
+//! Espaço põe a simulação a correr e volta a parar. F/G fecham e abrem o
+//! diafragma (profundidade de campo); C liga a cor (por omissão é a preto e
+//! branco); M mostra os monómeros; Esc sai.
+//!   TERRAIN=1 centra numa zona com rocha, entulho e água (em vez de num agente)
+//!   COLOR=1, MONOMERS=0.7  arrancam com cor / com monómeros
 
 use std::sync::Arc;
 
@@ -53,6 +57,8 @@ struct U {
     screen: vec4<f32>,
     // distância de focagem, abertura (raio da lente), tan(meio campo), exagero da altura
     lens: vec4<f32>,
+    // quanto da cor das peças se mantém (0 = preto e branco), livre × 3
+    opts: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var color_tex: texture_2d<f32>;
@@ -167,7 +173,10 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             let ao = 1.0 / (1.0 + 1.6 * occ / 8.0 * 4.0);
             // (O fundo fica um cinzento muito escuro em vez de preto puro, como
             // o suporte de uma amostra.)
-            let base = max(albedo, vec3<f32>(0.035, 0.036, 0.04));
+            // PRETO E BRANCO, como uma micrografia: fica só o claro-escuro
+            // das peças (opts.x repõe a cor).
+            let gray = vec3<f32>(dot(albedo, vec3<f32>(0.33, 0.45, 0.22)) * 1.35);
+            let base = max(mix(gray, albedo, u.opts.x), vec3<f32>(0.035, 0.036, 0.04));
             col = base * (0.95 + 1.5 * edge) * ao + vec3<f32>(0.25) * edge * edge * step(0.5, h0);
             // Esbate para o preto na borda da zona.
             let b = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
@@ -219,6 +228,10 @@ struct Scope {
     frame: u32,
     steps: u32,
     paused: bool,
+    /// Manter a cor das peças (por omissão é a preto e branco).
+    colour: bool,
+    /// Brilho dos monómeros na zona (0 = não se desenham).
+    monomers: f32,
 }
 
 fn accum_texture(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
@@ -271,6 +284,35 @@ impl Scope {
             .and_then(|v| v.split_once(',').and_then(|(x, y)| Some([x.trim().parse().ok()?, y.trim().parse().ok()?])))
             .or_else(|| best.get(pick.min(best.len().saturating_sub(1))).map(|&(_, s)| [agents[s].pos_x, agents[s].pos_y]))
             .unwrap_or([cfg.sim_size() * 0.5; 2]);
+        // TERRAIN=1: em vez disso, o bloco do mundo com a melhor mistura de
+        // rocha, entulho e água (para ver o terreno).
+        let centre = if env("TERRAIN", 0.0) != 0.0 {
+            let gamma = world.read_gamma_blocking(gpu);
+            let n = cfg.grid_size as usize;
+            let b = 24usize;
+            let mut best_at = (0.0f32, centre);
+            for by in (0..n - b).step_by(b) {
+                for bx in (0..n - b).step_by(b) {
+                    let (mut rock, mut rubble) = (0u32, 0u32);
+                    for y in by..by + b {
+                        for x in bx..bx + b {
+                            let v = gamma[y * n + x];
+                            rock += (v >= 3) as u32;
+                            rubble += (v > 0 && v < 3) as u32;
+                        }
+                    }
+                    let t = (b * b) as f32;
+                    let score = (rock as f32 / t).min(rubble as f32 / t).min(1.0 - (rock + rubble) as f32 / t);
+                    if score > best_at.0 {
+                        let u = cfg.world_units_per_cell as f32;
+                        best_at = (score, [(bx + b / 2) as f32 * u, (by + b / 2) as f32 * u]);
+                    }
+                }
+            }
+            best_at.1
+        } else {
+            centre
+        };
         let region = env("REGION", 420.0);
         log::info!("{path}: {} agentes; zona de {} unidades à volta de ({:.0}, {:.0})", alive.len(), 2.0 * region, centre[0], centre[1]);
 
@@ -290,7 +332,7 @@ impl Scope {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scope"),
-            size: 7 * 16,
+            size: 8 * 16,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -364,7 +406,10 @@ impl Scope {
             samples: 0,
             frame: 0,
             steps: env("STEPS", 2.0) as u32,
-            paused: false,
+            // Começa PARADO: é assim que a imagem converge e se vê bem.
+            paused: true,
+            colour: env("COLOR", 0.0) != 0.0,
+            monomers: env("MONOMERS", 0.0),
             world,
         }
     }
@@ -400,7 +445,7 @@ impl Scope {
         let cam = Camera { center: o.centre, zoom: TEX as f32 / (2.0 * r) };
         self.cap.view.epoch.set(self.world.params.epoch);
         self.cap.view.ghost_steps.set(60.0);
-        self.cap.encode(&gpu.queue, &mut enc, &cam, 0, 0.7);
+        self.cap.encode(&gpu.queue, &mut enc, &cam, 0, self.monomers);
         self.height_view.epoch.set(self.world.params.epoch);
         self.height_view.ghost_steps.set(60.0);
         self.height_view.update(&gpu.queue, &cam, [TEX as f32; 2], 0, 0.0, 0);
@@ -437,7 +482,7 @@ impl Scope {
         let right = norm(cross(fwd, [0.0, 0.0, 1.0]));
         let up = cross(right, fwd);
         let v4 = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
-        let data: [[f32; 4]; 7] = [
+        let data: [[f32; 4]; 8] = [
             v4(eye),
             v4(right),
             v4(up),
@@ -445,6 +490,7 @@ impl Scope {
             [o.centre[0], o.centre[1], r, HMAX],
             [self.size[0] as f32, self.size[1] as f32, self.frame as f32, weight],
             [o.dist, o.aperture, 0.36, 1.0],
+            [if self.colour { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
         ];
         gpu.queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&data));
         let (src, dst) = ((self.frame % 2) as usize, ((self.frame + 1) % 2) as usize);
@@ -542,7 +588,7 @@ impl Running {
         if self.scope.frame % 30 == 0 {
             let s = &self.scope;
             self.window.set_title(&format!(
-                "Ribossome: microscope   {} samples   {}   aperture {:.1}   (drag: orbit, right drag: move, wheel: zoom, space: pause, F/G: aperture)",
+                "Ribossome: microscope   {} samples   {}   aperture {:.1}   (drag: orbit, right drag: move, wheel: zoom, space: run/pause, F/G: aperture, C: colour, M: monomers)",
                 s.samples,
                 if s.paused || s.steps == 0 { "paused" } else { "running" },
                 s.orbit.aperture
@@ -603,6 +649,14 @@ impl Running {
                 }
                 Key::Character("f") => self.scope.orbit.aperture = (self.scope.orbit.aperture - 1.0).max(0.0),
                 Key::Character("g") => self.scope.orbit.aperture = (self.scope.orbit.aperture + 1.0).min(30.0),
+                Key::Character("c") => {
+                    self.scope.colour = !self.scope.colour;
+                    self.scope.last_orbit = None;
+                }
+                Key::Character("m") => {
+                    self.scope.monomers = if self.scope.monomers > 0.0 { 0.0 } else { 0.7 };
+                    self.scope.last_orbit = None;
+                }
                 _ => {}
             },
             _ => {}

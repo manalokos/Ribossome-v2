@@ -89,7 +89,7 @@ const PEBBLE_SPRITE_R: f32 = 0.36;
 const ROCK_SPRITE_R: f32 = 0.72;
 // (luminância, máscara) do grão: d = posição relativa ao centro (células),
 // r = raio, h = hash do grão (variante e rotação), px = píxel em células.
-fn grain_sprite(row: f32, d: vec2<f32>, r: f32, h: u32, px: f32) -> vec2<f32> {
+fn grain_sprite(row: f32, d: vec2<f32>, r: f32, h: u32, px: f32) -> vec3<f32> {
     let ang = f32((h >> 4u) & 0xFFu) * (6.2831853 / 256.0);
     let cs = cos(ang);
     let sn = sin(ang);
@@ -97,7 +97,7 @@ fn grain_sprite(row: f32, d: vec2<f32>, r: f32, h: u32, px: f32) -> vec2<f32> {
     let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
     let g = px / r;
     let s = textureSampleGrad(sprites_tex, sprites_samp, vec2<f32>((f32((h >> 12u) % 9u) + 0.5) / SPRITE_COLS, (row + 0.5) / SPRITE_ROWS) + clamp(q, vec2<f32>(-0.98), vec2<f32>(0.98)) * sc, vec2<f32>(g, 0.0) * sc, vec2<f32>(0.0, g) * sc);
-    return vec2<f32>(s.r, s.g);
+    return vec3<f32>(s.r, s.g, s.b);
 }
 
 // Célula do fluido debaixo de uma posição do mundo.
@@ -273,6 +273,7 @@ struct Ground {
     rock_l: f32,
     // Altura (em células) do seixo de cima naquele ponto: uma cúpula.
     pebble_h: f32,
+    rock_h: f32,
     // Sombra de contacto (0..1) de um grão mais alto sobre o que ali está.
     shadow: f32,
 }
@@ -283,6 +284,7 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
     var pebble_l = -1.0;
     var pebble_z = -1.0;
     var pebble_h = 0.0;
+    var rock_h = 0.0;
     var rock_l = -1.0;
     var rock_z = -1.0;
     var halo = 0.0;
@@ -323,6 +325,7 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
                                 let s = grain_sprite(SPRITE_ROW_ROCK, d, ROCK_SPRITE_R, h, px);
                                 if (s.y > 0.5) {
                                     rock_z = z;
+                                    rock_h = ROCK_SPRITE_R * s.z;
                                     rock_l = s.x;
                                 }
                             }
@@ -336,7 +339,7 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
                                 if (s.y > 0.5) {
                                     pebble_z = z;
                                     pebble_l = s.x;
-                                    pebble_h = r * (0.35 + 0.9 * sqrt(max(1.0 - d2 / (r * r), 0.0)));
+                                    pebble_h = r * s.z;
                                     pebble = 1.0;
                                 }
                             }
@@ -361,6 +364,7 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
     out.pebble_l = pebble_l;
     out.rock_l = rock_l;
     out.pebble_h = pebble_h;
+    out.rock_h = rock_h;
     // Só escurece se vier de um grão mais alto do que o que ali se vê.
     out.shadow = select(0.0, halo, halo_z > pebble_z);
     return out;
@@ -465,6 +469,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     var rock_tex = 1.0;
     var rubble_tex = 1.0;
     var pebble_h = 0.3;
+    var rock_h = 0.0;
     var ground_shadow = 1.0;
     // De perto, o terreno em grãos (ver ground_at) em vez de células.
     let grains = 1.0 - smoothstep(GRAIN_PIXEL_FULL, GRAIN_PIXEL_NONE, pixel_cells);
@@ -477,12 +482,13 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         if (gr.rock_l >= 0.0) { rock_tex = mix(1.0, 0.55 + 1.0 * pow(gr.rock_l, 0.8), grains); }
         if (gr.pebble_l >= 0.0) { rubble_tex = mix(1.0, 0.5 + 1.3 * pow(gr.pebble_l, 0.8), grains); }
         pebble_h = gr.pebble_h;
+        rock_h = gr.rock_h;
         ground_shadow = 1.0 - GRAIN_SHADOW * gr.shadow * grains;
     }
     // ALTURA do terreno (para o microscópio 3D): a rocha é um planalto com o
     // relevo dos seus blocos; cada grão de entulho é um seixo pousado.
     if (view.height_pass != 0u) {
-        return vec4<f32>(max(rock_m * (34.0 + 7.0 * (rock_tex - 1.0)), rubble_m * pebble_h * f32(WORLD_UNITS_PER_CELL)), 0.0, 0.0, 1.0);
+        return vec4<f32>(max(rock_m * (26.0 + 0.9 * rock_h * f32(WORLD_UNITS_PER_CELL)), rubble_m * pebble_h * f32(WORLD_UNITS_PER_CELL)), 0.0, 0.0, 1.0);
     }
     let rock = (vec3<f32>(0.30, 0.27, 0.24) + 0.08 * tone) * rock_tex;
     // A rocha soma a luz que lhe CHEGA (a da célula de cima): a

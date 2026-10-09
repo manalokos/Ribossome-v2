@@ -68,12 +68,17 @@ const SPRITE_STALK_BODY: f32 = 0.3;
 // (luminância, máscara) do mosaico (linha, coluna) em q (-1..1, y para
 // cima); qx, qy são as derivadas de q no ecrã (escolhem o mipmap sem
 // depender do ramo em que se está).
-fn sprite(row: f32, col: f32, q: vec2<f32>, qx: vec2<f32>, qy: vec2<f32>) -> vec2<f32> {
+// ALTURA da peça neste fragmento (unidades do mundo), para o relevo do
+// microscópio 3D: cada sítio que lê um sprite deixa-a aqui (a altura do
+// atlas vezes o tamanho da peça).
+var<private> g_h: f32 = 0.0;
+// Devolve também (em .z) a altura da forma insuflada, em meios mosaicos.
+fn sprite(row: f32, col: f32, q: vec2<f32>, qx: vec2<f32>, qy: vec2<f32>) -> vec3<f32> {
     let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
     let qc = clamp(q, vec2<f32>(-0.98), vec2<f32>(0.98));
     let s = textureSampleGrad(sprites_tex, sprites_samp, vec2<f32>((col + 0.5) / SPRITE_COLS, (row + 0.5) / SPRITE_ROWS) + qc * sc, qx * sc, qy * sc);
     let inside = step(max(abs(q.x), abs(q.y)), 0.995);
-    return vec2<f32>(s.r, s.g * inside);
+    return vec3<f32>(s.r, s.g * inside, s.b);
 }
 // Máscara DESFOCADA do mosaico (um nível baixo do mipmap, escolhido à mão):
 // serve de sombra de contacto com a forma do sprite.
@@ -164,6 +169,8 @@ struct AgentVsOut {
     @location(6) @interpolate(flat) sprite: u32,
     // Meio lado do quadrado de um órgão, em unidades do mundo (para a altura).
     @location(7) @interpolate(flat) size: f32,
+    // Quanto este resíduo está levantado do fundo (ondulação do corpo).
+    @location(8) @interpolate(flat) lift: f32,
 };
 
 // Classes (v3): alifáticos A I L M V, aromáticos F W Y, polares S T N Q,
@@ -476,6 +483,14 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     return o;
 }
 
+// ONDULAÇÃO VERTICAL (só no relevo do microscópio 3D): cada resíduo fica um
+// pouco levantado do fundo, numa onda ao longo do corpo que avança com a
+// idade do agente, como uma fita a nadar perto do substrato.
+const BODY_LIFT: f32 = 5.0;
+fn body_lift(a: Agent, k: u32) -> f32 {
+    return BODY_LIFT * (0.5 + 0.5 * sin(f32(k) * 0.55 + f32(a.age) * 0.03 + f32(a.id % 97u)));
+}
+
 fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
     var o: AgentVsOut;
     // Instâncias por agente: 0..63 tubos, 64..127 órgãos (por cima),
@@ -744,6 +759,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
         o.core_phase = vec2<f32>(r_tube, 0.0);
         o.organ = organ;
         o.sprite = select(0u, 0x100u | sprite_col, organ != ORGAN_LINKER);
+        o.lift = body_lift(a, k);
         return o;
     }
     if (glyph && !naked && (organ == NO_ORGAN || organ == ORGAN_LINKER || skip_glyph)) {
@@ -770,6 +786,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
     o.core_phase = vec2<f32>(1.0 / ext, phase);
     o.sprite = sprite_col;
     o.size = r;
+    o.lift = body_lift(a, k);
     o.mode = 1u;
     return o;
 }
@@ -1009,21 +1026,22 @@ fn antenna(p: vec2<f32>, tip: vec2<f32>, core: f32) -> f32 {
 // altura), depois as sombras (transparentes, só sobre o que está mais baixo).
 @fragment
 fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
+    g_h = agent_height(in);
     let c = agent_frag(in);
     if (c.a < 0.99) { discard; }
-    if (view.height_pass != 0u) { return vec4<f32>(agent_height(in), 0.0, 0.0, 1.0); }
+    // (in.lift: a ondulação vertical do corpo, só no relevo.)
+    if (view.height_pass != 0u) { return vec4<f32>(g_h + in.lift, 0.0, 0.0, 1.0); }
     return c;
 }
 
-// ALTURA de uma peça (unidades do mundo), para o relevo do microscópio 3D: a
-// forma é a do desenho (o que o sprite recorta), "insuflada". Um troço é um
-// cilindro deitado no fundo; um órgão é uma cúpula sobre o seu contorno,
-// tanto mais alta quanto maior ele é (fica por cima dos troços).
+// ALTURA de uma peça SEM sprite (fios, ligações, troços de longe), para o
+// relevo do microscópio 3D: meio cilindro, ou uma cúpula. As peças com
+// sprite usam a altura do atlas (g_h).
 fn agent_height(in: AgentVsOut) -> f32 {
     if (in.mode == 0u) {
         let r = max(in.core_phase.x, 1e-3);
         let x = clamp(seg_dist(in.local, vec2<f32>(0.0), in.tangent) / r, 0.0, 1.0);
-        return r * (1.0 + sqrt(1.0 - x * x));
+        return r * sqrt(1.0 - x * x);
     }
     // Raio do órgão (unidades do mundo) e, em raios do órgão, o do seu
     // CORPO: o que fica fora dele mas dentro do desenho (antenas, espigões)
@@ -1043,7 +1061,7 @@ fn agent_height(in: AgentVsOut) -> f32 {
         d = length(vec2<f32>(dot(in.local, t) / max(in.core_phase.y, 1.0), dot(in.local, vec2<f32>(-t.y, t.x)))) / core;
     }
     let dome = sqrt(max(1.0 - d * d, 0.0));
-    return unit * (0.45 + 1.5 * body * dome);
+    return unit * body * dome;
 }
 
 @fragment
@@ -1072,6 +1090,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             let q = vec2<f32>((dot(in.local, e) - 0.5 * l) * sc.x, dot(in.local, nn) * sc.y);
             let aa = in.sprite & 0xFFu;
             let s = sprite(SPRITE_ROW_AMINO + f32(aa / SPRITE_COLS_U), f32(aa % SPRITE_COLS_U), q, vec2<f32>(dot(tdx, e), dot(tdx, nn)) * sc, vec2<f32>(dot(tdy, e), dot(tdy, nn)) * sc);
+            g_h = s.z * r_t * AMINO_MARGIN;
             if (s.y >= 0.5) { return vec4<f32>(sem_color(in.color, s.x), 1.0); }
             // Sombra com a FORMA do sprite (hélice, fita…): a sua máscara
             // desfocada, e não uma auréola de cápsula.
@@ -1121,6 +1140,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             q = vec2<f32>(q.x * cs - q.y * sn, q.x * sn + q.y * cs);
         }
         let sp = sprite(f32(in.organ), col_f, q, uv_x * core * SHADOW_MARGIN, uv_y * core * SHADOW_MARGIN);
+        g_h = sp.z * in.size / SHADOW_MARGIN;
         if (sp.y < 0.5) {
             let sh = halo(length(q) / body);
             if (sh < 0.004) { discard; }
@@ -1234,13 +1254,17 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
                     let s = sprite(SPRITE_ROW_SPIKE, (col_f + i) % SPRITE_COLS, q, vec2<f32>(g / wb, 0.0), vec2<f32>(0.0, 2.0 * g / max(len - a0, 1e-3)));
                     if (s.y >= 0.5 && s.x > spike_l) {
                         spike_l = s.x;
+                        g_h = s.z * in.size * wb;
                         tip = len;
                     }
                 }
             }
             if (spike_l < 0.0 && d <= hub) {
                 let b = sprite(SPRITE_ROW_PROTEASE, col_f, vec2<f32>(u, v) / hub, uv_x * core / hub, uv_y * core / hub);
-                if (b.y >= 0.5) { return vec4<f32>(sem_color(in.color, b.x), 1.0); }
+                if (b.y >= 0.5) {
+                    g_h = b.z * in.size * hub;
+                    return vec4<f32>(sem_color(in.color, b.x), 1.0);
+                }
             }
             if (spike_l < 0.0) {
                 let sh = halo(d / hub);
@@ -1276,6 +1300,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             // SPRITE esticado ao comprimento real do depósito.
             let m = vec2<f32>(1.0 / asp, 1.0);
             let sp = sprite(f32(ORGAN_STORAGE), col_f, uv_l * m, uv_x * m, uv_y * m);
+            g_h = sp.z * in.size * core;
             if (sp.y < 0.5) {
                 let sh = halo(length(uv_l * m));
                 if (sh < 0.004) { discard; }

@@ -2,7 +2,10 @@
 
 Lê as imagens geradas em saves/sprites/fontes/ (cinzentas, fundo preto;
 NN_nome_K.png = uma variante, NN_nome_grelha.png = matriz 3x3) e escreve
-assets/sprites.png: cinzento + alfa, COLS colunas de variantes por ROWS
+assets/sprites.png: R = cinzento, G = máscara, B = ALTURA (o contorno
+"insuflado": cada ponto fica com a altura da maior esfera que cabe na forma
+e passa por ele, por isso um disco dá uma cúpula, um anel um toro, um traço
+um tubo), em frações de meio mosaico. COLS colunas de variantes por ROWS
 linhas, mosaicos de TILE px. O shader (agents_view.wgsl) pinta a luminância
 com a cor do órgão e escolhe a coluna pelo código do órgão, por isso órgãos
 do mesmo tipo têm pequenas diferenças entre si.
@@ -30,7 +33,9 @@ import glob
 import os
 import re
 import sys
+import numpy as np
 from PIL import Image, ImageFilter, ImageOps
+from scipy import ndimage as ndi
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sprites_escolha import ORGANS, mask_of  # noqa: E402
@@ -54,7 +59,30 @@ def fit(lum, mask, box):
     out_m.paste(mask, (-box[0], -box[1]))
     out_l = out_l.resize((TILE, TILE), Image.LANCZOS)
     out_m = out_m.resize((TILE, TILE), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.5))
-    return Image.merge("LA", (out_l, out_m))
+    return Image.merge("RGBA", (out_l, out_m, inflate(out_l, out_m), Image.new("L", (TILE, TILE), 255)))
+
+
+def inflate(lum, mask):
+    """Altura da forma insuflada (0..255 = 0..meio mosaico): em cada ponto,
+    a da maior esfera inscrita que o cobre, mais um relevo fino tirado da
+    luminância (as estrias e bossas do desenho)."""
+    m = np.array(mask) > 127
+    if not m.any():
+        return Image.new("L", mask.size, 0)
+    d = ndi.distance_transform_edt(m)
+    w = np.zeros_like(d)
+    r = float(d.max())
+    while r >= 1.0:
+        core = d >= r
+        cover = ndi.distance_transform_edt(~core) <= r
+        w = np.where(cover & (w == 0), r, w)
+        r -= 1.0
+    w = np.where(m, np.maximum(w, d), 0.0)
+    h = np.sqrt(np.clip(d * (2.0 * w - d), 0.0, None))
+    relief = ndi.gaussian_filter(np.array(lum, dtype=np.float32) / 255.0, 1.0)
+    h = np.where(m, h + 0.05 * (TILE / 2) * (relief - relief[m].mean()), 0.0)
+    h = ndi.gaussian_filter(h, 0.8)
+    return Image.fromarray(np.clip(h / (TILE / 2) * 255.0, 0, 255).astype(np.uint8), "L")
 
 
 def tile(lum, row):
@@ -105,7 +133,7 @@ def main():
             t = tile(cell, row)
             if t is not None:
                 rows.setdefault(row, []).append(t)
-    atlas = Image.new("LA", (TILE * COLS, TILE * ROWS), (0, 0))
+    atlas = Image.new("RGBA", (TILE * COLS, TILE * ROWS), (0, 0, 0, 255))
     for row, tiles in rows.items():
         # Mais variantes do que colunas: continuam nas linhas seguintes.
         for r in range((len(tiles) + COLS - 1) // COLS):
