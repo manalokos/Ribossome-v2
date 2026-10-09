@@ -78,6 +78,8 @@ var<private> g_lift: f32 = 0.0;
 const AGENT_Z: f32 = 11.0;
 // Altura dos sensores em relação à de uma bola do mesmo contorno.
 const SENSOR_FLAT: f32 = 0.45;
+// Altura dos troços do corpo em relação à forma insuflada do seu sprite.
+const AMINO_RELIEF: f32 = 1.8;
 // ...e a altura do CENTRO da peça acima do chão: o volume vai de g_c - g_h
 // a g_c + g_h (a mesma forma para cima e para baixo: uma cúpula fica uma
 // bola, meio tubo um tubo).
@@ -1144,7 +1146,9 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             let q = vec2<f32>((dot(in.local, e) - 0.5 * l) * sc.x, dot(in.local, nn) * sc.y);
             let aa = in.sprite & 0xFFu;
             let s = sprite(SPRITE_ROW_AMINO + f32(aa / SPRITE_COLS_U), f32(aa % SPRITE_COLS_U), q, vec2<f32>(dot(tdx, e), dot(tdx, nn)) * sc, vec2<f32>(dot(tdy, e), dot(tdy, nn)) * sc);
-            g_h = s.z * r_t * AMINO_MARGIN;
+            // (Mais gordo do que a forma insuflada do sprite: as hélices e as
+            // fitas são estreitas e ficavam quase planas no microscópio 3D.)
+            g_h = AMINO_RELIEF * s.z * r_t * AMINO_MARGIN;
             g_c = r_t;
             if (s.y >= 0.5) { return vec4<f32>(sem_color(in.color, s.x), 1.0); }
             // Sombra com a FORMA do sprite (hélice, fita…): a sua máscara
