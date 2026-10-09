@@ -74,6 +74,8 @@ const SPRITE_STALK_BODY: f32 = 0.3;
 var<private> g_h: f32 = 0.0;
 // Cota do meio dos corpos acima do chão, no microscópio 3D.
 const AGENT_Z: f32 = 11.0;
+// Altura dos sensores em relação à de uma bola do mesmo contorno.
+const SENSOR_FLAT: f32 = 0.45;
 // ...e a altura do CENTRO da peça acima do chão: o volume vai de g_c - g_h
 // a g_c + g_h (a mesma forma para cima e para baixo: uma cúpula fica uma
 // bola, meio tubo um tubo).
@@ -1155,6 +1157,8 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
         }
         let sp = sprite(f32(in.organ), col_f, q, uv_x * core * SHADOW_MARGIN, uv_y * core * SHADOW_MARGIN);
         g_h = sp.z * in.size / SHADOW_MARGIN;
+        // (Os sensores são achatados, como discos, e não bolas.)
+        if (in.organ == ORGAN_FOOD_SENSOR || in.organ == ORGAN_LIGHT_SENSOR || in.organ == ORGAN_FOOD_SENSOR_DIR || in.organ == ORGAN_LIGHT_SENSOR_DIR || in.organ == ORGAN_ENERGY_SENSOR) { g_h *= SENSOR_FLAT; }
         g_c = 0.8 * in.size / SHADOW_MARGIN;
         if (sp.y < 0.5) {
             let sh = halo(length(q) / body);

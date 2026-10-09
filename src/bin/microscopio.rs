@@ -102,6 +102,18 @@ fn hash3(p: vec3<u32>) -> vec3<f32> {
     return vec3<f32>(v) / 4294967295.0;
 }
 
+// Ruído suave (0..1) para o grão do chão.
+fn vnoise(p: vec2<f32>) -> f32 {
+    let i = vec2<i32>(floor(p));
+    let f = p - floor(p);
+    let w = f * f * (3.0 - 2.0 * f);
+    let a = hash3(vec3<u32>(vec2<u32>(i + vec2<i32>(32768)), 5u)).x;
+    let b = hash3(vec3<u32>(vec2<u32>(i + vec2<i32>(32769, 32768)), 5u)).x;
+    let c = hash3(vec3<u32>(vec2<u32>(i + vec2<i32>(32768, 32769)), 5u)).x;
+    let d = hash3(vec3<u32>(vec2<u32>(i + vec2<i32>(32769, 32769)), 5u)).x;
+    return mix(mix(a, b, w.x), mix(c, d, w.x), w.y);
+}
+
 // Mundo (x, y) -> coordenadas da textura da zona (o mundo cresce para cima).
 fn region_uv(xy: vec2<f32>) -> vec2<f32> {
     let d = (xy - u.region.xy) / (2.0 * u.region.z);
@@ -157,6 +169,43 @@ fn surf(xy: vec2<f32>) -> Surf {
     return s;
 }
 
+// O mesmo, mas INTERPOLADO entre os 4 texels à volta (só entre os que têm
+// peça, para não misturar com o vazio). Texel a texel cada peça era uma
+// escadinha de caixas, e de lado viam-se os degraus como linhas de
+// varrimento; o passo largo dos raios usa surf (barato) e a afinação final,
+// a normal e a oclusão usam este.
+fn lerp_volume(t: texture_multisampled_2d<f32>, uv: vec2<f32>, g: f32) -> vec2<f32> {
+    let dim = vec2<f32>(textureDimensions(t));
+    let x = uv * dim - 0.5;
+    let c = vec2<i32>(floor(x));
+    let f = x - floor(x);
+    let hi = vec2<i32>(dim) - 1;
+    var sum = vec2<f32>(0.0);
+    var wsum = 0.0;
+    for (var k = 0; k < 4; k++) {
+        let o = vec2<i32>(k & 1, k >> 1);
+        let v = textureLoad(t, clamp(c + o, vec2<i32>(0), hi), 0).rg;
+        let w = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1) * step(0.25, v.x);
+        sum += v * w;
+        wsum += w;
+    }
+    if (wsum < 0.5) { return NONE; }
+    return g + sum / wsum * u.lens.w;
+}
+
+fn surf_smooth(xy: vec2<f32>) -> Surf {
+    var s: Surf;
+    s.g = ground_at(xy);
+    s.a = NONE;
+    s.w = NONE;
+    let uv = region_uv(xy);
+    if (all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0))) {
+        s.a = lerp_volume(vol_tex, uv, s.g);
+        s.w = lerp_volume(world_vol, uv, s.g);
+    }
+    return s;
+}
+
 fn within(z: f32, v: vec2<f32>, eps: f32) -> bool {
     return z <= v.x + eps && z >= v.y - eps;
 }
@@ -167,7 +216,7 @@ fn solid(p: vec3<f32>, s: Surf) -> bool {
 
 // A superfície mais alta no ponto: para a oclusão.
 fn top_at(xy: vec2<f32>) -> f32 {
-    let s = surf(xy);
+    let s = surf_smooth(xy);
     return max(s.g, max(s.a.x, s.w.x));
 }
 
@@ -212,10 +261,10 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         for (var i = 0; i < 8; i++) {
             let m = 0.5 * (lo + hi);
             let p = org + dir * m;
-            if (solid(p, surf(p.xy))) { hi = m; } else { lo = m; }
+            if (solid(p, surf_smooth(p.xy))) { hi = m; } else { lo = m; }
         }
         let p = org + dir * hi;
-        let s = surf(p.xy);
+        let s = surf_smooth(p.xy);
         let e = 2.0 * u.region.z / f32(textureDimensions(vol_tex).x) * 1.5;
         // Onde bateu: num agente, numa peça do mundo, ou no chão?
         let on_agent = within(p.z, s.a, 0.06);
@@ -231,6 +280,13 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             // O chão tem a cor do mundo sem agentes (a água, o que lá houver);
             // o monte de terreno, onde não há pedra à vista, é pó de rocha.
             albedo = textureSampleLevel(world_color, samp, region_uv(p.xy), 0.0).rgb * 0.5;
+            // SUPORTE: onde não há nada, o chão é uma lâmina lisa (como vidro)
+            // com um grão muito fino e umas partículas minúsculas pousadas.
+            let grain = 0.5 * vnoise(p.xy * 0.33) + 0.3 * vnoise(p.xy * 1.7) + 0.2 * vnoise(p.xy * 6.1);
+            let cell = floor(p.xy / 13.0);
+            let hs = hash3(vec3<u32>(vec2<u32>(vec2<i32>(cell) + vec2<i32>(32768)), 17u));
+            let speck = step(0.8, hs.z) * (1.0 - smoothstep(0.2, 1.0, length(p.xy / 13.0 - cell - 0.1 - 0.8 * hs.xy) * (5.0 + 6.0 * hs.x)));
+            albedo = max(albedo, vec3<f32>(0.075 + 0.035 * grain + 0.16 * speck));
             albedo = max(albedo, vec3<f32>(0.11, 0.105, 0.1) * smoothstep(0.5, 6.0, s.g));
         } else {
             // A peça é a mesma forma para cima e para baixo do seu meio: onde
@@ -241,7 +297,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             var d = vec4<f32>(0.0);
             var offs = array<vec2<f32>, 4>(vec2<f32>(e, 0.0), vec2<f32>(-e, 0.0), vec2<f32>(0.0, e), vec2<f32>(0.0, -e));
             for (var k = 0; k < 4; k++) {
-                let q = surf(p.xy + offs[k]);
+                let q = surf_smooth(p.xy + offs[k]);
                 let qv = select(q.w, q.a, on_agent);
                 d[k] = select(mid, select(qv.y, qv.x, upper), qv.x > -500.0);
             }
@@ -275,8 +331,8 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         // O campo de visão não acaba num quadrado: esbate-se com a distância
         // ao centro da zona e com a distância para lá do plano de focagem.
         let rd = length(p.xy - u.region.xy) / u.region.z;
-        col *= 1.0 - smoothstep(0.62, 0.97, rd);
-        col *= 1.0 - 0.8 * clamp((hi - u.lens.x) / (2.2 * u.region.z), 0.0, 1.0);
+        col *= 1.0 - smoothstep(0.8, 1.0, rd);
+        col *= 1.0 - 0.6 * clamp((hi - u.lens.x) / (4.0 * u.region.z), 0.0, 1.0);
     }
     // Grão do detetor (desaparece com a acumulação).
     col += (rnd.z - 0.5) * 0.03;
@@ -571,7 +627,7 @@ impl Scope {
             accum: [accum_texture(device, size[0], size[1]), accum_texture(device, size[0], size[1])],
             size,
             region,
-            orbit: Orbit { centre, yaw: 0.6, pitch: 0.75, dist: region * 1.9, aperture: env("APERTURE", 1.5) },
+            orbit: Orbit { centre, yaw: 0.6, pitch: 0.75, dist: region * 1.3, aperture: env("APERTURE", 1.5) },
             last_orbit: None,
             samples: 0,
             frame: 0,
@@ -866,7 +922,7 @@ impl Running {
                 // de perto é pequena e detalhada, a de longe apanha mais mundo).
                 let o = &mut self.scope.orbit;
                 o.dist = (o.dist * 0.9f32.powf(lines)).clamp(90.0, 5000.0);
-                self.scope.region = (o.dist / 1.9).clamp(50.0, 2600.0);
+                self.scope.region = (o.dist / 1.3).clamp(50.0, 2600.0);
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => match event.logical_key.as_ref() {
                 Key::Named(NamedKey::Escape) => event_loop.exit(),
@@ -928,7 +984,7 @@ fn photo(path: &str, samples: u32) {
     scope.orbit.pitch = env("PITCH", scope.orbit.pitch);
     scope.orbit.dist = env("DIST", scope.orbit.dist);
     if std::env::var("REGION").is_err() {
-        scope.region = (scope.orbit.dist / 1.9).clamp(50.0, 2600.0);
+        scope.region = (scope.orbit.dist / 1.3).clamp(50.0, 2600.0);
     }
     scope.orbit.aperture = env("APERTURE", scope.orbit.aperture);
     // Uns passos para a grelha de desenho e as poses assentarem, depois parada.

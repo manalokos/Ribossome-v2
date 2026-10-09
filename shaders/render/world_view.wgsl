@@ -513,7 +513,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
             vol = vec2<f32>(2.0 + 0.8 * rock_h * cell, -30.0);
         } else if (rubble_m > 0.5) {
             vol = vec2<f32>(0.45 * pebble_r + pebble_h, 0.45 * pebble_r - pebble_h) * cell;
-        } else if (mol_h > 0.0) {
+        } else if (mol_h > 0.0 && view.monomer_brightness > 0.0) {
             vol = vec2<f32>(4.0 + mol_h * cell, 4.0 - mol_h * cell);
         }
         return vec4<f32>(vol, 0.0, 1.0);
