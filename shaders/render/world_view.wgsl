@@ -344,10 +344,16 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
                             tone += w * t;
                             weight += w;
                             let z = f32(h >> 24u);
-                            if (d2 < ROCK_SPRITE_R * ROCK_SPRITE_R && z > rock_z) {
+                            // No microscópio 3D fica o bloco mais ALTO naquele
+                            // ponto (a fronteira é onde os dois se cruzam, sem
+                            // parede a pique); na vista normal, um sorteado, que
+                            // poupa leituras.
+                            let by_height = view.relief != 0u;
+                            if (d2 < ROCK_SPRITE_R * ROCK_SPRITE_R && (by_height || z > rock_z)) {
                                 let s = grain_sprite(SPRITE_ROW_ROCK, d, ROCK_SPRITE_R, h, px);
-                                if (s.y > 0.5) {
-                                    rock_z = z;
+                                let key = select(z, 1000.0 * s.z + 0.001 * z, by_height);
+                                if (s.y > 0.5 && key > rock_z) {
+                                    rock_z = key;
                                     rock_h = ROCK_SPRITE_R * s.z;
                                     rock_l = s.x;
                                 }

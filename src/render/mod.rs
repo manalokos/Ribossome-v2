@@ -596,7 +596,7 @@ impl WorldView {
             ghost_steps: self.ghost_steps.get(),
             show_vents: self.show_vents.get() as u32,
             height_pass: self.height_pass.get(),
-            _pad_v1: 0,
+            relief: self.relief_order.get() as u32,
             _pad_v2: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));

@@ -463,7 +463,12 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         var occ = 0.0;
         for (var k = 0; k < 8; k++) {
             let a = 0.785398 * f32(k) + 6.2831853 * rnd2.z;
-            let rr = select(9.0, 22.0, (k & 1) == 1);
+            // A distância a que se olha muda de frame para frame (de 4 a 80
+            // unidades, mais vezes perto): acumulada, a sombra de oclusão
+            // fica um degradé largo em vez de um halo de borda marcada a
+            // duas distâncias fixas.
+            let jit = fract(rnd2.y * 13.7 + f32(k) * 0.6180339);
+            let rr = mix(4.0, 80.0, jit * jit);
             occ += clamp((top_at(p.xy + vec2<f32>(cos(a), sin(a)) * rr) - zref) / rr, 0.0, 1.5);
         }
         var ao = 1.0 / (1.0 + 0.8 * occ);
