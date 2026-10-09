@@ -38,6 +38,18 @@
 // A cor é a do órgão (ou a da classe do aminoácido).
 @group(0) @binding(14) var sprites_tex: texture_2d<f32>;
 @group(0) @binding(15) var sprites_samp: sampler;
+// SOMBRAS DE CONTACTO (como no microscópio eletrónico: sem direção, um
+// escurecimento à volta de cada peça sobre o que está por baixo). Cada peça
+// desenha uma auréola preta e transparente fora da sua máscara; o quadrado
+// leva uma margem para ela caber. A ordem do desenho (tubos, depois órgãos)
+// decide quem escurece quem.
+const SHADOW: f32 = 0.5;
+const SHADOW_MARGIN: f32 = 1.3;
+const TUBE_SHADOW: f32 = 1.5;
+// Auréola à volta de um disco de raio 1 (x = distância ao centro).
+fn halo(x: f32) -> f32 {
+    return SHADOW * (1.0 - smoothstep(0.8, SHADOW_MARGIN, x));
+}
 const SPRITE_COLS: f32 = 9.0;
 const SPRITE_COLS_U: u32 = 9u;
 const SPRITE_ROWS: f32 = 27.0;
@@ -515,8 +527,10 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         let e = select(vec2<f32>(1.0, 0.0), seg / l, l > 1e-4);
         let nn = vec2<f32>(-e.y, e.x);
         // Quadrado orientado que cobre a cápsula.
-        let along = select(-r_tube, l + r_tube, c.x > 0.0);
-        let w = centre + e * along + nn * (c.y * r_tube);
+        // (Com a margem da sombra, menos no fio entre genes.)
+        let rq = r_tube * select(TUBE_SHADOW, 1.0, organ == ORGAN_LINKER);
+        let along = select(-rq, l + rq, c.x > 0.0);
+        let w = centre + e * along + nn * (c.y * rq);
         let px = (w - cam_center()) * view.zoom;
         o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), 0.0, 1.0);
         o.mode = 0u;
@@ -538,7 +552,9 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     }
     var ext = organ_extent(organ) + spike / max(r_world, 1e-3);
     // O quadrado do deposito tem de cobrir o oval ao comprido.
-    if (organ == ORGAN_STORAGE) { ext = phase * 1.05; }
+    if (organ == ORGAN_STORAGE) { ext = phase * SHADOW_MARGIN; }
+    // Margem para a sombra (a protease já tem o quadrado dos espigões).
+    if (organ != ORGAN_STORAGE && organ != ORGAN_PROTEASE) { ext *= SHADOW_MARGIN; }
     let r = r_world * ext * detail_fat();
     let w = centre + c * r;
     let px = (w - cam_center()) * view.zoom;
@@ -783,7 +799,12 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
         // TUBO: cápsula com sombreado de cilindro (centro claro, bordas escuras).
         let r_t = in.core_phase.x;
         let dd = seg_dist(in.local, vec2<f32>(0.0), in.tangent);
-        if (dd > r_t) { discard; }
+        if (dd > r_t) {
+            // Fora do tubo: a sombra (só nos troços do corpo).
+            let x = (dd - r_t) / (r_t * (TUBE_SHADOW - 1.0));
+            if ((in.sprite & 0x100u) == 0u || x >= 1.0) { discard; }
+            return vec4<f32>(0.0, 0.0, 0.0, SHADOW * (1.0 - x) * (1.0 - x));
+        }
         if ((in.sprite & 0x100u) != 0u) {
             // Troço de aminoácido: a cápsula do atlas esticada ao troço.
             let l = length(in.tangent);
@@ -817,7 +838,13 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
     // tamanho de cada um está em organ_extent). O depósito (esticado) e a
     // protease (corpo + espigões) têm o seu ramo mais abaixo.
     if (in.organ != NO_ORGAN && in.organ != ORGAN_STORAGE && in.organ != ORGAN_PROTEASE && in.organ != ORGAN_LINKER) {
-        var q = vec2<f32>(u, v);
+        // (O sprite ocupa o quadrado menos a margem da sombra.)
+        var q = vec2<f32>(u, v) * SHADOW_MARGIN;
+        // Raio do corpo no mosaico (nos sensores, a esfera; as antenas não fazem sombra).
+        var body = 0.97;
+        if (in.organ == ORGAN_FOOD_SENSOR) { body = 0.62; }
+        if (in.organ == ORGAN_LIGHT_SENSOR) { body = 0.85; }
+        if (in.organ == ORGAN_FOOD_SENSOR_DIR || in.organ == ORGAN_LIGHT_SENSOR_DIR) { body = SPRITE_STALK_BODY; }
         if (in.organ == ORGAN_FOOD_SENSOR_DIR || in.organ == ORGAN_LIGHT_SENSOR_DIR) {
             // UMA antena, do lado que o sensor lê (core_phase.y = +1 esquerda, -1 direita).
             q.y *= select(-1.0, 1.0, in.core_phase.y >= 0.0);
@@ -828,8 +855,12 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             let sn = sin(in.core_phase.y);
             q = vec2<f32>(q.x * cs - q.y * sn, q.x * sn + q.y * cs);
         }
-        let sp = sprite(f32(in.organ), col_f, q, uv_x * core, uv_y * core);
-        if (sp.y < 0.5) { discard; }
+        let sp = sprite(f32(in.organ), col_f, q, uv_x * core * SHADOW_MARGIN, uv_y * core * SHADOW_MARGIN);
+        if (sp.y < 0.5) {
+            let sh = halo(length(q) / body);
+            if (sh < 0.004) { discard; }
+            return vec4<f32>(0.0, 0.0, 0.0, sh);
+        }
         return vec4<f32>(sem_color(in.color, sp.x), 1.0);
     }
     let white = vec3<f32>(1.0);
@@ -946,7 +977,11 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
                 let b = sprite(SPRITE_ROW_PROTEASE, col_f, vec2<f32>(u, v) / hub, uv_x * core / hub, uv_y * core / hub);
                 if (b.y >= 0.5) { return vec4<f32>(sem_color(in.color, b.x), 1.0); }
             }
-            if (spike_l < 0.0) { discard; }
+            if (spike_l < 0.0) {
+                let sh = halo(d / hub);
+                if (sh < 0.004) { discard; }
+                return vec4<f32>(0.0, 0.0, 0.0, sh);
+            }
             let pale = mix(in.color, vec3<f32>(1.0, 0.8, 0.65), 0.3 + 0.5 * d / max(tip, 0.01));
             return vec4<f32>(sem_color(pale, spike_l), 1.0);
         }
@@ -976,7 +1011,11 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             // SPRITE esticado ao comprimento real do depósito.
             let m = vec2<f32>(1.0 / asp, 1.0);
             let sp = sprite(f32(ORGAN_STORAGE), col_f, uv_l * m, uv_x * m, uv_y * m);
-            if (sp.y < 0.5) { discard; }
+            if (sp.y < 0.5) {
+                let sh = halo(length(uv_l * m));
+                if (sh < 0.004) { discard; }
+                return vec4<f32>(0.0, 0.0, 0.0, sh);
+            }
             return vec4<f32>(sem_color(in.color, sp.x), 1.0);
         }
         default: {

@@ -391,7 +391,9 @@ impl WorldView {
                 module: &amodule,
                 entry_point: Some(shaders::entry(adef, "fs_agent")),
                 compilation_options: Default::default(),
-                targets: &[Some(format.into())],
+                // Com transparência: as sombras de contacto são auréolas pretas
+                // meio transparentes à volta de cada peça.
+                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
             }),
             multiview_mask: None,
             cache: None,

@@ -21,6 +21,8 @@ const SPRITE_ROW_ROCK: f32 = 26.0;
 // Raio (células) do sprite de um grão de entulho (vezes o seu tamanho) e de
 // um bloco de rocha: maiores do que o espaço entre grãos, para se
 // sobreporem (o de cima tapa o de baixo; fora da máscara vê-se o de baixo).
+// Sombra de contacto entre grãos (ver SHADOW em agents_view.wgsl).
+const GRAIN_SHADOW: f32 = 0.55;
 const PEBBLE_SPRITE_R: f32 = 0.36;
 const ROCK_SPRITE_R: f32 = 0.72;
 // (luminância, máscara) do grão: d = posição relativa ao centro (células),
@@ -183,6 +185,8 @@ struct Ground {
     // Luminância do sprite do grão / bloco que fica por cima (-1 = nenhum).
     pebble_l: f32,
     rock_l: f32,
+    // Sombra de contacto (0..1) de um grão mais alto sobre o que ali está.
+    shadow: f32,
 }
 
 fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
@@ -192,6 +196,8 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
     var pebble_z = -1.0;
     var rock_l = -1.0;
     var rock_z = -1.0;
+    var halo = 0.0;
+    var halo_z = -1.0;
     var rock = 0.0;
     var pebble = 0.0;
     var tone = 0.0;
@@ -244,6 +250,12 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
                                     pebble = 1.0;
                                 }
                             }
+                            // Auréola deste grão (fica a do mais alto que a tiver).
+                            let hx = 1.0 - smoothstep(0.75, 1.3, sqrt(d2) / r);
+                            if (hx > 0.0 && z > halo_z) {
+                                halo_z = z;
+                                halo = hx;
+                            }
                             tone += w * 0.05 * t;
                             weight += w * 0.05;
                         }
@@ -258,6 +270,8 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
     out.tone = tone / weight;
     out.pebble_l = pebble_l;
     out.rock_l = rock_l;
+    // Só escurece se vier de um grão mais alto do que o que ali se vê.
+    out.shadow = select(0.0, halo, halo_z > pebble_z);
     return out;
 }
 
@@ -351,6 +365,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     var tone = 0.5 * f32(g % 3u);
     var rock_tex = 1.0;
     var rubble_tex = 1.0;
+    var ground_shadow = 1.0;
     // De perto, o terreno em grãos (ver ground_at) em vez de células.
     let grains = 1.0 - smoothstep(GRAIN_PIXEL_FULL, GRAIN_PIXEL_NONE, pixel_cells);
     if (grains > 0.0) {
@@ -361,6 +376,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         // Relevo dos sprites (1 = sem textura): escurece os vales e aclara as arestas.
         if (gr.rock_l >= 0.0) { rock_tex = mix(1.0, 0.55 + 1.0 * pow(gr.rock_l, 0.8), grains); }
         if (gr.pebble_l >= 0.0) { rubble_tex = mix(1.0, 0.5 + 1.3 * pow(gr.pebble_l, 0.8), grains); }
+        ground_shadow = 1.0 - GRAIN_SHADOW * gr.shadow * grains;
     }
     let rock = (vec3<f32>(0.30, 0.27, 0.24) + 0.08 * tone) * rock_tex;
     // A rocha soma a luz que lhe CHEGA (a da célula de cima): a
@@ -369,7 +385,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     let light_up = light_view[ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV];
     let rock_col = rock + LIGHT_GOLD * sqrt(clamp(light_up, 0.0, 1.0));
     let rubble = vec3<f32>(0.22, 0.20, 0.18) * (0.75 + 0.3 * tone) * rubble_tex;
-    let back = mix(water, rubble, rubble_m);
+    let back = mix(water, rubble, rubble_m) * ground_shadow;
 
     // Normal: os ATIVADOS têm a média das cores dos seus canais (A vermelho,
     // U amarelo, G verde, C azul, pesada pelas contagens); os GASTOS são
