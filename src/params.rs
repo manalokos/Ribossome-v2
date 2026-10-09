@@ -911,7 +911,9 @@ gpu_struct! {
         /// de rocha se sobrepõem fica o mais ALTO naquele ponto, e não um
         /// sorteado (custa mais leituras; a vista normal não precisa).
         pub relief: u32,
-        pub _pad_v2: u32,
+        /// Fração de passo a somar à epoch no relógio do tremor das moléculas
+        /// (para ele continuar entre dois passos, em câmara lenta).
+        pub clock_frac: f32,
     }
 }
 

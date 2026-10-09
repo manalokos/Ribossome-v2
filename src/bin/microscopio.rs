@@ -19,7 +19,7 @@
 //!   --foto ficheiro.png [amostras]   sem janela: acumula e grava a imagem
 //! Rato: arrastar com o botão esquerdo roda a câmara, com o direito desloca a
 //! zona, a roda aproxima. Começa PARADO (a imagem converge e fica nítida);
-//! Espaço põe a simulação a correr e volta a parar. F/G fecham e abrem o
+//! Espaço põe a simulação a correr e volta a parar. G/H fecham e abrem o
 //! diafragma (profundidade de campo); Z/X alongam e encurtam a lente (longa =
 //! quase axonométrica; por omissão 135 mm); E/R clareiam e escurecem a
 //! exposição; C liga a cor (por omissão é a preto e branco); M esconde os
@@ -654,6 +654,128 @@ fn fs_present(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// MOVIMENTO INTERPOLADO (câmara lenta): guardam-se as posições dos agentes
+/// antes e depois do último passo da simulação, e em cada frame desenha-se um
+/// ponto intermédio (a posição e a rotação de cada agente e a pose de cada
+/// resíduo, em linha reta entre os dois). O estado verdadeiro é reposto antes
+/// do passo seguinte, por isso a simulação não dá por nada. Só os agentes:
+/// os monómeros, o terreno e a água mudam de passo em passo.
+const TWEEN_SHADER: &str = r#"
+struct A {
+    pos: vec2<f32>,
+    vel: vec2<f32>,
+    rot: f32,
+    energy: f32,
+    alive: u32,
+    gene_len: u32,
+    pair_count: u32,
+    body_len: u32,
+    generation: u32,
+    age: u32,
+    id: u32,
+    radius: f32,
+    parent: u32,
+    coding_span: u32,
+}
+@group(0) @binding(0) var<storage, read> a_prev: array<A>;
+@group(0) @binding(1) var<storage, read> a_cur: array<A>;
+@group(0) @binding(2) var<storage, read_write> a_live: array<A>;
+@group(0) @binding(3) var<storage, read> b_prev: array<vec2<f32>>;
+@group(0) @binding(4) var<storage, read> b_cur: array<vec2<f32>>;
+@group(0) @binding(5) var<storage, read_write> b_live: array<vec2<f32>>;
+@group(0) @binding(6) var<uniform> tw: vec4<f32>;
+
+@compute @workgroup_size(64)
+fn tween(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i < arrayLength(&a_cur)) {
+        let p = a_prev[i];
+        let c = a_cur[i];
+        var o = c;
+        // Só entre dois estados do MESMO agente (o slot pode ter mudado de
+        // dono, ou o corpo de tamanho) e sem saltos (a volta ao mundo).
+        let same = p.alive == 1u && c.alive == 1u && p.id == c.id && p.body_len == c.body_len && distance(p.pos, c.pos) < 200.0;
+        let t = select(1.0, tw.x, same);
+        if (c.alive == 1u) {
+            var dr = c.rot - p.rot;
+            dr = dr - 6.2831853 * round(dr / 6.2831853);
+            o.pos = mix(p.pos, c.pos, t);
+            o.rot = select(c.rot, p.rot + dr * t, same);
+            a_live[i] = o;
+            for (var k = 0u; k < min(c.body_len, 64u); k++) {
+                b_live[i * 64u + k] = mix(b_prev[i * 64u + k], b_cur[i * 64u + k], t);
+            }
+        }
+    }
+}
+"#;
+
+struct Tween {
+    pipeline: wgpu::ComputePipeline,
+    bind: wgpu::BindGroup,
+    uniform: wgpu::Buffer,
+    prev_agents: wgpu::Buffer,
+    prev_body: wgpu::Buffer,
+    cur_agents: wgpu::Buffer,
+    cur_body: wgpu::Buffer,
+    groups: u32,
+    /// Há dois estados guardados (e os buffers vivos têm um ponto intermédio).
+    have: bool,
+}
+
+impl Tween {
+    fn new(device: &wgpu::Device, world: &World) -> Self {
+        let copy = |label: &str, like: &wgpu::Buffer| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: like.size(),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            })
+        };
+        let prev_agents = copy("tween prev agents", &world.agents_buf);
+        let cur_agents = copy("tween cur agents", &world.agents_buf);
+        let prev_body = copy("tween prev body", &world.body_pos_buf);
+        let cur_body = copy("tween cur body", &world.body_pos_buf);
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tween t"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tween"), source: wgpu::ShaderSource::Wgsl(TWEEN_SHADER.into()) });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("tween"),
+            layout: None,
+            module: &module,
+            entry_point: Some("tween"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let entries: Vec<wgpu::BindGroupEntry> = [&prev_agents, &cur_agents, &world.agents_buf, &prev_body, &cur_body, &world.body_pos_buf, &uniform]
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() })
+            .collect();
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("tween"), layout: &pipeline.get_bind_group_layout(0), entries: &entries });
+        let groups = (world.agents_buf.size() / 64).div_ceil(64) as u32;
+        Self { pipeline, bind, uniform, prev_agents, prev_body, cur_agents, cur_body, groups, have: false }
+    }
+
+    fn copy(enc: &mut wgpu::CommandEncoder, src: &wgpu::Buffer, dst: &wgpu::Buffer) {
+        enc.copy_buffer_to_buffer(src, 0, dst, 0, Some(src.size()));
+    }
+
+    /// Repõe o estado verdadeiro (o do último passo) nos buffers vivos.
+    fn restore(&mut self, enc: &mut wgpu::CommandEncoder, world: &World) {
+        if self.have {
+            Self::copy(enc, &self.cur_agents, &world.agents_buf);
+            Self::copy(enc, &self.cur_body, &world.body_pos_buf);
+            self.have = false;
+        }
+    }
+}
+
 /// Câmara em órbita à volta do centro da zona.
 #[derive(Clone, Copy, PartialEq)]
 struct Orbit {
@@ -735,18 +857,29 @@ struct Scope {
     shutter: f32,
     last_frame: std::time::Instant,
     /// Estado para que as camadas foram desenhadas, e há quantos frames.
-    layer_key: Option<([f32; 2], f32, f32, u32, Option<u32>)>,
+    layer_key: Option<([f32; 2], f32, f32, u32, Option<u32>, u32)>,
     layer_age: u32,
+    /// MOVIMENTO SUAVE em câmara lenta: os agentes desenham-se num ponto
+    /// intermédio entre os dois últimos passos, e o tremor das moléculas
+    /// continua entre eles.
+    smooth_motion: bool,
+    tween: Tween,
     /// Câmara do último frame (olho, direita, cima, frente), para projetar
     /// pontos do mundo no ecrã.
     cam: [[f32; 3]; 4],
     /// MIRA: marca o agente mais perto do centro e diz quem é.
     reticle: bool,
+    /// SEGUIR: a câmara acompanha o agente da mira.
+    follow: bool,
+    /// A câmara mexeu-se só por estar a seguir: a imagem não recomeça do zero
+    /// (fica o arrasto do obturador, como numa fotografia a acompanhar).
+    soft_orbit: bool,
     subject: Option<Subject>,
 }
 
 /// O agente na mira.
 struct Subject {
+    id: u32,
     slot: u32,
     pos: [f32; 2],
     radius: f32,
@@ -1061,8 +1194,12 @@ impl Scope {
             last_frame: std::time::Instant::now(),
             layer_key: None,
             layer_age: 0,
+            smooth_motion: env("SMOOTH", 1.0) != 0.0,
+            tween: Tween::new(device, &world),
             cam: [[0.0; 3]; 4],
             reticle: env("RETICLE", 0.0) != 0.0,
+            follow: env("FOLLOW", 0.0) != 0.0,
+            soft_orbit: false,
             subject: None,
             last_step: std::time::Instant::now(),
             world,
@@ -1093,6 +1230,7 @@ impl Scope {
             let rs = self.world.params.require_start != 0;
             Subject {
                 slot: slot as u32,
+                id: a.id,
                 pos: [a.pos_x, a.pos_y],
                 radius: a.radius,
                 name: ribossome::names::organism_name_in(&genome, rs, &code),
@@ -1101,6 +1239,40 @@ impl Scope {
                 read_at: std::time::Instant::now(),
             }
         });
+    }
+
+    /// SEGUIR: lê a posição atual do agente da mira (só ele: 64 bytes) e leva
+    /// o centro da câmara para lá, aos poucos. Se morreu, deixa de seguir.
+    fn follow_step(&mut self, gpu: &Gpu) {
+        if !self.follow {
+            return;
+        }
+        if self.subject.is_none() {
+            self.find_subject(gpu);
+        }
+        let Some(sub) = self.subject.as_mut() else {
+            self.follow = false;
+            return;
+        };
+        let bytes = gpu.read_ranges_blocking(&self.world.agents_buf, &[(sub.slot as u64 * 64, 64)]);
+        if bytes.len() < 64 {
+            self.follow = false;
+            return;
+        }
+        let a: ribossome::params::Agent = bytemuck::pod_read_unaligned(&bytes[..64]);
+        if a.alive == 0 || a.id != sub.id {
+            self.follow = false;
+            return;
+        }
+        sub.pos = [a.pos_x, a.pos_y];
+        sub.detail = format!("gen {} · age {} · {} residues · {} bases · energy {:.1}", a.generation, a.age, a.body_len, a.gene_len, a.energy);
+        let c = &mut self.orbit.centre;
+        let (dx, dy) = (a.pos_x - c[0], a.pos_y - c[1]);
+        if dx.abs() + dy.abs() > 0.05 {
+            c[0] += dx * 0.2;
+            c[1] += dy * 0.2;
+            self.soft_orbit = !self.paused;
+        }
     }
 
     /// AUTOFOCO: põe o plano de focagem no que se vê no píxel `px` do ecrã
@@ -1140,7 +1312,9 @@ impl Scope {
         let o = self.orbit;
         let moving = !self.paused && self.steps > 0;
         if self.last_orbit != Some(o) {
-            self.samples = 0;
+            if !std::mem::take(&mut self.soft_orbit) {
+                self.samples = 0;
+            }
             self.last_orbit = Some(o);
         }
         // Parada, a média vai convergindo; a correr, pesa mais o presente (o
@@ -1171,7 +1345,11 @@ impl Scope {
         // parada nada as altera. Só se refazem quando mudam (e nos dois
         // primeiros frames de cada estado, para a lista de desenho assentar).
         let subject_slot = self.subject.as_ref().filter(|_| self.reticle).map(|s| s.slot);
-        let key = (o.centre, r, self.monomers, self.world.params.epoch + step_now as u32, subject_slot);
+        // (Com movimento suave em câmara lenta, as camadas mudam em todos os
+        // frames: o instante entre os dois passos faz parte do estado.)
+        let tweening = slow && self.smooth_motion;
+        let tween_t = if tweening { (self.last_step.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0) } else { 1.0 };
+        let key = (o.centre, r, self.monomers, self.world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
         if self.layer_key != Some(key) {
             self.layer_key = Some(key);
             self.layer_age = 0;
@@ -1210,10 +1388,40 @@ impl Scope {
             self.height_view.height_pass.set(1);
         }
         let mut enc = gpu.device.create_command_encoder(&Default::default());
+        // Sem movimento suave (ou parada, ou a toda a velocidade) os buffers
+        // vivos têm de ter o estado verdadeiro.
+        if !tweening {
+            self.tween.restore(&mut enc, &self.world);
+        }
         if step_now {
+            if tweening {
+                // Estado verdadeiro de volta, guarda-se como "antes", um passo,
+                // guarda-se como "depois".
+                self.tween.restore(&mut enc, &self.world);
+                Tween::copy(&mut enc, &self.world.agents_buf, &self.tween.prev_agents);
+                Tween::copy(&mut enc, &self.world.body_pos_buf, &self.tween.prev_body);
+            }
             // (Em câmara lenta, um passo de cada vez.)
             self.world.encode_steps(&gpu.queue, &mut enc, if slow { 1 } else { self.steps.min(ribossome::world::MAX_STEPS_PER_FRAME) });
+            if tweening {
+                Tween::copy(&mut enc, &self.world.agents_buf, &self.tween.cur_agents);
+                Tween::copy(&mut enc, &self.world.body_pos_buf, &self.tween.cur_body);
+                self.tween.have = true;
+            }
         }
+        let mut clock = (self.world.params.epoch, 0.0f32);
+        if tweening && self.tween.have {
+            // O ponto intermédio deste frame, entre o passo anterior e o último.
+            gpu.queue.write_buffer(&self.tween.uniform, 0, bytemuck::cast_slice(&[tween_t, 0.0, 0.0, 0.0f32]));
+            let mut pass = enc.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&self.tween.pipeline);
+            pass.set_bind_group(0, &self.tween.bind, &[]);
+            pass.dispatch_workgroups(self.tween.groups, 1, 1);
+            // O relógio do tremor das moléculas acompanha: passo anterior + fração.
+            clock = (self.world.params.epoch.wrapping_sub(1), tween_t);
+        }
+        self.cap.view.clock_frac.set(clock.1);
+        self.height_view.clock_frac.set(clock.1);
         if !cached {
         self.world.set_draw_rect(&gpu.queue, Some(([o.centre[0] - r, o.centre[1] - r], [o.centre[0] + r, o.centre[1] + r])));
         self.world.encode_draw_list(&mut enc);
@@ -1223,10 +1431,10 @@ impl Scope {
         self.height_view.coc_radius.set(MOLECULE_R);
         self.cap.view.relief_order.set(true);
         self.height_view.relief_order.set(true);
-        self.cap.view.epoch.set(self.world.params.epoch);
+        self.cap.view.epoch.set(clock.0);
         self.cap.view.ghost_steps.set(std::env::var("GHOSTS").ok().and_then(|v| v.parse().ok()).unwrap_or(60.0));
         self.cap.encode(&gpu.queue, &mut enc, &cam, 0, self.monomers);
-        self.height_view.epoch.set(self.world.params.epoch);
+        self.height_view.epoch.set(clock.0);
         self.height_view.ghost_steps.set(std::env::var("GHOSTS").ok().and_then(|v| v.parse().ok()).unwrap_or(60.0));
         // (Com monómeros: no passo dos volumes cada molécula é um grãozinho.)
         self.height_view.update(&gpu.queue, &cam, [TEX as f32; 2], 0, self.monomers, 0);
@@ -1509,8 +1717,8 @@ fn overlay(ctx: &egui::Context, screen: egui::Rect, s: &Scope, marker: Option<[f
                 let w = galleys.iter().map(|g| g.size().x).fold(0.0, f32::max);
                 let h: f32 = galleys.iter().map(|g| g.size().y + 2.0).sum();
                 let rect = egui::Rect::from_min_size(egui::pos2(top.x - 0.5 * w, top.y - h), egui::vec2(w, h)).expand2(egui::vec2(12.0, 7.0));
-                painter.rect_filled(rect.translate(egui::vec2(2.0, 3.0)).expand(1.0), 7.0, egui::Color32::from_black_alpha(70));
-                painter.rect_filled(rect, 6.0, egui::Color32::from_black_alpha(185));
+                painter.rect_filled(rect.translate(egui::vec2(2.0, 3.0)).expand(1.0), 7.0, egui::Color32::from_black_alpha(35));
+                painter.rect_filled(rect, 6.0, egui::Color32::from_black_alpha(77));
                 let mut y = top.y - h;
                 for g in galleys {
                     let size = g.size();
@@ -1572,6 +1780,10 @@ fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: Optio
                 s.monomers = if mono { 0.7 } else { 0.0 };
                 s.last_orbit = None;
             }
+            if ui.checkbox(&mut s.follow, "Follow").on_hover_text("the camera follows the agent nearest the centre (key F); moving the view by hand lets go").changed() && s.follow {
+                s.subject = None;
+            }
+            ui.checkbox(&mut s.smooth_motion, "Smooth").on_hover_text("in slow motion, draws the agents between two simulation steps instead of jumping from one to the next");
             if ui.checkbox(&mut s.reticle, "Reticle").on_hover_text("marks the agent nearest the centre and names it (key T)").changed() {
                 s.subject = None;
             }
@@ -1889,7 +2101,9 @@ impl Running {
         }
         // MIRA: procura-se de novo de vez em quando (o agente mexe-se, a câmara
         // também), nunca em todos os frames.
-        if self.scope.reticle && self.scope.subject.as_ref().is_none_or(|s| s.read_at.elapsed().as_secs_f32() > 1.0) {
+        // (A seguir, o agente é sempre o mesmo: não se procura outro.)
+        self.scope.follow_step(&self.gpu);
+        if !self.scope.follow && self.scope.reticle && self.scope.subject.as_ref().is_none_or(|s| s.read_at.elapsed().as_secs_f32() > 1.0) {
             self.scope.find_subject(&self.gpu);
         }
         let shot_view = self.shot_tex.as_ref().filter(|_| shooting).map(|t| t.create_view(&Default::default()));
@@ -1900,7 +2114,7 @@ impl Running {
         if self.scope.frame % 30 == 0 {
             let s = &self.scope;
             self.window.set_title(&format!(
-                "Ribossome: microscope   {} samples{}   {}   lens {:.0} mm   aperture {:.1}   exposure {:.2}   (click: focus, drag: orbit, right drag: move, wheel: zoom, space: run/pause, Tab: panel, Z/X: lens, F/G: aperture, E/R: exposure, C: colour, M: monomers, S: supersampling)",
+                "Ribossome: microscope   {} samples{}   {}   lens {:.0} mm   aperture {:.1}   exposure {:.2}   (click: focus, drag: orbit, right drag: move, wheel: zoom, space: run/pause, Tab: panel, Z/X: lens, G/H: aperture, E/R: exposure, F: follow, T: reticle, P: photo, V: video, C: colour, M: monomers, S: supersampling)",
                 s.samples,
                 if s.ss > 1 { " ×4 (supersampled)" } else { "" },
                 if s.paused || s.steps == 0 { "paused" } else { "running" },
@@ -1991,6 +2205,10 @@ impl Running {
                     o.yaw -= dx * 0.006;
                     o.pitch = (o.pitch + dy * 0.006).clamp(0.12, 1.55);
                 }
+                if self.panning && (dx != 0.0 || dy != 0.0) {
+                    // (Deslocar à mão larga o agente.)
+                    self.scope.follow = false;
+                }
                 if self.panning {
                     // Desloca a zona no plano do fundo, no referencial da câmara.
                     let k = o.dist / self.surface_cfg.height as f32;
@@ -2038,8 +2256,15 @@ impl Running {
                     self.scope.paused = !self.scope.paused;
                     self.scope.last_orbit = None;
                 }
-                Key::Character("f") => self.scope.orbit.aperture = (self.scope.orbit.aperture - 1.0).max(0.0),
-                Key::Character("g") => self.scope.orbit.aperture = (self.scope.orbit.aperture + 1.0).min(30.0),
+                // F: SEGUIR o agente mais perto do centro (outra vez: larga-o).
+                Key::Character("f") => {
+                    self.scope.follow = !self.scope.follow;
+                    if self.scope.follow {
+                        self.scope.find_subject(&self.gpu);
+                    }
+                }
+                Key::Character("g") => self.scope.orbit.aperture = (self.scope.orbit.aperture - 1.0).max(0.0),
+                Key::Character("h") => self.scope.orbit.aperture = (self.scope.orbit.aperture + 1.0).min(30.0),
                 Key::Character("c") => {
                     self.scope.colour = (self.scope.colour + 1) % 3;
                     self.scope.last_orbit = None;

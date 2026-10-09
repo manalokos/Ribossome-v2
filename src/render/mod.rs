@@ -62,6 +62,8 @@ pub struct WorldView {
     pub show_vents: std::cell::Cell<bool>,
     /// Desenhar a altura das peças em vez da cor (para o microscópio 3D).
     pub height_pass: std::cell::Cell<u32>,
+    /// Fração de passo no relógio do tremor das moléculas (0..1).
+    pub clock_frac: std::cell::Cell<f32>,
     draw_args: wgpu::Buffer,
     /// Slot a desenhar sozinho (u32::MAX = todos).
     pub focus: std::cell::Cell<u32>,
@@ -537,6 +539,7 @@ impl WorldView {
             ghost_steps: std::cell::Cell::new(0.0),
             show_vents: std::cell::Cell::new(false),
             height_pass: std::cell::Cell::new(0),
+            clock_frac: std::cell::Cell::new(0.0),
             draw_args: world.draw_args_buf.clone(),
             focus: std::cell::Cell::new(u32::MAX),
             uv_depth: std::cell::Cell::new(11.0),
@@ -597,7 +600,7 @@ impl WorldView {
             show_vents: self.show_vents.get() as u32,
             height_pass: self.height_pass.get(),
             relief: self.relief_order.get() as u32,
-            _pad_v2: 0,
+            clock_frac: self.clock_frac.get(),
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }

@@ -220,7 +220,7 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     let lo = vec2<i32>(floor(pc - vec2<f32>(r + 1.6 * MOL_JITTER)));
     let hi = vec2<i32>(floor(pc + vec2<f32>(r + 1.6 * MOL_JITTER)));
     // Relógio do tremor (passos da simulação: parada, as moléculas param).
-    let jt = f32(view.epoch % 1048576u) * MOL_JITTER_RATE;
+    let jt = (f32(view.epoch % 1048576u) + view.clock_frac) * MOL_JITTER_RATE;
     let jseg = u32(jt);
     let jf = jt - f32(jseg);
     let jmix = jf * jf * (3.0 - 2.0 * jf);
