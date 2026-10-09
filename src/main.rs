@@ -1830,14 +1830,21 @@ impl Running {
         // de MICRO_Z0 é só o mapa; daí até MICRO_Z1 o microscópio entra em
         // fundido, visto de cima como o mapa, e depois inclina-se e ganha a
         // profundidade de campo até à câmara escolhida no painel.
-        const MICRO_Z0: f32 = 0.6;
-        const MICRO_Z1: f32 = 3.2;
+        const MICRO_Z0: f32 = 0.3;
+        const MICRO_Z1: f32 = 1.8;
         let smooth = |a: f32, b: f32, x: f32| {
             let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
         };
         self.micro_t = if self.ui.microscope && !covered && vp[2] >= 32.0 && vp[3] >= 32.0 { smooth(MICRO_Z0.ln(), MICRO_Z1.ln(), self.cam.zoom.max(1e-6).ln()) } else { 0.0 };
         let micro = self.micro_t > 0.0;
+        // De volta ao mapa, a rotação que se tinha dado esquece-se: a próxima
+        // aproximação começa outra vez alinhada com ele.
+        if !micro {
+            if let Some(scope) = self.scope.as_mut() {
+                scope.orbit.yaw = 0.0;
+            }
+        }
         let map_visible = self.micro_t < 0.75;
         if micro {
             use ribossome::microscope::{REF_TAN, REGION_PER_DIST, Scope};
