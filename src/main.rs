@@ -1840,7 +1840,9 @@ impl Running {
         let micro = self.micro_t > 0.0;
         // De volta ao mapa, a rotação que se tinha dado esquece-se: a próxima
         // aproximação começa outra vez alinhada com ele.
-        if !micro {
+        // (Logo que a vista volta a estar a direito, a meio do fundido: não é
+        // preciso afastar até ao mapa puro.)
+        if self.micro_t <= 0.5 {
             if let Some(scope) = self.scope.as_mut() {
                 scope.orbit.yaw = 0.0;
             }

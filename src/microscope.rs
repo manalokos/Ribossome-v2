@@ -78,6 +78,10 @@ struct U {
 // ...e o mesmo volume do mundo já ALISADO nos degraus (ver fs_smooth): é
 // deste que os raios leem.
 @group(0) @binding(12) var world_smooth: texture_2d<f32>;
+// TETO grosseiro (fs_top): em cada bloco da zona, uma cota acima de tudo o
+// que lá há. Os raios só fazem as leituras caras quando descem abaixo dela;
+// a maior parte do caminho é ar vazio.
+@group(0) @binding(13) var top_tex: texture_2d<f32>;
 @group(0) @binding(8) var world_color: texture_2d<f32>;
 // SEGUNDA CAMADA DE AGENTES: onde duas peças se sobrepõem, a de cima fica em
 // vol_tex e a de baixo aqui (com a sua cor). Sem ela a peça de baixo perdia o
@@ -134,6 +138,47 @@ fn region_uv(xy: vec2<f32>) -> vec2<f32> {
 
 // CHÃO: o terreno desfocado. Onde há rocha ou entulho o chão sobe, num monte
 // suave onde as pedras e os bichos assentam (em vez de um degrau a pique).
+const TOPS: f32 = 256.0;
+fn ceiling_at(xy: vec2<f32>) -> f32 {
+    let uv = region_uv(xy);
+    // (Fora da zona só há chão, mas fica a cargo do teste completo.)
+    if (any(uv < vec2<f32>(0.0)) || any(uv >= vec2<f32>(1.0))) { return 1e6; }
+    return textureLoad(top_tex, vec2<i32>(uv * TOPS), 0).r;
+}
+
+@fragment
+fn fs_top(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let dim = vec2<i32>(textureDimensions(vol_tex));
+    let k = dim.x / i32(TOPS);
+    let base = vec2<i32>(pos.xy) * k;
+    var agents = 0.0;
+    var stones = 0.0;
+    var mols = 0.0;
+    // (O bloco e dois texels à volta: a superfície final é interpolada.)
+    for (var j = -2; j < k + 2; j++) {
+        for (var i = -2; i < k + 2; i++) {
+            let c = clamp(base + vec2<i32>(i, j), vec2<i32>(0), dim - 1);
+            agents = max(agents, max(textureLoad(vol_tex, c, 0).r, textureLoad(low_vol, c, 0).r));
+            let w = textureLoad(world_smooth, c, 0);
+            stones = max(stones, w.r);
+            mols = max(mols, w.b);
+        }
+    }
+    // O chão e os apoios variam devagar: o maior nos cantos e no meio do bloco.
+    var g = 0.0;
+    var support = 0.0;
+    var base_a = 0.0;
+    for (var q = 0; q < 5; q++) {
+        let o = select(vec2<f32>(f32(q & 1), f32(q >> 1)) * 1.4 - 0.2, vec2<f32>(0.5), q == 4);
+        let t = textureSampleLevel(ground_tex, samp, (floor(pos.xy) + o) / TOPS, 0.0);
+        g = max(g, GROUND_H * t.r * t.r * (3.0 - 2.0 * t.r));
+        support = max(support, t.g);
+        base_a = max(base_a, GROUND_H * t.a * t.a * (3.0 - 2.0 * t.a) + t.b);
+    }
+    let top = max(max(g + stones, g + max(support, stones) + mols), select(0.0, base_a + agents, agents > 0.0));
+    return vec4<f32>(top * u.lens.w + 3.0, 0.0, 0.0, 1.0);
+}
+
 @fragment
 fn fs_ground(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = pos.xy / u.opts.y;
@@ -473,7 +518,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             // O teste barato (texel a texel) só conta se o interpolado, que é
             // o que dá a superfície final, concordar: senão ficavam pontinhos
             // fixos nas bordas das peças, que a acumulação não limpava.
-            if (solid(p, surf(p.xy)) && solid(p, surf_smooth(p.xy))) { break; }
+            if (p.z <= ceiling_at(p.xy) && solid(p, surf(p.xy)) && solid(p, surf_smooth(p.xy))) { break; }
             prev_t = t;
             t += dt;
         }
@@ -521,7 +566,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             let cell = floor(p.xy / 13.0);
             let hs = hash3(vec3<u32>(vec2<u32>(vec2<i32>(cell) + vec2<i32>(32768)), 17u));
             let speck = step(0.8, hs.z) * (1.0 - smoothstep(0.2, 1.0, length(p.xy / 13.0 - cell - 0.1 - 0.8 * hs.xy) * (5.0 + 6.0 * hs.x)));
-            albedo = max(albedo, vec3<f32>(0.3 + 0.07 * grain + 0.2 * speck));
+            albedo = max(albedo, vec3<f32>(0.12 + 0.05 * grain + 0.2 * speck));
             albedo = max(albedo, vec3<f32>(0.36, 0.35, 0.34) * smoothstep(0.5, 6.0, s.g));
         } else {
             // A peça é a mesma forma para cima e para baixo do seu meio: onde
@@ -855,6 +900,9 @@ pub struct Scope {
     pub ground: wgpu::RenderPipeline,
     /// O volume do mundo com os degraus alisados (fs_smooth).
     pub world_smooth_tex: wgpu::Texture,
+    /// Teto grosseiro da zona, para os raios saltarem o ar vazio (fs_top).
+    pub top_tex: wgpu::Texture,
+    pub top: wgpu::RenderPipeline,
     pub smooth_a: wgpu::Texture,
     pub smooth_b: wgpu::Texture,
     pub smooth: [wgpu::RenderPipeline; 3],
@@ -1106,6 +1154,7 @@ impl Scope {
                 tex_entry(10),
                 tex_entry(11),
                 tex_entry(12),
+                tex_entry(13),
                 wgpu::BindGroupLayoutEntry {
                     binding: 9,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -1214,6 +1263,8 @@ impl Scope {
             ground_tex: float_target(device, GROUND),
             ground: pipeline("fs_ground", HEIGHT_FORMAT),
             world_smooth_tex: float_target(device, TEX),
+            top_tex: float_target(device, 256),
+            top: pipeline("fs_top", HEIGHT_FORMAT),
             smooth_a: float_target(device, TEX),
             smooth_b: float_target(device, TEX),
             smooth: [pipeline("fs_edge", HEIGHT_FORMAT), pipeline("fs_blur_h", HEIGHT_FORMAT), pipeline("fs_blur_v", HEIGHT_FORMAT)],
@@ -1700,7 +1751,8 @@ impl Scope {
         let subject_colour = self.subject_tex.create_view(&Default::default());
         let ground = self.ground_tex.create_view(&Default::default());
         let world_smooth = self.world_smooth_tex.create_view(&Default::default());
-        let bind = |volume: &wgpu::TextureView, prev: &wgpu::TextureView, floor: &wgpu::TextureView, smooth: &wgpu::TextureView| {
+        let top_view = self.top_tex.create_view(&Default::default());
+        let bind = |volume: &wgpu::TextureView, prev: &wgpu::TextureView, floor: &wgpu::TextureView, smooth: &wgpu::TextureView, top: &wgpu::TextureView| {
             gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("scope"),
                 layout: &self.layout,
@@ -1718,6 +1770,7 @@ impl Scope {
                     wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&low_colour) },
                     wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&subject_colour) },
                     wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(smooth) },
+                    wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(top) },
                 ],
             })
         };
@@ -1744,20 +1797,21 @@ impl Scope {
         // O chão desfocado (lê "quanto terreno há"), a amostra do traçado de
         // raios e a imagem final.
         if !cached {
-        pass_to(enc, &ground, &self.ground, &bind(&pres, &prev_view, &pres, &pres));
+        pass_to(enc, &ground, &self.ground, &bind(&pres, &prev_view, &pres, &pres, &pres));
         // (Os passos que escrevem numa textura não a podem ler: leem outra.)
         let smooth_a = self.smooth_a.create_view(&Default::default());
         let smooth_b = self.smooth_b.create_view(&Default::default());
-        pass_to(enc, &smooth_a, &self.smooth[0], &bind(&height, &prev_view, &ground, &pres));
-        pass_to(enc, &smooth_b, &self.smooth[1], &bind(&height, &prev_view, &ground, &smooth_a));
-        pass_to(enc, &world_smooth, &self.smooth[2], &bind(&height, &prev_view, &ground, &smooth_b));
+        pass_to(enc, &smooth_a, &self.smooth[0], &bind(&height, &prev_view, &ground, &pres, &pres));
+        pass_to(enc, &smooth_b, &self.smooth[1], &bind(&height, &prev_view, &ground, &smooth_a, &pres));
+        pass_to(enc, &world_smooth, &self.smooth[2], &bind(&height, &prev_view, &ground, &smooth_b, &pres));
+        pass_to(enc, &top_view, &self.top, &bind(&height, &prev_view, &ground, &world_smooth, &pres));
         }
-        pass_to(enc, &next_view, &self.march, &bind(&height, &prev_view, &ground, &world_smooth));
+        pass_to(enc, &next_view, &self.march, &bind(&height, &prev_view, &ground, &world_smooth, &top_view));
         match embed {
-            None => pass_to(enc, target, &self.present, &bind(&height, &next_view, &ground, &world_smooth)),
+            None => pass_to(enc, target, &self.present, &bind(&height, &next_view, &ground, &world_smooth, &top_view)),
             Some((vp, _)) => {
                 // Só o retângulo da vista, por cima do que a aplicação já desenhou.
-                let bg = bind(&height, &next_view, &ground, &world_smooth);
+                let bg = bind(&height, &next_view, &ground, &world_smooth, &top_view);
                 let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("scope view"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1803,7 +1857,7 @@ impl Scope {
         }
         // (A mesma imagem para a fotografia / o vídeo, sem a interface.)
         if let Some(copy) = copy {
-            pass_to(enc, copy, &self.present, &bind(&height, &next_view, &ground, &world_smooth));
+            pass_to(enc, copy, &self.present, &bind(&height, &next_view, &ground, &world_smooth, &top_view));
         }
     }
 }
