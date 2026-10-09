@@ -265,6 +265,7 @@ fn ghost_record(slot: u32, a: Agent) {
     atomicStore(&ghosts[g + 3u], params.epoch);
     atomicStore(&ghosts[g + 4u], a.body_len);
     atomicStore(&ghosts[g + 5u], a.id);
+    atomicStore(&ghosts[g + 6u], bitcast<u32>(tint_out[slot]));
     for (var i = 0u; i < 16u; i++) { atomicStore(&ghosts[g + 8u + i], bodies[slot * 16u + i]); }
     for (var i = 0u; i < 32u; i++) { atomicStore(&ghosts[g + 24u + i], organs[slot * 32u + i]); }
     for (var k = 0u; k < MAX_BODY; k++) {

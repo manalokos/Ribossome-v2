@@ -182,6 +182,10 @@ fn dot_pos(cell: u32, kind: u32, k: u32) -> vec2<f32> {
 struct Soup {
     act: vec4<f32>,
     spent: vec4<f32>,
+    // Relevo das moléculas que cobrem o ponto: soma da luminância dos
+    // sprites e quantos são (a média dá o sombreado, à parte da quantidade).
+    lum: f32,
+    cover: f32,
 }
 
 // Densidade de monómeros (por célula de área) no ponto pc (em células),
@@ -190,6 +194,8 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     var s: Soup;
     s.act = vec4<f32>(0.0);
     s.spent = vec4<f32>(0.0);
+    s.lum = 0.0;
+    s.cover = 0.0;
     let r = clamp(radius, 0.05, 1.0);
     // Núcleo GAUSSIANO, σ = r / DOT_SIGMAS, cortado em r e descido para
     // acabar em zero aí (sem degrau na borda). O integral sobre o disco é
@@ -226,7 +232,13 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                                 let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
                                 let g = px / r;
                                 let t = textureSampleGrad(sprites_tex, sprites_samp, vec2<f32>((f32(ch) + 0.5) / SPRITE_COLS, (SPRITE_ROW_MONOMER + f32(st) + 0.5) / SPRITE_ROWS) + clamp(q, vec2<f32>(-0.98), vec2<f32>(0.98)) * sc, vec2<f32>(g, 0.0) * sc, vec2<f32>(0.0, g) * sc);
-                                sum += step(0.5, t.g) * (0.3 + 0.9 * t.r);
+                                // A quantidade conta a máscara inteira; o relevo
+                                // (t.r) vai à parte, para não se perder quando a
+                                // cor satura.
+                                let cov = step(0.5, t.g);
+                                sum += cov;
+                                s.lum += cov * t.r;
+                                s.cover += cov;
                             }
                         }
                         let dens = sum * f32(count) / f32(max(shown, 1u));
@@ -372,10 +384,18 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     // de um píxel em células.
     let pixel_cells = 1.0 / (view.zoom * f32(WORLD_UNITS_PER_CELL));
     let dots = (1.0 - smoothstep(DOTS_PIXEL_FULL, DOTS_PIXEL_NONE, pixel_cells)) * step(1e-4, view.coc_radius);
+    var mol_relief = 1.0;
+    var mol_edge = 0.0;
     if (dots > 0.0 && view.view_mode <= 5u) {
         let soup = soup_at(world / f32(WORLD_UNITS_PER_CELL), view.coc_radius, pixel_cells);
         act = mix(act, soup.act, dots);
         spent = mix(spent, soup.spent, dots);
+        // RELEVO das moléculas: escurece os vales e aclara as arestas.
+        if (soup.cover > 0.0) {
+            let l = pow(clamp(soup.lum / soup.cover, 0.0, 1.0), 0.8);
+            mol_relief = mix(1.0, 0.15 + 1.6 * l, dots);
+            mol_edge = dots * pow(l, 4.0) * 0.5;
+        }
     }
     // LUZ como SOMA DOURADA: onde chega luz soma-se um brilho dourado; a
     // sombra (do terreno e dos agentes) é a falta dele. Não multiplica nada,
@@ -477,7 +497,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     let hue = mix(MONOMER_SPENT_COLOR, act_col, act_frac);
     let inten = pow(clamp(total_amt, 0.0, 1.0), MONOMER_GAMMA);
     // A noite vê-se só na camada da luz (glow), que já vem escura do topo.
-    var c = mix(back, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
+    var c = mix(back, clamp(hue * mol_relief + vec3<f32>(mol_edge), vec3<f32>(0.0), vec3<f32>(1.0)), clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
     c = mix(c, rock_col, rock_m);
     if (view.show_vents != 0u) {
         // FUMAROLAS À VISTA (ao pintar): calor a laranja, química a

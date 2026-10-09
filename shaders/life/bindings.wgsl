@@ -89,6 +89,9 @@ const GHOST_HEAD: u32 = 16u;
 // veem: não se guarda nada.
 const GHOST_VIEW_MAX: f32 = 12000.0;
 @group(3) @binding(34) var<storage, read_write> ghosts: array<atomic<u32>>;
+// TOM DA ESPÉCIE (só para o desenho): um ângulo de cor por agente, tirado da
+// composição do genoma (ver species_hue em drawlist.wgsl).
+@group(3) @binding(35) var<storage, read_write> tint_out: array<f32>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

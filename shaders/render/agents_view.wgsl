@@ -174,11 +174,20 @@ fn energy_tone(a: Agent) -> f32 {
     return mix(0.65, 1.0, clamp(e, 0.0, 1.0)) + 0.25 * clamp((e - 1.0) / 3.0, 0.0, 1.0);
 }
 
-// Cor de um TROÇO do corpo de perto: a da classe do aminoácido, mas puxada
-// para um tom comum (AMINO_MUTE), para as cores dos órgãos sobressaírem.
-const AMINO_MUTE: f32 = 0.6;
-fn amino_color(aa: u32) -> vec3<f32> {
-    return mix(class_color(aa), vec3<f32>(0.74, 0.72, 0.66), AMINO_MUTE);
+// TOM DA ESPÉCIE: cada agente tem um ângulo de cor tirado do seu genoma
+// (species_hue em drawlist.wgsl; o mesmo para as duas formas da linhagem e
+// quase igual entre parentes próximos). Aqui passa a uma cor suave.
+@group(0) @binding(18) var<storage, read> tint_view: array<f32>;
+fn hue_color(h: f32) -> vec3<f32> {
+    let k = vec3<f32>(0.0, 2.0943951, 4.1887902);
+    return vec3<f32>(0.70) + 0.26 * cos(vec3<f32>(h) - k);
+}
+// Cor de um TROÇO do corpo: a da classe do aminoácido puxada (AMINO_MUTE)
+// para o tom da espécie, para as cores dos órgãos sobressaírem e cada
+// espécie ter a sua cor.
+const AMINO_MUTE: f32 = 0.65;
+fn amino_color(aa: u32, hue: f32) -> vec3<f32> {
+    return mix(class_color(aa), hue_color(hue), AMINO_MUTE);
 }
 
 fn class_color(aa: u32) -> vec3<f32> {
@@ -237,11 +246,12 @@ fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
 // Cor (rgb) e peso (a) do resíduo q nos níveis de detalhe 1 e 2.
 fn lod_residue_color(slot: u32, q: u32) -> vec4<f32> {
     let aa = (bodies_view[slot * 16u + q / 4u] >> ((q % 4u) * 8u)) & 0xFFu;
-    var col = class_color(aa);
+    // (De longe também: os troços sem órgão levam o tom da espécie.)
+    var col = amino_color(aa, tint_view[slot]);
     var wgt = 1.0;
     let oc = (organs_view[slot * 32u + q / 2u] >> ((q % 2u) * 16u)) & 0xFFFFu;
     if (oc != 0u) {
-        col = organ_lod_color((oc & 0x1Fu) - 1u, oc, col);
+        col = organ_lod_color((oc & 0x1Fu) - 1u, oc, class_color(aa));
         wgt = LOD_ORGAN_WEIGHT;
     }
     // Nas vistas de sinais a cor é o sinal do resíduo (sem reforço).
@@ -407,7 +417,7 @@ fn vs_ghost(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         o.core_phase = vec2<f32>(r_tube, 0.0);
         o.organ = organ;
         o.sprite = select(0u, 0x100u | aa, organ != ORGAN_LINKER);
-        o.color = amino_color(aa) * tone;
+        o.color = amino_color(aa, ghost_f(g + 6u)) * tone;
     } else {
         var phase = 0.0;
         if (organ == ORGAN_PROTEASE) { phase = 8.99; }
@@ -589,7 +599,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
         r_world = TUBE_FAT * (0.9 + 3.0 * pow(aa_props_view[aa].volume / 130.0, 1.4));
         col = class_color(aa);
         // (O tubo, na vista química, leva a cor esbatida; o órgão troca-a mais abaixo.)
-        if (!glyph && (view.signal_view == 0u || view.signal_view == 4u)) { col = amino_color(aa); }
+        if (!glyph && (view.signal_view == 0u || view.signal_view == 4u)) { col = amino_color(aa, tint_view[slot]); }
         sprite_col = aa;
         let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
         if (oc != 0u) {

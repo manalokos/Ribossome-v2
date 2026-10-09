@@ -423,6 +423,7 @@ impl WorldView {
                 vertex_storage(13),
                 vertex_storage(16),
                 vertex_storage(17),
+                vertex_storage(18),
                 wgpu::BindGroupLayoutEntry {
                     binding: 14,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -463,6 +464,7 @@ impl WorldView {
                 wgpu::BindGroupEntry { binding: 15, resource: wgpu::BindingResource::Sampler(&sprites_sampler) },
                 wgpu::BindGroupEntry { binding: 16, resource: world.ghosts_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 17, resource: world.velocity_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 18, resource: world.tint_buf.as_entire_binding() },
             ],
         });
         let agents_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
