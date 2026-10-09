@@ -528,6 +528,128 @@ fn fs_present(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// MOVIMENTO INTERPOLADO (câmara lenta): guardam-se as posições dos agentes
+/// antes e depois do último passo da simulação, e em cada frame desenha-se um
+/// ponto intermédio (a posição e a rotação de cada agente e a pose de cada
+/// resíduo, em linha reta entre os dois). O estado verdadeiro é reposto antes
+/// do passo seguinte, por isso a simulação não dá por nada. Só os agentes:
+/// os monómeros, o terreno e a água mudam de passo em passo.
+const TWEEN_SHADER: &str = r#"
+struct A {
+    pos: vec2<f32>,
+    vel: vec2<f32>,
+    rot: f32,
+    energy: f32,
+    alive: u32,
+    gene_len: u32,
+    pair_count: u32,
+    body_len: u32,
+    generation: u32,
+    age: u32,
+    id: u32,
+    radius: f32,
+    parent: u32,
+    coding_span: u32,
+}
+@group(0) @binding(0) var<storage, read> a_prev: array<A>;
+@group(0) @binding(1) var<storage, read> a_cur: array<A>;
+@group(0) @binding(2) var<storage, read_write> a_live: array<A>;
+@group(0) @binding(3) var<storage, read> b_prev: array<vec2<f32>>;
+@group(0) @binding(4) var<storage, read> b_cur: array<vec2<f32>>;
+@group(0) @binding(5) var<storage, read_write> b_live: array<vec2<f32>>;
+@group(0) @binding(6) var<uniform> tw: vec4<f32>;
+
+@compute @workgroup_size(64)
+fn tween(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i < arrayLength(&a_cur)) {
+        let p = a_prev[i];
+        let c = a_cur[i];
+        var o = c;
+        // Só entre dois estados do MESMO agente (o slot pode ter mudado de
+        // dono, ou o corpo de tamanho) e sem saltos (a volta ao mundo).
+        let same = p.alive == 1u && c.alive == 1u && p.id == c.id && p.body_len == c.body_len && distance(p.pos, c.pos) < 200.0;
+        let t = select(1.0, tw.x, same);
+        if (c.alive == 1u) {
+            var dr = c.rot - p.rot;
+            dr = dr - 6.2831853 * round(dr / 6.2831853);
+            o.pos = mix(p.pos, c.pos, t);
+            o.rot = select(c.rot, p.rot + dr * t, same);
+            a_live[i] = o;
+            for (var k = 0u; k < min(c.body_len, 64u); k++) {
+                b_live[i * 64u + k] = mix(b_prev[i * 64u + k], b_cur[i * 64u + k], t);
+            }
+        }
+    }
+}
+"#;
+
+struct Tween {
+    pipeline: wgpu::ComputePipeline,
+    bind: wgpu::BindGroup,
+    uniform: wgpu::Buffer,
+    prev_agents: wgpu::Buffer,
+    prev_body: wgpu::Buffer,
+    cur_agents: wgpu::Buffer,
+    cur_body: wgpu::Buffer,
+    groups: u32,
+    /// Há dois estados guardados (e os buffers vivos têm um ponto intermédio).
+    have: bool,
+}
+
+impl Tween {
+    fn new(device: &wgpu::Device, world: &World) -> Self {
+        let copy = |label: &str, like: &wgpu::Buffer| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: like.size(),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            })
+        };
+        let prev_agents = copy("tween prev agents", &world.agents_buf);
+        let cur_agents = copy("tween cur agents", &world.agents_buf);
+        let prev_body = copy("tween prev body", &world.body_pos_buf);
+        let cur_body = copy("tween cur body", &world.body_pos_buf);
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tween t"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tween"), source: wgpu::ShaderSource::Wgsl(TWEEN_SHADER.into()) });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("tween"),
+            layout: None,
+            module: &module,
+            entry_point: Some("tween"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let entries: Vec<wgpu::BindGroupEntry> = [&prev_agents, &cur_agents, &world.agents_buf, &prev_body, &cur_body, &world.body_pos_buf, &uniform]
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() })
+            .collect();
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("tween"), layout: &pipeline.get_bind_group_layout(0), entries: &entries });
+        let groups = (world.agents_buf.size() / 64).div_ceil(64) as u32;
+        Self { pipeline, bind, uniform, prev_agents, prev_body, cur_agents, cur_body, groups, have: false }
+    }
+
+    fn copy(enc: &mut wgpu::CommandEncoder, src: &wgpu::Buffer, dst: &wgpu::Buffer) {
+        enc.copy_buffer_to_buffer(src, 0, dst, 0, Some(src.size()));
+    }
+
+    /// Repõe o estado verdadeiro (o do último passo) nos buffers vivos.
+    fn restore(&mut self, enc: &mut wgpu::CommandEncoder, world: &World) {
+        if self.have {
+            Self::copy(enc, &self.cur_agents, &world.agents_buf);
+            Self::copy(enc, &self.cur_body, &world.body_pos_buf);
+            self.have = false;
+        }
+    }
+}
+
 /// Câmara em órbita à volta do centro da zona.
 #[derive(Clone, Copy, PartialEq)]
 struct Orbit {
@@ -594,6 +716,7 @@ struct Scope {
     /// acumular amostras, por isso fica limpa mesmo com a cena a mexer.
     rate: f32,
     last_step: std::time::Instant,
+    tween: Tween,
 }
 
 /// Alvo de várias amostras de onde também se lê (uma amostra de cada vez).
@@ -872,12 +995,13 @@ impl Scope {
             frame: 0,
             steps: env("STEPS", 2.0) as u32,
             // Começa PARADO: é assim que a imagem converge e se vê bem.
-            paused: true,
+            paused: env("RUN", 0.0) == 0.0,
             colour: env("COLOR", 0.0) as u32,
             monomers: env("MONOMERS", 0.7),
             ss: 1,
             exposure: env("EXPOSURE", 1.0),
             rate: env("RATE", 2.0),
+            tween: Tween::new(device, &world),
             last_step: std::time::Instant::now(),
             world,
         }
@@ -940,9 +1064,10 @@ impl Scope {
         let step_now = moving && (!slow || self.last_step.elapsed().as_secs_f32() >= 1.0 / self.rate);
         if slow && step_now {
             self.last_step = std::time::Instant::now();
-            self.samples = self.samples.min(3);
         }
-        let weight = if moving && !slow { (1.0 / (self.samples + 1) as f32).max(0.12) } else { 1.0 / (self.samples + 1) as f32 };
+        // A correr (devagar ou não) a imagem muda em todos os frames: pesa
+        // mais o presente, e o que se mexe deixa um rasto curto.
+        let weight = if moving { (1.0 / (self.samples + 1) as f32).max(if slow { 0.08 } else { 0.12 }) } else { 1.0 / (self.samples + 1) as f32 };
         self.samples += 1;
         self.frame += 1;
 
@@ -978,9 +1103,35 @@ impl Scope {
             self.height_view.height_pass.set(1);
         }
         let mut enc = gpu.device.create_command_encoder(&Default::default());
+        // Fora da câmara lenta (ou parada) os buffers vivos têm de ter o
+        // estado verdadeiro.
+        if !slow {
+            self.tween.restore(&mut enc, &self.world);
+        }
         if step_now {
+            if slow {
+                // Estado verdadeiro de volta, guarda-se como "antes", um passo,
+                // guarda-se como "depois".
+                self.tween.restore(&mut enc, &self.world);
+                Tween::copy(&mut enc, &self.world.agents_buf, &self.tween.prev_agents);
+                Tween::copy(&mut enc, &self.world.body_pos_buf, &self.tween.prev_body);
+            }
             // (Em câmara lenta, um passo de cada vez.)
             self.world.encode_steps(&gpu.queue, &mut enc, if slow { 1 } else { self.steps.min(ribossome::world::MAX_STEPS_PER_FRAME) });
+            if slow {
+                Tween::copy(&mut enc, &self.world.agents_buf, &self.tween.cur_agents);
+                Tween::copy(&mut enc, &self.world.body_pos_buf, &self.tween.cur_body);
+                self.tween.have = true;
+            }
+        }
+        if slow && self.tween.have {
+            // O ponto intermédio deste frame, entre o passo anterior e o último.
+            let t = (self.last_step.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0);
+            gpu.queue.write_buffer(&self.tween.uniform, 0, bytemuck::cast_slice(&[t, 0.0, 0.0, 0.0f32]));
+            let mut pass = enc.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&self.tween.pipeline);
+            pass.set_bind_group(0, &self.tween.bind, &[]);
+            pass.dispatch_workgroups(self.tween.groups, 1, 1);
         }
         self.world.set_draw_rect(&gpu.queue, Some(([o.centre[0] - r, o.centre[1] - r], [o.centre[0] + r, o.centre[1] + r])));
         self.world.encode_draw_list(&mut enc);
