@@ -886,7 +886,7 @@ impl World {
             variant_buf,
             heat_image: None,
             chem_image: None,
-            fumarole_gain: 1.0,
+            fumarole_gain: FUMAROLE_GAIN_DEFAULT,
             heat_key: Vec::new(),
             fluid_was_on: true,
             snap: snapshot::snap_buffers(device, p_a, joint_angle, joint_base, joint_active, sensor_mem, bitten),
@@ -899,7 +899,7 @@ impl World {
         self.params = SimParams { seed: self.params.seed, ..Default::default() };
         self.settings = WorldSettings::default();
         self.fumaroles = vec![Fumarole::v3_default()];
-        self.fumarole_gain = 1.0;
+        self.fumarole_gain = FUMAROLE_GAIN_DEFAULT;
         self.seed_density = SEED_DENSITY_DEFAULT;
         self.seed_active = SEED_ACTIVE_DEFAULT;
         self.custom_terrain = None;
@@ -1886,9 +1886,12 @@ fn fit_matter_to_terrain(cells: &mut [u32], gamma: &[u32], seed: u64) {
     }
 }
 
-/// Densidade semeada por omissão (≈ 8 monómeros por célula de água).
-pub const SEED_DENSITY_DEFAULT: f32 = 0.4;
-pub const SEED_ACTIVE_DEFAULT: f32 = 0.5;
+/// Densidade semeada por omissão (≈ 17 monómeros por célula de água) e
+/// fração que começa ativada.
+pub const SEED_DENSITY_DEFAULT: f32 = 0.83;
+pub const SEED_ACTIVE_DEFAULT: f32 = 1.0;
+/// Força das fumarolas por omissão (o multiplicador do separador World).
+pub const FUMAROLE_GAIN_DEFAULT: f32 = 0.3;
 
 fn seed_cells(cfg: &WorldConfig, seed: u64, density: f32, active: f32) -> Vec<u32> {
     let n = cfg.grid_size as usize;

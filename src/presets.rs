@@ -53,7 +53,7 @@ impl Default for Preset {
             description: String::new(),
             fluid: true,
             terrain: PresetTerrain::Default,
-            fumarole_gain: 1.0,
+            fumarole_gain: crate::world::FUMAROLE_GAIN_DEFAULT,
             params: BTreeMap::new(),
             seeds: 2000,
             seed_len: [12, 120],
