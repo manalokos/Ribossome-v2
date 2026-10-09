@@ -75,6 +75,15 @@ fn sprite(row: f32, col: f32, q: vec2<f32>, qx: vec2<f32>, qy: vec2<f32>) -> vec
     let inside = step(max(abs(q.x), abs(q.y)), 0.995);
     return vec2<f32>(s.r, s.g * inside);
 }
+// Máscara DESFOCADA do mosaico (um nível baixo do mipmap, escolhido à mão):
+// serve de sombra de contacto com a forma do sprite.
+const SPRITE_SOFT_LEVEL: f32 = 3.4;
+fn sprite_soft(row: f32, col: f32, q: vec2<f32>) -> f32 {
+    let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
+    let qc = clamp(q, vec2<f32>(-0.94), vec2<f32>(0.94));
+    let far = max(abs(q.x), abs(q.y));
+    return textureSampleLevel(sprites_tex, sprites_samp, vec2<f32>((col + 0.5) / SPRITE_COLS, (row + 0.5) / SPRITE_ROWS) + qc * sc, SPRITE_SOFT_LEVEL).g * (1.0 - smoothstep(0.94, 1.15, far));
+}
 // Cinzento do microscópio pintado com a cor do órgão, com as arestas claras.
 fn sem_color(tint: vec3<f32>, lum: f32) -> vec3<f32> {
     let l = pow(clamp(lum, 0.0, 1.0), 0.7);
@@ -133,7 +142,7 @@ const LOD_ORGAN_THICK: f32 = 2.2;
 const KIN_DOT_PX: f32 = 5.0;
 const NO_ORGAN: u32 = 0xFFu;
 // Tamanho de um órgão em relação a um resíduo estrutural.
-const ORGAN_SCALE: f32 = 1.47;
+const ORGAN_SCALE: f32 = 1.15;
 const TUBE_FAT: f32 = 1.5;
 
 struct AgentVsOut {
@@ -1011,9 +1020,11 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             let aa = in.sprite & 0xFFu;
             let s = sprite(SPRITE_ROW_AMINO + f32(aa / SPRITE_COLS_U), f32(aa % SPRITE_COLS_U), q, vec2<f32>(dot(tdx, e), dot(tdx, nn)) * sc, vec2<f32>(dot(tdy, e), dot(tdy, nn)) * sc);
             if (s.y >= 0.5) { return vec4<f32>(sem_color(in.color, s.x), 1.0); }
-            let x = max(dd - r_t, 0.0) / (r_t * (TUBE_SHADOW - 1.0));
-            if (x >= 1.0) { discard; }
-            return vec4<f32>(0.0, 0.0, 0.0, SHADOW * (1.0 - x) * (1.0 - x));
+            // Sombra com a FORMA do sprite (hélice, fita…): a sua máscara
+            // desfocada, e não uma auréola de cápsula.
+            let sh = SHADOW * smoothstep(0.03, 0.4, sprite_soft(SPRITE_ROW_AMINO + f32(aa / SPRITE_COLS_U), f32(aa % SPRITE_COLS_U), q));
+            if (sh < 0.004) { discard; }
+            return vec4<f32>(0.0, 0.0, 0.0, sh);
         }
         if (dd > r_t) { discard; }
         let x = dd / r_t;
