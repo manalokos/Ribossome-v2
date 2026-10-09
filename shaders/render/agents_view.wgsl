@@ -40,7 +40,7 @@
 @group(0) @binding(15) var sprites_samp: sampler;
 const SPRITE_COLS: f32 = 9.0;
 const SPRITE_COLS_U: u32 = 9u;
-const SPRITE_ROWS: f32 = 25.0;
+const SPRITE_ROWS: f32 = 27.0;
 const SPRITE_ROW_AMINO: f32 = 22.0;
 const SPRITE_ROW_SPIKE: f32 = 23.0;
 const SPRITE_ROW_PROTEASE: f32 = 24.0;

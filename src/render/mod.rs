@@ -149,6 +149,14 @@ impl WorldView {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let sprites = sprites_texture(device, queue).create_view(&Default::default());
+        let sprites_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("sprites"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("world view layout"),
             entries: &[
@@ -222,6 +230,22 @@ impl WorldView {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -235,6 +259,8 @@ impl WorldView {
                 wgpu::BindGroupEntry { binding: 4, resource: world.temp_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 5, resource: world.velocity_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 6, resource: world.redox_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&sprites) },
+                wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::Sampler(&sprites_sampler) },
             ],
         });
         let pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -319,14 +345,6 @@ impl WorldView {
                     count: None,
                 },
             ],
-        });
-        let sprites = sprites_texture(device, queue).create_view(&Default::default());
-        let sprites_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("sprites"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            ..Default::default()
         });
         let agents_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("agents view bg"),

@@ -8,7 +8,8 @@ com a cor do órgão e escolhe a coluna pelo código do órgão, por isso órgã
 do mesmo tipo têm pequenas diferenças entre si.
 
 Linhas: 0..21 = tipo de órgão; 22 = troço de aminoácido (cápsula deitada);
-23 = um espigão da protease (ponta para cima); 24 = corpo da protease.
+23 = um espigão da protease (ponta para cima); 24 = corpo da protease;
+25 = grão de entulho; 26 = bloco de rocha (world_view.wgsl).
 Linhas com menos de COLS variantes repetem-nas.
 
 Encaixe no mosaico:
@@ -30,7 +31,7 @@ from sprites_escolha import ORGANS, mask_of  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "saves", "sprites", "fontes")
-TILE, COLS, ROWS = 192, 9, 25
+TILE, COLS, ROWS = 192, 9, 27
 STALK_BODY = 0.3
 STRETCH = {7, 22, 23}
 STALK = {8, 9}
