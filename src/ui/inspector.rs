@@ -358,6 +358,67 @@ fn aa_color(aa: u8) -> egui::Color32 {
     egui::Color32::from_rgb(c[0], c[1], c[2])
 }
 
+/// GENOMA COM A ZONA LIDA: as bases que o ribossoma traduz a cor cheia, as
+/// não traduzidas esbatidas (antes do primeiro AUG, depois do último stop e
+/// entre dois genes); cada codão de início (AUG) em fundo verde e cada stop
+/// em fundo vermelho. `span` é `Agent::coding_span`: a base do primeiro AUG
+/// (16 bits baixos) e a primeira base depois da zona lida (16 altos).
+fn genome_map(ui: &mut egui::Ui, genome: &[u8], span: u32) {
+    use crate::life::amino::{STOP, codon};
+    let (start, end) = ((span & 0xFFFF) as usize, ((span >> 16) as usize).min(genome.len()));
+    // 0 = não traduzida, 1 = traduzida, 2 = início, 3 = stop.
+    let mut kind = vec![0u8; genome.len()];
+    let mut genes = 0;
+    let mut i = start;
+    while i + 2 < genome.len() && i < end {
+        // Um gene: do AUG ao stop (ou ao fim da zona lida), codão a codão.
+        kind[i..i + 3].fill(2);
+        genes += 1;
+        i += 3;
+        let mut stopped = false;
+        while i + 2 < genome.len() && i < end {
+            if codon(genome[i], genome[i + 1], genome[i + 2]) == STOP {
+                kind[i..i + 3].fill(3);
+                i += 3;
+                stopped = true;
+                break;
+            }
+            kind[i..i + 3].fill(1);
+            i += 3;
+        }
+        // Segundo gene: o AUG seguinte, dentro da zona lida.
+        let next = (i..end.saturating_sub(2)).find(|&j| genome[j..j + 3] == [0, 1, 2]);
+        match next {
+            Some(j) if stopped => i = j,
+            _ => break,
+        }
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for (&b, &k) in genome.iter().zip(&kind) {
+            let col = base_color(b);
+            let mut text = egui::RichText::new(BASES[b as usize].to_string()).monospace();
+            text = match k {
+                0 => text.color(col.gamma_multiply(0.35)),
+                2 => text.color(egui::Color32::WHITE).background_color(egui::Color32::from_rgb(20, 110, 50)),
+                3 => text.color(egui::Color32::WHITE).background_color(egui::Color32::from_rgb(150, 35, 35)),
+                _ => text.color(col),
+            };
+            ui.label(text);
+        }
+    });
+    if start >= genome.len() {
+        ui.small("no start codon (AUG): nothing is translated");
+    } else {
+        let read = kind.iter().filter(|&&k| k != 0).count();
+        ui.small(format!(
+            "translated: {read} of {} bases, {genes} gene{} · green = start (AUG) · red = stop · dim = not translated",
+            genome.len(),
+            if genes == 1 { "" } else { "s" }
+        ));
+    }
+}
+
 fn colored_seq(ui: &mut egui::Ui, items: impl Iterator<Item = (char, egui::Color32)>) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -628,7 +689,7 @@ pub fn panel(
         });
         ui.separator();
         ui.strong(format!("Genome ({} bases)", d.genome.len()));
-        colored_seq(ui, d.genome.iter().map(|&b| (BASES[b as usize], base_color(b))));
+        genome_map(ui, &d.genome, a.coding_span);
         if !d.body.is_empty() {
             ui.strong(format!("Protein ({} residues; organs in white)", d.body.len()));
             colored_seq(
