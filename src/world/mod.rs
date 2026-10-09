@@ -290,6 +290,10 @@ pub struct World {
     /// Contacto por agente (vec4): depois do passo, .x = energia perdida em
     /// mordidas e .z = ganha a morder (a vista usa-os para o flash).
     pub contact_disp_buf: wgpu::Buffer,
+    /// Grelha de contacto (cabeça de lista por célula e seguinte por agente):
+    /// o desenho usa-a para achar o agente mais próximo de um ponto.
+    pub contact_head_buf: wgpu::Buffer,
+    pub contact_next_buf: wgpu::Buffer,
     /// Partilha de matéria pelas ligações (um u32 por agente; ver
     /// MATTER_* em bonds.wgsl). Depois de um passo: quem recebeu e quem deu.
     pub matter_claim_buf: wgpu::Buffer,
@@ -873,6 +877,8 @@ impl World {
             kin_target,
             kin_buf,
             contact_disp_buf: contact_disp,
+            contact_head_buf: contact_head,
+            contact_next_buf: contact_next,
             matter_claim_buf: matter_claim,
             stats_buf,
             stats_staging,

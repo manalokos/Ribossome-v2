@@ -837,6 +837,7 @@ fn bond_vertex(vi: u32, slot: u32, a: Agent, i: u32) -> AgentVsOut {
 // PARENTESCO (vista 4): bola por cima do agente, do mesmo tamanho no ecrã
 // para todos. Verde = genoma próximo do selecionado, amarelo, vermelho = distante.
 const MARK_BONDED: u32 = 255u;
+const KIN_DOTS: u32 = 0u;
 fn kin_vertex(vi: u32, slot: u32, a: Agent) -> AgentVsOut {
     var o: AgentVsOut;
     o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
@@ -869,7 +870,9 @@ fn kin_vertex(vi: u32, slot: u32, a: Agent) -> AgentVsOut {
         return capsule_vertex(vi, cm, cm, KIN_DOT_PX / view.zoom, vec3<f32>(0.1, 0.95, 1.0));
     }
     let q = kin_view[slot];
-    if (view.signal_view != 4u || a.alive == 0u || q < 0.0) { return o; }
+    // (O parentesco já não é uma bola por agente: é o mapa de Voronoi do
+    // fundo, kin_map em world_view.wgsl.)
+    if (KIN_DOTS == 0u || view.signal_view != 4u || a.alive == 0u || q < 0.0) { return o; }
     // Raiz quadrada: mais resolução nos parentescos fracos (os clãs
     // distantes distinguem-se uns dos outros): 25% de 8-meros -> meio da escala.
     let t = sqrt(clamp(q, 0.0, 1.0));

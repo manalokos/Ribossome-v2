@@ -12,6 +12,62 @@
 @group(0) @binding(6) var<storage, read> redox_view: array<f32>;
 // Atlas de sprites (o mesmo dos agentes, ver agents_view.wgsl): aqui usam-se
 // as linhas dos grãos de entulho e dos blocos de rocha.
+// MAPA DE PARENTESCO (cor dos agentes = parentesco com o selecionado): em
+// vez de uma bola por agente, cada ponto do mundo fica com a cor do agente
+// MAIS PRÓXIMO (um diagrama de Voronoi), até KIN_REACH de distância. Os
+// agentes procuram-se na grelha de contacto da simulação (células de
+// KIN_CELL unidades, uma lista ligada por célula: contact.wgsl).
+@group(0) @binding(9) var<storage, read> kin_agents: array<Agent>;
+@group(0) @binding(10) var<storage, read> kin_head: array<u32>;
+@group(0) @binding(11) var<storage, read> kin_next: array<u32>;
+@group(0) @binding(12) var<storage, read> kin_value: array<f32>;
+const KIN_CELL: f32 = 120.0;
+const KIN_N: u32 = u32(SIM_SIZE / KIN_CELL) + 1u;
+const KIN_REACH: f32 = 230.0;
+// Cor e opacidade do mapa no ponto w (mundo). px = unidades do mundo por píxel.
+fn kin_map(w: vec2<f32>, px: f32) -> vec4<f32> {
+    let c = vec2<i32>(floor(w / KIN_CELL));
+    var best = 1e30;
+    var second = 1e30;
+    var q = -1.0;
+    for (var dy = -2; dy <= 2; dy++) {
+        for (var dx = -2; dx <= 2; dx++) {
+            let x = c.x + dx;
+            let y = c.y + dy;
+            if (x >= 0 && y >= 0 && x < i32(KIN_N) && y < i32(KIN_N)) {
+                var e = kin_head[u32(y) * KIN_N + u32(x)];
+                for (var guard = 0u; guard < 48u && e != 0xFFFFFFFFu; guard++) {
+                    let a = kin_agents[e];
+                    let k = kin_value[e];
+                    if (a.alive != 0u && k >= 0.0) {
+                        let d = w - vec2<f32>(a.pos_x, a.pos_y);
+                        let d2 = dot(d, d);
+                        if (d2 < best) {
+                            second = best;
+                            best = d2;
+                            q = k;
+                        } else if (d2 < second) {
+                            second = d2;
+                        }
+                    }
+                    e = kin_next[e];
+                }
+            }
+        }
+    }
+    if (q < 0.0) { return vec4<f32>(0.0); }
+    let d1 = sqrt(best);
+    // Verde = genoma próximo do selecionado, amarelo, vermelho = distante
+    // (a mesma rampa das bolas que isto substitui).
+    let t = clamp(q, 0.0, 1.0);
+    let col = select(mix(vec3<f32>(1.0, 0.85, 0.1), vec3<f32>(0.15, 1.0, 0.25), (t - 0.5) * 2.0),
+                     mix(vec3<f32>(1.0, 0.12, 0.08), vec3<f32>(1.0, 0.85, 0.1), t * 2.0), t < 0.5);
+    // Fronteira entre duas células (onde os dois mais próximos estão à mesma
+    // distância): uma linha escura fina.
+    let edge = smoothstep(0.0, max(2.5 * px, 2.0), sqrt(second) - d1);
+    let fade = 1.0 - smoothstep(0.75 * KIN_REACH, KIN_REACH, d1);
+    return vec4<f32>(col * (0.3 + 0.35 * edge), 0.85 * fade);
+}
 @group(0) @binding(7) var sprites_tex: texture_2d<f32>;
 @group(0) @binding(8) var sprites_samp: sampler;
 const SPRITE_COLS: f32 = 9.0;
@@ -420,5 +476,9 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     // A noite vê-se só na camada da luz (glow), que já vem escura do topo.
     var c = mix(back, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
     c = mix(c, rock_col, rock_m);
+    if (view.signal_view == 4u) {
+        let km = kin_map(world, 1.0 / view.zoom);
+        c = mix(c, km.rgb, km.a * (1.0 - rock_m));
+    }
     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
