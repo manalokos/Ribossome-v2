@@ -148,7 +148,8 @@ fn drain(att: &[Residue], vic: &[Residue], w: &World) -> f32 {
 /// Retrato de um agente sozinho, enquadrado pelo corpo.
 pub(crate) fn portrait(gpu: &Gpu, w: &World, cap: &Capture, slot: u32, a: &Agent, bright: f32) -> Vec<u8> {
     let raw = gpu.read_ranges_blocking(&w.body_pos_buf, &[(slot as u64 * 512, 512)]);
-    let pos: &[[f32; 2]] = bytemuck::cast_slice(&raw);
+    // (Cópia: sem agentes a leitura vem vazia; ver Inspector::pick.)
+    let pos: Vec<[f32; 2]> = bytemuck::pod_collect_to_vec(&raw);
     let (s, c) = a.rot.sin_cos();
     let (mut lo, mut hi) = ([a.pos_x, a.pos_y], [a.pos_x, a.pos_y]);
     for (i, p) in pos.iter().take((a.body_len as usize).min(64)).enumerate() {

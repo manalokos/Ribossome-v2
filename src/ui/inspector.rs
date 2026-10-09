@@ -174,7 +174,9 @@ impl Inspector {
         near.truncate(n);
         let ranges: Vec<(u64, u64)> = near.iter().map(|&(s, _)| (s as u64 * 512, 512)).collect();
         let raw = gpu.read_ranges_blocking(&world.body_pos_buf, &ranges);
-        let pos: &[[f32; 2]] = bytemuck::cast_slice(&raw);
+        // (Cópia para f32: sem agentes vivos a leitura vem vazia, e uma fatia
+        // vazia de bytes não se pode ver como f32 sem o programa rebentar.)
+        let pos: Vec<[f32; 2]> = bytemuck::pod_collect_to_vec(&raw);
         let best = near
             .iter()
             .enumerate()

@@ -598,7 +598,7 @@ impl Default for SimParams {
             vent_cycle_period: 7000.0,
             vent_cycle_amp: 0.91,
             sediment_cohesion: 0.5,
-            sediment_compaction: 0.001,
+            sediment_compaction: 0.00001,
             _pad_s2: 0,
             _pad_s3: 0,
         }
