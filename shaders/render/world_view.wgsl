@@ -289,6 +289,7 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
     // depender da célula de onde se olha.
     var pebble_l = -1.0;
     var pebble_z = -1.0;
+    var pebble_zh = -1.0;
     var pebble_h = 0.0;
     var rock_h = 0.0;
     var pebble_r = 0.0;
@@ -341,9 +342,16 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
                             let w = exp(-d2 * peb_k / (size * size));
                             let r = PEBBLE_SPRITE_R * size;
                             let z = f32(h >> 24u);
-                            if (d2 < r * r && z > pebble_z) {
+                            if (d2 < r * r) {
                                 let s = grain_sprite(SPRITE_ROW_PEBBLE, d, r, h, px);
-                                if (s.y > 0.5) {
+                                // Onde dois seixos se sobrepõem, vê-se o que é
+                                // MAIS ALTO naquele ponto (e não um sorteado):
+                                // a fronteira é a linha onde as duas bolas se
+                                // cruzam, sem degrau. No microscópio 3D isto
+                                // tira as paredes a pique entre pedras.
+                                let zh = r * s.z + 0.0005 * z;
+                                if (s.y > 0.5 && zh > pebble_zh) {
+                                    pebble_zh = zh;
                                     pebble_z = z;
                                     pebble_l = s.x;
                                     pebble_h = r * s.z;
@@ -498,23 +506,32 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         pebble_r = gr.pebble_r;
         ground_shadow = 1.0 - GRAIN_SHADOW * gr.shadow * grains;
     }
-    // PARA O MICROSCÓPIO 3D. Modo 2: quanto terreno há aqui (o microscópio
-    // desfoca isto e faz dele o relevo suave do chão, onde tudo assenta).
-    if (view.height_pass == 2u) {
-        return vec4<f32>(max(rock_m, 0.4 * rubble_m), 0.0, 0.0, 1.0);
-    }
-    // Modo 1: o VOLUME de cada pedra e de cada molécula (cimo, fundo), em
-    // unidades do mundo acima do chão. Um seixo é uma bola meio enterrada;
-    // um bloco de rocha sai do chão; uma molécula é um grãozinho a pairar.
-    if (view.height_pass == 1u) {
+    // PARA O MICROSCÓPIO 3D: o VOLUME de cada pedra e de cada molécula (cimo,
+    // fundo), em unidades do mundo acima do chão. Um seixo é uma bola meio
+    // enterrada; um bloco de rocha sai do chão; uma molécula é um grãozinho
+    // a pairar.
+    if (view.height_pass != 0u) {
         let cell = f32(WORLD_UNITS_PER_CELL);
         var vol = vec2<f32>(0.0);
         if (rock_m > 0.5) {
             vol = vec2<f32>(2.0 + 0.8 * rock_h * cell, -30.0);
         } else if (rubble_m > 0.5) {
             vol = vec2<f32>(0.45 * pebble_r + pebble_h, 0.45 * pebble_r - pebble_h) * cell;
-        } else if (mol_h > 0.0 && view.monomer_brightness > 0.0) {
-            vol = vec2<f32>(4.0 + mol_h * cell, 4.0 - mol_h * cell);
+        }
+        // Uma molécula em cima de uma pedra é uma bossa pousada nela; na água
+        // livre é um grãozinho a pairar.
+        if (mol_h > 0.0 && view.monomer_brightness > 0.0 && view.height_pass == 1u) {
+            if (vol.x > 0.0) {
+                vol.x += 0.7 * mol_h * cell;
+            } else {
+                vol = vec2<f32>(3.0 + mol_h * cell, 3.0 - mol_h * cell);
+            }
+        }
+        // Modo 2: quanto terreno há aqui e o cimo das pedras. O microscópio
+        // desfoca os dois: o primeiro dá o relevo suave do chão, o segundo a
+        // cota a que os agentes assentam (por cima das pedras, não dentro).
+        if (view.height_pass == 2u) {
+            return vec4<f32>(max(rock_m, 0.4 * rubble_m), max(vol.x, 0.0), 0.0, 1.0);
         }
         return vec4<f32>(vol, 0.0, 1.0);
     }

@@ -72,6 +72,8 @@ const SPRITE_STALK_BODY: f32 = 0.3;
 // microscópio 3D: cada sítio que lê um sprite deixa-a aqui (a altura do
 // atlas vezes o tamanho da peça).
 var<private> g_h: f32 = 0.0;
+// ...e quanto esse ponto está levantado em relação ao meio do corpo.
+var<private> g_lift: f32 = 0.0;
 // Cota do meio dos corpos acima do chão, no microscópio 3D.
 const AGENT_Z: f32 = 11.0;
 // Altura dos sensores em relação à de uma bola do mesmo contorno.
@@ -494,9 +496,15 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
 // ONDULAÇÃO VERTICAL (só no relevo do microscópio 3D): cada resíduo fica um
 // pouco levantado do fundo, numa onda ao longo do corpo que avança com a
 // idade do agente, como uma fita a nadar perto do substrato.
-const BODY_LIFT: f32 = 5.0;
+const BODY_LIFT: f32 = 9.0;
 fn body_lift(a: Agent, k: u32) -> f32 {
-    return BODY_LIFT * (0.5 + 0.5 * sin(f32(k) * 0.55 + f32(a.age) * 0.03 + f32(a.id % 97u)));
+    return BODY_LIFT * (0.5 + 0.5 * sin(f32(k) * 0.38 + f32(a.age) * 0.03 + f32(a.id % 97u)));
+}
+// Os ÓRGÃOS ficam desencontrados em altura (um mais acima, o seguinte a
+// meio, o outro mais abaixo), para dois órgãos seguidos não se atravessarem.
+const ORGAN_STAGGER: f32 = 0.45;
+fn organ_stagger(k: u32, radius: f32) -> f32 {
+    return (f32(k % 3u) - 1.0) * ORGAN_STAGGER * radius;
 }
 
 fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
@@ -794,7 +802,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
     o.core_phase = vec2<f32>(1.0 / ext, phase);
     o.sprite = sprite_col;
     o.size = r;
-    o.lift = body_lift(a, k);
+    o.lift = body_lift(a, k) + organ_stagger(k, r / SHADOW_MARGIN);
     o.mode = 1u;
     return o;
 }
@@ -1036,6 +1044,7 @@ fn antenna(p: vec2<f32>, tip: vec2<f32>, core: f32) -> f32 {
 fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
     g_h = agent_height(in);
     g_c = g_h;
+    g_lift = 0.0;
     let c = agent_frag(in);
     if (c.a < 0.99) { discard; }
     // VOLUME (cimo, fundo) acima do chão. O corpo INTEIRO tem o meio à mesma
@@ -1043,7 +1052,7 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
     // enfiados uns nos outros como contas num fio, a pairar um pouco acima do
     // fundo; um órgão grande que chegasse ao chão fica achatado por baixo.
     if (view.height_pass != 0u) {
-        let mid = AGENT_Z + in.lift;
+        let mid = AGENT_Z + in.lift + g_lift;
         return vec4<f32>(mid + g_h, max(mid - g_h, 0.4), 0.0, 1.0);
     }
     return c;
@@ -1274,6 +1283,11 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
                     if (s.y >= 0.5 && s.x > spike_l) {
                         spike_l = s.x;
                         g_h = s.z * in.size * wb;
+                        // No microscópio 3D os espigões apontam para TODOS os
+                        // lados, não só no plano: cada um sobe ou desce ao
+                        // longo do seu comprimento, com a sua inclinação.
+                        let r3 = fract(sin(i * 37.719 + 2.3) * 15731.743);
+                        g_lift = (along - a0) * in.size * tan(mix(-0.55, 1.15, r3));
                         g_c = in.size * hub;
                         tip = len;
                     }

@@ -50,6 +50,11 @@ const HMAX: f32 = 95.0;
 /// Lado da textura de "quanto terreno há" e da do chão desfocado.
 const PRES: u32 = 512;
 const GROUND: u32 = 256;
+/// Meio lado da zona desenhada, em distâncias da câmara ao ponto que ela olha:
+/// larga, para a cena se apagar com a distância sem acabar num corte.
+const REGION_PER_DIST: f32 = 1.7;
+/// Raio de uma molécula de monómero, em células (o desenho normal usa mais).
+const MOLECULE_R: f32 = 0.2;
 /// Raio do desfoque do chão, em unidades do mundo.
 const GROUND_BLUR: f32 = 55.0;
 
@@ -66,7 +71,7 @@ struct U {
     // distância de focagem, abertura (raio da lente), tan(meio campo), exagero da altura
     lens: vec4<f32>,
     // quanto da cor das peças se mantém (0 = preto e branco), lado da textura
-    // do chão, raio do desfoque do chão (em fração da zona), livre
+    // do chão, raio do desfoque do chão (em fração da zona), superamostragem
     opts: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> u: U;
@@ -128,17 +133,25 @@ fn region_uv(xy: vec2<f32>) -> vec2<f32> {
 @fragment
 fn fs_ground(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = pos.xy / u.opts.y;
-    var sum = 0.0;
+    var sum = vec2<f32>(0.0);
     var wsum = 0.0;
     for (var j = -4; j <= 4; j++) {
         for (var i = -4; i <= 4; i++) {
             let o = vec2<f32>(f32(i), f32(j)) * 0.25;
             let w = exp(-2.2 * dot(o, o));
-            sum += w * textureSampleLevel(height_tex, samp, uv + o * u.opts.z, 0.0).r;
+            sum += w * textureSampleLevel(height_tex, samp, uv + o * u.opts.z, 0.0).rg;
             wsum += w;
         }
     }
-    return vec4<f32>(sum / wsum, 0.0, 0.0, 1.0);
+    return vec4<f32>(sum / wsum, 0.0, 1.0);
+}
+
+// APOIO dos agentes: o cimo das pedras, desfocado (verde da textura do chão).
+// Um bicho em cima de entulho assenta nesse relevo suave em vez de ficar
+// metido entre as pedras.
+fn support_at(xy: vec2<f32>) -> f32 {
+    let uv = clamp(region_uv(xy), vec2<f32>(0.0), vec2<f32>(1.0));
+    return 1.35 * textureSampleLevel(ground_tex, samp, uv, 0.0).g;
 }
 
 fn ground_at(xy: vec2<f32>) -> f32 {
@@ -166,7 +179,7 @@ fn surf(xy: vec2<f32>) -> Surf {
         let c = vec2<i32>(uv * vec2<f32>(textureDimensions(vol_tex)));
         let ta = textureLoad(vol_tex, c, 0).rg * u.lens.w;
         let tw = textureLoad(world_vol, c, 0).rg * u.lens.w;
-        if (ta.x > 0.25) { s.a = vec2<f32>(s.g + ta.x, s.g + ta.y); }
+        if (ta.x > 0.25) { s.a = s.g + support_at(xy) + ta; }
         if (tw.x > 0.25) { s.w = vec2<f32>(s.g + tw.x, s.g + tw.y); }
     }
     return s;
@@ -203,7 +216,7 @@ fn surf_smooth(xy: vec2<f32>) -> Surf {
     s.w = NONE;
     let uv = region_uv(xy);
     if (all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0))) {
-        s.a = lerp_volume(vol_tex, uv, s.g);
+        s.a = lerp_volume(vol_tex, uv, s.g + support_at(xy));
         s.w = lerp_volume(world_vol, uv, s.g);
     }
     return s;
@@ -254,7 +267,10 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         var prev_t = t0;
         for (var i = 0; i < 240; i++) {
             let p = org + dir * t;
-            if (solid(p, surf(p.xy))) { break; }
+            // O teste barato (texel a texel) só conta se o interpolado, que é
+            // o que dá a superfície final, concordar: senão ficavam pontinhos
+            // fixos nas bordas das peças, que a acumulação não limpava.
+            if (solid(p, surf(p.xy)) && solid(p, surf_smooth(p.xy))) { break; }
             prev_t = t;
             t += dt;
         }
@@ -333,9 +349,13 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         col = base * (0.95 + 1.5 * edge) * ao + vec3<f32>(0.25) * edge * edge * select(0.0, 1.0, !on_ground);
         // O campo de visão não acaba num quadrado: esbate-se com a distância
         // ao centro da zona e com a distância para lá do plano de focagem.
-        let rd = length(p.xy - u.region.xy) / u.region.z;
-        col *= 1.0 - smoothstep(0.8, 1.0, rd);
-        col *= 1.0 - 0.6 * clamp((hi - u.lens.x) / (4.0 * u.region.z), 0.0, 1.0);
+        // O brilho cai com a DISTÂNCIA ao ponto para onde a câmara olha
+        // (uma divisão, sem horizonte marcado): a cena vai-se apagando
+        // devagar. Só mesmo na borda da zona desenhada há um corte suave.
+        let away = length(p.xy - u.region.xy) / u.lens.x;
+        col /= 1.0 + 1.1 * away * away;
+        let rel = abs(p.xy - u.region.xy) / u.region.z;
+        col *= 1.0 - smoothstep(0.86, 1.0, max(rel.x, rel.y));
     }
     // Grão do detetor (desaparece com a acumulação).
     col += (rnd.z - 0.5) * 0.03;
@@ -345,7 +365,16 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_present(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let c = textureLoad(prev_tex, vec2<i32>(pos.xy), 0).rgb;
+    // SUPERAMOSTRAGEM: a imagem acumulada tem opts.w vezes o lado do ecrã;
+    // cada píxel é a média do seu bloco.
+    let ss = max(i32(u.opts.w), 1);
+    var c = vec3<f32>(0.0);
+    for (var j = 0; j < ss; j++) {
+        for (var i = 0; i < ss; i++) {
+            c += textureLoad(prev_tex, vec2<i32>(pos.xy) * ss + vec2<i32>(i, j), 0).rgb;
+        }
+    }
+    c /= f32(ss * ss);
     // Curva suave nos claros, para as arestas não queimarem.
     return vec4<f32>(c / (1.0 + 0.25 * c), 1.0);
 }
@@ -395,6 +424,8 @@ struct Scope {
     colour: bool,
     /// Brilho dos monómeros na zona (0 = não se desenham).
     monomers: f32,
+    /// Superamostragem: lado da imagem acumulada em múltiplos do do ecrã.
+    ss: u32,
 }
 
 /// Alvo de várias amostras de onde também se lê (uma amostra de cada vez).
@@ -459,14 +490,18 @@ impl Scope {
         let agents = world.read_agents_blocking(gpu);
         let alive: Vec<_> = agents.iter().filter(|a| a.alive != 0 && a.body_len >= 10).collect();
         let organs: Vec<u16> = bytemuck::pod_collect_to_vec(&gpu.read_buffer_blocking(&world.organs_buf));
+        // ORGAN=n: só agentes com este tipo de órgão (11 = protease).
+        let need: Option<u16> = std::env::var("ORGAN").ok().and_then(|v| v.parse().ok());
         let mut best: Vec<(usize, usize)> = agents
             .iter()
             .enumerate()
             .filter(|(_, a)| a.alive != 0 && (14..=48).contains(&a.body_len))
             .map(|(slot, a)| {
                 let kinds: std::collections::HashSet<u16> = organs[slot * 64..slot * 64 + a.body_len as usize].iter().filter(|&&c| c != 0).map(|&c| c & 0x1F).collect();
-                (kinds.len(), slot)
+                (kinds.len(), slot, need.is_none_or(|n| kinds.contains(&(n + 1))))
             })
+            .filter(|b| b.2)
+            .map(|b| (b.0, b.1))
             .collect();
         best.sort_by(|a, b| b.cmp(a));
         let pick = env("PICK", 0.0) as usize;
@@ -640,7 +675,7 @@ impl Scope {
             accum: [accum_texture(device, size[0], size[1]), accum_texture(device, size[0], size[1])],
             size,
             region,
-            orbit: Orbit { centre, yaw: 0.6, pitch: 0.75, dist: region * 1.3, aperture: env("APERTURE", 1.5) },
+            orbit: Orbit { centre, yaw: 0.6, pitch: 0.75, dist: region / REGION_PER_DIST, aperture: env("APERTURE", 1.5) },
             last_orbit: None,
             samples: 0,
             frame: 0,
@@ -649,13 +684,15 @@ impl Scope {
             paused: true,
             colour: env("COLOR", 0.0) != 0.0,
             monomers: env("MONOMERS", 0.7),
+            ss: 1,
             world,
         }
     }
 
     fn resize(&mut self, device: &wgpu::Device, size: [u32; 2]) {
         self.size = size;
-        self.accum = [accum_texture(device, size[0], size[1]), accum_texture(device, size[0], size[1])];
+        let (w, h) = (size[0] * self.ss, size[1] * self.ss);
+        self.accum = [accum_texture(device, w, h), accum_texture(device, w, h)];
         self.last_orbit = None;
     }
 
@@ -712,6 +749,9 @@ impl Scope {
         self.world.set_draw_rect(&gpu.queue, Some(([o.centre[0] - r, o.centre[1] - r], [o.centre[0] + r, o.centre[1] + r])));
         self.world.encode_draw_list(&mut enc);
         let cam = Camera { center: o.centre, zoom: TEX as f32 / (2.0 * r) };
+        // (Moléculas pequenas: no microscópio são partículas, não manchas.)
+        self.cap.view.coc_radius.set(MOLECULE_R);
+        self.height_view.coc_radius.set(MOLECULE_R);
         self.cap.view.epoch.set(self.world.params.epoch);
         self.cap.view.ghost_steps.set(60.0);
         self.cap.encode(&gpu.queue, &mut enc, &cam, 0, self.monomers);
@@ -768,9 +808,9 @@ impl Scope {
             v4(up),
             v4(fwd),
             [o.centre[0], o.centre[1], r, HMAX],
-            [self.size[0] as f32, self.size[1] as f32, self.frame as f32, weight],
+            [(self.size[0] * self.ss) as f32, (self.size[1] * self.ss) as f32, self.frame as f32, weight],
             [o.dist, o.aperture, 0.36, 1.0],
-            [if self.colour { 1.0 } else { 0.0 }, GROUND as f32, GROUND_BLUR / (2.0 * r), 0.0],
+            [if self.colour { 1.0 } else { 0.0 }, GROUND as f32, GROUND_BLUR / (2.0 * r), self.ss as f32],
         ];
         gpu.queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&data));
         let (src, dst) = ((self.frame % 2) as usize, ((self.frame + 1) % 2) as usize);
@@ -880,8 +920,9 @@ impl Running {
         if self.scope.frame % 30 == 0 {
             let s = &self.scope;
             self.window.set_title(&format!(
-                "Ribossome: microscope   {} samples   {}   aperture {:.1}   (drag: orbit, right drag: move, wheel: zoom in/out, space: run/pause, F/G: aperture, C: colour, M: monomers)",
+                "Ribossome: microscope   {} samples{}   {}   aperture {:.1}   (drag: orbit, right drag: move, wheel: zoom in/out, space: run/pause, F/G: aperture, C: colour, M: monomers, S: supersampling)",
                 s.samples,
+                if s.ss > 1 { " ×4 (supersampled)" } else { "" },
                 if s.paused || s.steps == 0 { "paused" } else { "running" },
                 s.orbit.aperture
             ));
@@ -935,7 +976,7 @@ impl Running {
                 // de perto é pequena e detalhada, a de longe apanha mais mundo).
                 let o = &mut self.scope.orbit;
                 o.dist = (o.dist * 0.9f32.powf(lines)).clamp(90.0, 5000.0);
-                self.scope.region = (o.dist / 1.3).clamp(50.0, 2600.0);
+                self.scope.region = (o.dist * REGION_PER_DIST).clamp(50.0, 4000.0);
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => match event.logical_key.as_ref() {
                 Key::Named(NamedKey::Escape) => event_loop.exit(),
@@ -948,6 +989,11 @@ impl Running {
                 Key::Character("c") => {
                     self.scope.colour = !self.scope.colour;
                     self.scope.last_orbit = None;
+                }
+                Key::Character("s") => {
+                    self.scope.ss = if self.scope.ss >= 2 { 1 } else { 2 };
+                    let size = self.scope.size;
+                    self.scope.resize(&self.gpu.device, size);
                 }
                 Key::Character("m") => {
                     self.scope.monomers = if self.scope.monomers > 0.0 { 0.0 } else { 0.7 };
@@ -992,12 +1038,14 @@ fn photo(path: &str, samples: u32) {
     let (w, h) = (1280u32, 768u32);
     let format = wgpu::TextureFormat::Rgba8Unorm;
     let mut scope = Scope::new(&gpu, format, [w, h]);
+    scope.ss = (std::env::var("SS").ok().and_then(|v| v.parse().ok()).unwrap_or(2u32)).clamp(1, 3);
+    scope.resize(&gpu.device, [w, h]);
     let env = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
     scope.orbit.yaw = env("YAW", scope.orbit.yaw);
     scope.orbit.pitch = env("PITCH", scope.orbit.pitch);
     scope.orbit.dist = env("DIST", scope.orbit.dist);
     if std::env::var("REGION").is_err() {
-        scope.region = (scope.orbit.dist / 1.3).clamp(50.0, 2600.0);
+        scope.region = (scope.orbit.dist * REGION_PER_DIST).clamp(50.0, 4000.0);
     }
     scope.orbit.aperture = env("APERTURE", scope.orbit.aperture);
     // Uns passos para a grelha de desenho e as poses assentarem, depois parada.
