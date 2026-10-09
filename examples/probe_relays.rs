@@ -50,7 +50,12 @@ fn main() {
     // H + S = bias (variante 0), H + L = relógio (variante 0), H + K = relé
     // condensador (variante 4), H + Y = relé diferenciador (variante 5).
     let make = |src: &str, relay: &str| bases(&format!("AUG CAU {src} {one} GGU CAU {relay} {rc} GGU GGU GGU UAA"));
-    let cases = [("bias + condensador", make("UCU", "AAA")), ("bias + diferenciador", make("UCU", "UAU")), ("relógio + diferenciador", make("CUU", "UAU"))];
+    let cases = [
+        ("bias + condensador", make("UCU", "AAA")), ("bias + diferenciador", make("UCU", "UAU")), ("relógio + diferenciador", make("CUU", "UAU")),
+        // H + G = relé flip-flop (variante 1): liga com α > limiar, desliga
+        // com α < −limiar; entre os dois, γ fica como estava.
+        ("relógio + flip-flop", make("CUU", "GGU")),
+    ];
     for (name, g) in &cases {
         let body = translate_organs(g, true, &code);
         let desc: Vec<String> = body.iter().enumerate().filter_map(|(k, r)| r.organ.map(|(t, p, gi)| format!("{k}: {}", ribossome::life::organs::describe(t, p, gi, &w.organ_table)))).collect();

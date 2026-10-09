@@ -649,7 +649,19 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                         gate[k][cin] = 0.0;
                     }
                 } else if (f == 1u) {
-                    if (cin != cout) { emit[k][cout] = mag * x; }
+                    // FLIP-FLOP (memória de um bit; era "copiar"): a entrada
+                    // acima do limiar LIGA, abaixo de menos o limiar DESLIGA,
+                    // e entre os dois fica como estava. Enquanto ligado emite
+                    // a força inteira na saída. Um toque basta para mudar de
+                    // estado: o corpo passa a poder "ligar e ficar ligado"
+                    // (largar uma ventosa, fechar a boca, parar de nadar).
+                    // sensor_mem = estado (1 = ligado).
+                    let mi = base + k;
+                    var on = sensor_mem[mi] > 0.5;
+                    if (x > th) { on = true; }
+                    if (x < -th) { on = false; }
+                    sensor_mem[mi] = select(0.0, 1.0, on);
+                    if (on && cin != cout) { emit[k][cout] = mag; }
                 } else if (f == 2u) {
                     emit[k][cout] = -mag * x;
                 } else if (f == 3u) {

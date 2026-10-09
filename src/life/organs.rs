@@ -312,7 +312,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             let mag = RELAY_MAG[((gain_idx >> 4) & 3) as usize] * v("ganho");
             match v("funcao").round() as i32 {
                 0 => format!("relay SWITCH [diamond]: passes {cin} to {cout} (×{mag:.2}) and blocks {cin} here"),
-                1 => format!("relay copy [diamond]: reads {cin} and emits on {cout} (×{mag:.2})"),
+                1 => format!("relay FLIP-FLOP [diamond]: one bit of memory; {cin} above {:.2} switches it ON, below −{:.2} switches it OFF, in between it stays as it was; while on it emits ×{mag:.2} on {cout}", v("limiar"), v("limiar")),
                 2 => format!("relay inverter [diamond]: reads {cin} and emits −{cin} on {cout} (×{mag:.2})"),
                 3 => format!("relay GATE [diamond]: with |{cin}| > {:.2}, {cout} does not pass here", v("limiar")),
                 4 => format!(
