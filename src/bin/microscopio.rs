@@ -90,6 +90,8 @@ struct U {
     opts: vec4<f32>,
     // exposição (multiplica a imagem final), livre × 3
     photo: vec4<f32>,
+    // esbatimento com a distância: centro (x, y) e raio, em unidades do mundo
+    fade: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var color_tex: texture_2d<f32>;
@@ -223,7 +225,7 @@ fn ground_at(xy: vec2<f32>) -> f32 {
 // Onde assenta um AGENTE: o chão e o cimo das pedras com o desfoque largo
 // (azul e alfa da textura do chão). Não segue o chão de cada ponto: é isso
 // que mantém as formas dos órgãos inteiras.
-const AGENT_SPREAD: f32 = 3.0;
+const AGENT_SPREAD: f32 = 1.8;
 fn agent_base(xy: vec2<f32>, g: f32) -> f32 {
     let uv = clamp(region_uv(xy), vec2<f32>(0.0), vec2<f32>(1.0));
     let t = textureSampleLevel(ground_tex, samp, uv, 0.0);
@@ -646,7 +648,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         // O brilho cai com a DISTÂNCIA ao ponto para onde a câmara olha (uma
         // divisão, sem horizonte marcado), e chega a zero num CÍRCULO antes
         // da borda da zona desenhada, para nunca se ver o quadrado dela.
-        let away = length(p.xy - u.region.xy) / u.region.z;
+        let away = length(p.xy - u.fade.xy) / u.fade.z;
         col /= 1.0 + 7.0 * away * away;
         col *= 1.0 - smoothstep(0.7, 0.98, away);
     }
@@ -1061,7 +1063,7 @@ impl Scope {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scope"),
-            size: 9 * 16,
+            size: 10 * 16,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1283,6 +1285,43 @@ impl Scope {
         });
     }
 
+    /// A pegada no chão do que a câmara vê: os quatro cantos do enquadramento
+    /// projetados no fundo e no cimo do relevo, limitados ao disco do
+    /// esbatimento (para lá dele a imagem é preta), mais uma margem para a
+    /// oclusão e os desfoques. Devolve o centro e o meio lado do quadrado.
+    fn footprint(&self, fade_r: f32) -> ([f32; 2], f32) {
+        let o = self.orbit;
+        let aspect = self.size[0] as f32 / self.size[1].max(1) as f32;
+        let (sp, cp) = o.pitch.sin_cos();
+        let (sy, cy) = o.yaw.sin_cos();
+        let eye_dist = o.dist * REF_TAN / o.focal;
+        let target = [o.centre[0], o.centre[1], 28.0];
+        let eye = [target[0] + eye_dist * cp * sy, target[1] - eye_dist * cp * cy, target[2] + eye_dist * sp];
+        let fwd = [-cp * sy, cp * cy, -sp];
+        let right = [cy, sy, 0.0];
+        let up = [right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2], right[0] * fwd[1] - right[1] * fwd[0]];
+        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for (sx, syy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            let dir: [f32; 3] = std::array::from_fn(|k| fwd[k] + right[k] * sx * o.focal * aspect + up[k] * syy * o.focal);
+            for plane in [0.0f32, HMAX] {
+                // Onde o raio do canto cruza esta cota (acima do horizonte: longe).
+                let t = if dir[2] < -1e-4 { ((plane - eye[2]) / dir[2]).max(0.0) } else { 1e6 };
+                let mut p = [eye[0] + dir[0] * t - o.centre[0], eye[1] + dir[1] * t - o.centre[1]];
+                let len = p[0].hypot(p[1]);
+                if len > fade_r {
+                    p = [p[0] * fade_r / len, p[1] * fade_r / len];
+                }
+                for k in 0..2 {
+                    lo[k] = lo[k].min(p[k]);
+                    hi[k] = hi[k].max(p[k]);
+                }
+            }
+        }
+        let half = 0.5 * (hi[0] - lo[0]).max(hi[1] - lo[1]);
+        let r = (half * 1.08 + 100.0).min(fade_r).max(30.0);
+        ([o.centre[0] + 0.5 * (lo[0] + hi[0]), o.centre[1] + 0.5 * (lo[1] + hi[1])], r)
+    }
+
     /// SEGUIR: lê a posição atual do agente da mira (só ele: 64 bytes) e leva
     /// o centro da câmara para lá, aos poucos. Se morreu, deixa de seguir.
     fn follow_step(&mut self, gpu: &Gpu) {
@@ -1380,7 +1419,12 @@ impl Scope {
         self.samples += 1;
         self.frame += 1;
 
-        let r = self.region;
+        // A ZONA DESENHADA de cima é a pegada do que a câmara vê (mais uma
+        // margem), e não um quadrado grande à volta do ponto de mira: as
+        // texturas do relevo ficam todas onde se olha, com 2 a 3 vezes mais
+        // resolução. O esbatimento continua centrado no ponto de mira.
+        let fade_r = self.region;
+        let (zc, r) = self.footprint(fade_r);
         // AS CAMADAS (a zona vista de cima: volumes, cores, chão, alisamento)
         // só dependem do que lá está e de onde se olha a direito: rodar a
         // câmara, mudar a lente ou o foco não as altera, e com a simulação
@@ -1391,7 +1435,7 @@ impl Scope {
         // frames: o instante entre os dois passos faz parte do estado.)
         let tweening = slow && self.smooth_motion;
         let tween_t = if tweening { (self.last_step.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0) } else { 1.0 };
-        let key = (o.centre, r, self.monomers, self.world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
+        let key = (zc, r, self.monomers, self.world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
         if self.layer_key != Some(key) {
             self.layer_key = Some(key);
             self.layer_age = 0;
@@ -1403,7 +1447,7 @@ impl Scope {
         // parte: usa a mesma vista do passo dos volumes com outro modo, e os
         // parâmetros da vista são um só bloco, escrito antes de os comandos correrem.
         if !cached {
-            let cam = Camera { center: o.centre, zoom: PRES as f32 / (2.0 * r) };
+            let cam = Camera { center: zc, zoom: PRES as f32 / (2.0 * r) };
             self.height_view.height_pass.set(2);
             self.height_view.update(&gpu.queue, &cam, [PRES as f32; 2], 0, 0.0, 0);
             let mut enc = gpu.device.create_command_encoder(&Default::default());
@@ -1465,9 +1509,9 @@ impl Scope {
         self.cap.view.clock_frac.set(clock.1);
         self.height_view.clock_frac.set(clock.1);
         if !cached {
-        self.world.set_draw_rect(&gpu.queue, Some(([o.centre[0] - r, o.centre[1] - r], [o.centre[0] + r, o.centre[1] + r])));
+        self.world.set_draw_rect(&gpu.queue, Some(([zc[0] - r, zc[1] - r], [zc[0] + r, zc[1] + r])));
         self.world.encode_draw_list(&mut enc);
-        let cam = Camera { center: o.centre, zoom: TEX as f32 / (2.0 * r) };
+        let cam = Camera { center: zc, zoom: TEX as f32 / (2.0 * r) };
         // (Moléculas pequenas: no microscópio são partículas, não manchas.)
         self.cap.view.coc_radius.set(MOLECULE_R);
         self.height_view.coc_radius.set(MOLECULE_R);
@@ -1551,16 +1595,17 @@ impl Scope {
         let up = cross(right, fwd);
         self.cam = [eye, right, up, fwd];
         let v4 = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
-        let data: [[f32; 4]; 9] = [
+        let data: [[f32; 4]; 10] = [
             v4(eye),
             v4(right),
             v4(up),
             v4(fwd),
-            [o.centre[0], o.centre[1], r, HMAX],
+            [zc[0], zc[1], r, HMAX],
             [(self.size[0] * self.ss) as f32, (self.size[1] * self.ss) as f32, self.frame as f32, weight],
             [(eye_dist + o.focus_shift).max(1.0), o.aperture * REF_TAN / o.focal, o.focal, 1.0],
             [self.colour as f32, GROUND as f32, GROUND_BLUR / (2.0 * r), self.ss as f32],
             [self.exposure, if subject_slot.is_some() { 1.0 } else { 0.0 }, 0.0, 0.0],
+            [o.centre[0], o.centre[1], fade_r, 0.0],
         ];
         gpu.queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&data));
         let (src, dst) = ((self.frame % 2) as usize, ((self.frame + 1) % 2) as usize);
