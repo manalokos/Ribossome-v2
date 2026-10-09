@@ -349,10 +349,7 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
                                 // a fronteira é a linha onde as duas bolas se
                                 // cruzam, sem degrau. No microscópio 3D isto
                                 // tira as paredes a pique entre pedras.
-                                // (A altura que conta é a do CIMO do volume, 0,45 r + h,
-                                // a mesma que o microscópio usa: comparando só h, dois
-                                // seixos de raio diferente cruzavam-se com um degrau.)
-                                let zh = 0.45 * r + r * s.z + 0.0005 * z;
+                                let zh = r * s.z + 0.0005 * z;
                                 if (s.y > 0.5 && zh > pebble_zh) {
                                     pebble_zh = zh;
                                     pebble_z = z;
@@ -526,7 +523,12 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
             let shoulder = sqrt(clamp((rock_field - 0.45) / 0.35, 0.0, 1.0));
             vol = vec2<f32>((2.0 + 0.8 * rock_h * cell) * shoulder + 0.3, -30.0);
         } else if (rubble_m > 0.5) {
-            vol = vec2<f32>(0.45 * pebble_r + pebble_h, 0.45 * pebble_r - pebble_h) * cell;
+            // Um seixo é uma CÚPULA assente no chão (desce a zero no contorno),
+            // e não uma bola com o equador no ar: o relevo só guarda uma pedra
+            // por ponto, e a aba de uma bola por cima da vizinha mais baixa
+            // ficava uma parede fina a pique entre as duas. Com cúpulas, o
+            // monte é o máximo delas e é contínuo em todo o lado.
+            vol = vec2<f32>(1.2 * pebble_h * cell, -30.0);
         }
         // Uma molécula em cima de uma pedra é uma bossa pousada nela; na água
         // livre é um grãozinho a pairar.
