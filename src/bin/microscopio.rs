@@ -25,6 +25,10 @@
 //! exposição; C liga a cor (por omissão é a preto e branco); M esconde os
 //! monómeros; S liga a superamostragem; Esc sai.
 //!   LENS=mm, APERTURE, EXPOSURE  arrancam com esses valores
+//! T liga a MIRA (cantos à volta do agente mais perto do centro, com o nome
+//! da espécie, a linhagem, a geração, a idade e a energia).
+//! P tira uma fotografia (saves/capturas) e V grava vídeo (saves/videos, com
+//! o ffmpeg), os dois com a barra de dados e o título mas sem o painel.
 //! Um CLIQUE (sem arrastar) foca no ponto clicado; Tab mostra e esconde o
 //! painel de controlos; por baixo da imagem fica a barra de dados com a
 //! escala em nanómetros (ver NM_PER_UNIT: é uma convenção).
@@ -717,6 +721,22 @@ struct Scope {
     rate: f32,
     last_step: std::time::Instant,
     tween: Tween,
+    /// Câmara do último frame (olho, direita, cima, frente), para projetar
+    /// pontos do mundo no ecrã.
+    cam: [[f32; 3]; 4],
+    /// MIRA: marca o agente mais perto do centro e diz quem é.
+    reticle: bool,
+    subject: Option<Subject>,
+}
+
+/// O agente na mira.
+struct Subject {
+    pos: [f32; 2],
+    radius: f32,
+    name: String,
+    lineage: String,
+    detail: String,
+    read_at: std::time::Instant,
 }
 
 /// Alvo de várias amostras de onde também se lê (uma amostra de cada vez).
@@ -1002,6 +1022,9 @@ impl Scope {
             exposure: env("EXPOSURE", 1.0),
             rate: env("RATE", 2.0),
             tween: Tween::new(device, &world),
+            cam: [[0.0; 3]; 4],
+            reticle: env("RETICLE", 0.0) != 0.0,
+            subject: None,
             last_step: std::time::Instant::now(),
             world,
         }
@@ -1012,6 +1035,32 @@ impl Scope {
         let (w, h) = (size[0] * self.ss, size[1] * self.ss);
         self.accum = [accum_texture(device, w, h), accum_texture(device, w, h)];
         self.last_orbit = None;
+    }
+
+    /// MIRA: procura o agente vivo mais perto do centro da vista e lê o seu
+    /// genoma para lhe dar o nome (lê os agentes todos: só de vez em quando).
+    fn find_subject(&mut self, gpu: &Gpu) {
+        let c = self.orbit.centre;
+        let agents = self.world.read_agents_blocking(gpu);
+        let best = agents
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.alive != 0 && a.body_len >= 4)
+            .min_by(|x, y| ((x.1.pos_x - c[0]).powi(2) + (x.1.pos_y - c[1]).powi(2)).total_cmp(&((y.1.pos_x - c[0]).powi(2) + (y.1.pos_y - c[1]).powi(2))));
+        self.subject = best.map(|(slot, a)| {
+            let words: Vec<u32> = bytemuck::pod_collect_to_vec(&gpu.read_ranges_blocking(&self.world.genomes_buf, &[(slot as u64 * 64, 64)]));
+            let genome: Vec<u8> = (0..(a.gene_len as usize).min(words.len() * 16)).map(|i| ((words[i / 16] >> ((i % 16) * 2)) & 3) as u8).collect();
+            let code = ribossome::life::table::code_to_gpu(&self.world.organ_code);
+            let rs = self.world.params.require_start != 0;
+            Subject {
+                pos: [a.pos_x, a.pos_y],
+                radius: a.radius,
+                name: ribossome::names::organism_name_in(&genome, rs, &code),
+                lineage: ribossome::names::lineage_name_in(&genome, rs, &code),
+                detail: format!("gen {} · age {} · {} residues · {} bases · energy {:.1}", a.generation, a.age, a.body_len, a.gene_len, a.energy),
+                read_at: std::time::Instant::now(),
+            }
+        });
     }
 
     /// AUTOFOCO: põe o plano de focagem no que se vê no píxel `px` do ecrã
@@ -1047,7 +1096,7 @@ impl Scope {
 
     /// Um frame: passos da simulação, a zona vista de cima (cor e altura),
     /// uma amostra do traçado de raios acumulada, e a imagem para `target`.
-    fn frame(&mut self, gpu: &Gpu, target: &wgpu::TextureView) {
+    fn frame(&mut self, gpu: &Gpu, target: &wgpu::TextureView, copy: Option<&wgpu::TextureView>) {
         let o = self.orbit;
         let moving = !self.paused && self.steps > 0;
         if self.last_orbit != Some(o) {
@@ -1202,6 +1251,7 @@ impl Scope {
         let fwd = norm([target_pt[0] - eye[0], target_pt[1] - eye[1], target_pt[2] - eye[2]]);
         let right = norm(cross(fwd, [0.0, 0.0, 1.0]));
         let up = cross(right, fwd);
+        self.cam = [eye, right, up, fwd];
         let v4 = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
         let data: [[f32; 4]; 9] = [
             v4(eye),
@@ -1269,6 +1319,10 @@ impl Scope {
         pass_to(&mut enc, &ground, &self.ground, &bind(&pres, &prev_view, &pres));
         pass_to(&mut enc, &next_view, &self.march, &bind(&height, &prev_view, &ground));
         pass_to(&mut enc, target, &self.present, &bind(&height, &next_view, &ground));
+        // (A mesma imagem para a fotografia / o vídeo, sem a interface.)
+        if let Some(copy) = copy {
+            pass_to(&mut enc, copy, &self.present, &bind(&height, &next_view, &ground));
+        }
         gpu.queue.submit([enc.finish()]);
     }
 }
@@ -1292,17 +1346,16 @@ fn nm_text(nm: f32) -> String {
 #[derive(Default)]
 struct Asked {
     supersampling: bool,
+    photo: bool,
+    rec: bool,
 }
 
 /// INTERFACE de microscópio eletrónico: a barra de dados por baixo da imagem
 /// (campo, ampliação, distância de trabalho, lente, inclinação, amostras e a
 /// escala em nanómetros), a marca do último ponto focado e o painel de
 /// controlos (Tab esconde-o).
-fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: Option<[f32; 2]>) -> Asked {
-    let mut asked = Asked::default();
-    let ctx = root.ctx().clone();
+fn overlay(ctx: &egui::Context, screen: egui::Rect, s: &Scope, marker: Option<[f32; 2]>, recording: bool) {
     let ppp = ctx.pixels_per_point();
-    let screen = root.max_rect();
     let o = s.orbit;
     let eye_dist = o.dist * REF_TAN / o.focal;
     let wd = (eye_dist + o.focus_shift).max(1.0);
@@ -1358,6 +1411,54 @@ fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: Optio
             painter.line_segment([c + d * 13.0, c + d * 20.0], st);
         }
     }
+    // TÍTULO, como a legenda gravada numa micrografia.
+    let shadow = egui::Color32::from_black_alpha(200);
+    for (d, col) in [(egui::vec2(1.0, 1.0), shadow), (egui::vec2(0.0, 0.0), egui::Color32::from_gray(240))] {
+        painter.text(screen.left_top() + egui::vec2(16.0, 12.0) + d, egui::Align2::LEFT_TOP, "Ribossome v2", egui::FontId::proportional(22.0), col);
+        painter.text(screen.left_top() + egui::vec2(17.0, 40.0) + d, egui::Align2::LEFT_TOP, format!("epoch {}", s.world.params.epoch), egui::FontId::monospace(11.0), if d.x > 0.0 { shadow } else { egui::Color32::from_gray(170) });
+    }
+    // MIRA: cantos à volta do agente mais perto do centro, e quem é.
+    if let Some(sub) = s.subject.as_ref().filter(|_| s.reticle) {
+        let [eye, right, up, fwd] = s.cam;
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let d = [sub.pos[0] - eye[0], sub.pos[1] - eye[1], 20.0 - eye[2]];
+        let depth = dot(d, fwd);
+        if depth > 1.0 {
+            let img = egui::Rect::from_min_max(screen.left_top(), egui::pos2(screen.right(), screen.bottom() - bar_h));
+            let half_h = 0.5 * screen.height();
+            let c = screen.center() + egui::vec2(dot(d, right) / (depth * o.focal) * half_h, -dot(d, up) / (depth * o.focal) * half_h);
+            let r = (1.25 * sub.radius / (depth * o.focal) * half_h).clamp(18.0, 0.45 * img.height());
+            if img.expand(r).contains(c) {
+                let st = egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 235, 120));
+                let arm = 0.3 * r;
+                for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                    let k = c + egui::vec2(sx * r, sy * r);
+                    painter.line_segment([k, k - egui::vec2(sx * arm, 0.0)], st);
+                    painter.line_segment([k, k - egui::vec2(0.0, sy * arm)], st);
+                }
+                let top = egui::pos2(c.x, (c.y - r - 8.0).max(img.top() + 64.0));
+                let back = egui::Color32::from_black_alpha(210);
+                for (dd, col_a, col_b) in [(egui::vec2(1.0, 1.0), back, back), (egui::vec2(0.0, 0.0), egui::Color32::from_rgb(255, 240, 170), egui::Color32::from_gray(200))] {
+                    painter.text(top + dd - egui::vec2(0.0, 30.0), egui::Align2::CENTER_BOTTOM, &sub.name, egui::FontId::proportional(18.0), col_a);
+                    painter.text(top + dd - egui::vec2(0.0, 15.0), egui::Align2::CENTER_BOTTOM, format!("lineage {}", sub.lineage), egui::FontId::monospace(11.0), col_b);
+                    painter.text(top + dd, egui::Align2::CENTER_BOTTOM, &sub.detail, egui::FontId::monospace(11.0), col_b);
+                }
+            }
+        }
+    }
+    if recording {
+        painter.circle_filled(screen.left_top() + egui::vec2(160.0, 26.0), 6.0, egui::Color32::from_rgb(230, 50, 40));
+    }
+}
+
+/// O painel de controlos por cima da sobreposição (só no ecrã: as fotos e os
+/// vídeos levam a barra de dados e o título, mas não o painel).
+fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: Option<[f32; 2]>, recording: bool, status: &str) -> Asked {
+    let mut asked = Asked::default();
+    let ctx = root.ctx().clone();
+    overlay(&ctx, root.max_rect(), s, marker, recording);
+    let eye_dist = s.orbit.dist * REF_TAN / s.orbit.focal;
+    let wd = (eye_dist + s.orbit.focus_shift).max(1.0);
     egui::Window::new("Microscope").open(panel).anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0]).resizable(false).show(&ctx, |ui| {
         let mut mm = 12.0 / s.orbit.focal;
         if ui.add(egui::Slider::new(&mut mm, 14.0..=800.0).logarithmic(true).suffix(" mm").text("Lens")).changed() {
@@ -1391,6 +1492,9 @@ fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: Optio
                 s.monomers = if mono { 0.7 } else { 0.0 };
                 s.last_orbit = None;
             }
+            if ui.checkbox(&mut s.reticle, "Reticle").on_hover_text("marks the agent nearest the centre and names it (key T)").changed() {
+                s.subject = None;
+            }
             let mut ss = s.ss > 1;
             if ui.checkbox(&mut ss, "Supersampling").changed() {
                 asked.supersampling = true;
@@ -1405,6 +1509,18 @@ fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: Optio
                 s.orbit.focus_shift = 0.0;
             }
         });
+        ui.horizontal(|ui| {
+            if ui.button("📷 Photo").on_hover_text("saves the image with the data bar to saves/capturas (key P)").clicked() {
+                asked.photo = true;
+            }
+            let label = if recording { egui::RichText::new("■ Stop").color(egui::Color32::from_rgb(255, 90, 80)) } else { egui::RichText::new("● Rec") };
+            if ui.button(label).on_hover_text("records the image with the data bar to an MP4 in saves/videos (key V; needs ffmpeg on the PATH)").clicked() {
+                asked.rec = true;
+            }
+        });
+        if !status.is_empty() {
+            ui.label(egui::RichText::new(status).small());
+        }
         ui.label(egui::RichText::new("Click: focus there · drag: orbit · right drag: move\nwheel: zoom · Tab: hide this panel").small().weak());
     });
     asked
@@ -1427,6 +1543,18 @@ struct Running {
     pressed_at: Option<[f32; 2]>,
     /// Último ponto focado e quando, para a marca.
     focused: Option<([f32; 2], std::time::Instant)>,
+    /// FOTO E VÍDEO: a imagem com a barra de dados e o título (sem o painel)
+    /// desenha-se à parte, com a sua própria interface, e lê-se de volta.
+    shot_ctx: egui::Context,
+    shot_renderer: egui_wgpu::Renderer,
+    shot_tex: Option<wgpu::Texture>,
+    photo_now: bool,
+    rec: bool,
+    rec_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
+    rec_size: [u32; 2],
+    rec_frames: u32,
+    rec_path: std::path::PathBuf,
+    status: String,
 }
 
 impl Running {
@@ -1457,7 +1585,191 @@ impl Running {
         let scope = Scope::new(&gpu, format, [surface_cfg.width, surface_cfg.height]);
         let egui_state = egui_winit::State::new(egui::Context::default(), egui::ViewportId::ROOT, &window, Some(window.scale_factor() as f32), None, Some(gpu.device.limits().max_texture_dimension_2d as usize));
         let egui_renderer = egui_wgpu::Renderer::new(&gpu.device, format, egui_wgpu::RendererOptions::default());
-        Self { window, surface, surface_cfg, gpu, scope, cursor: [0.0; 2], orbiting: false, panning: false, egui_state, egui_renderer, panel: true, pressed_at: None, focused: None }
+        let shot_renderer = egui_wgpu::Renderer::new(&gpu.device, format, egui_wgpu::RendererOptions::default());
+        Self {
+            window,
+            surface,
+            surface_cfg,
+            gpu,
+            scope,
+            cursor: [0.0; 2],
+            orbiting: false,
+            panning: false,
+            egui_state,
+            egui_renderer,
+            panel: true,
+            pressed_at: None,
+            focused: None,
+            shot_ctx: egui::Context::default(),
+            shot_renderer,
+            shot_tex: None,
+            photo_now: false,
+            rec: false,
+            rec_tx: None,
+            rec_size: [0; 2],
+            rec_frames: 0,
+            rec_path: Default::default(),
+            status: String::new(),
+        }
+    }
+
+    /// A imagem de `view` (a cena, já desenhada) leva a barra de dados e o
+    /// título por cima, lê-se de volta e vai para um PNG e/ou para o vídeo.
+    fn shoot(&mut self, view: &wgpu::TextureView, size: [u32; 2]) {
+        let (w, h) = (size[0], size[1]);
+        let ppp = self.window.scale_factor() as f32;
+        let ctx = self.shot_ctx.clone();
+        ctx.set_pixels_per_point(ppp);
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32 / ppp, h as f32 / ppp))), ..Default::default() };
+        let scope = &self.scope;
+        let mut out = ctx.run_ui(raw, |root| overlay(root.ctx(), root.max_rect(), scope, None, false));
+        let jobs = ctx.tessellate(out.shapes, out.pixels_per_point);
+        let sd = egui_wgpu::ScreenDescriptor { size_in_pixels: size, pixels_per_point: out.pixels_per_point };
+        for (id, deltas) in out.textures_delta.set.drain() {
+            for delta in deltas {
+                self.shot_renderer.update_texture(&self.gpu.device, &self.gpu.queue, id, &delta);
+            }
+        }
+        let row = (w * 4).div_ceil(256) * 256;
+        let readback = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shot"),
+            size: (row * h) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        let mut cmds = self.shot_renderer.update_buffers(&self.gpu.device, &self.gpu.queue, &mut enc, &jobs, &sd);
+        {
+            let mut pass = enc
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("shot overlay"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+                .forget_lifetime();
+            self.shot_renderer.render(&mut pass, &jobs, &sd);
+        }
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture: self.shot_tex.as_ref().unwrap(), mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &readback, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        cmds.push(enc.finish());
+        self.gpu.queue.submit(cmds);
+        for id in out.textures_delta.free.drain() {
+            self.shot_renderer.free_texture(&id);
+        }
+        readback.map_async(wgpu::MapMode::Read, .., |r| r.expect("map"));
+        self.gpu.wait_idle();
+        let bgra = matches!(self.surface_cfg.format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        {
+            let data = readback.get_mapped_range(..).expect("mapped");
+            for y in 0..h as usize {
+                let line = &data[y * row as usize..y * row as usize + (w * 4) as usize];
+                for px in line.chunks_exact(4) {
+                    rgba.extend_from_slice(&if bgra { [px[2], px[1], px[0], 255] } else { [px[0], px[1], px[2], 255] });
+                }
+            }
+        }
+        readback.unmap();
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        if std::mem::take(&mut self.photo_now) {
+            let dir = std::path::Path::new("saves").join("capturas");
+            let _ = std::fs::create_dir_all(&dir);
+            let path = dir.join(format!("microscopio_{stamp}_epoch{}.png", self.scope.world.params.epoch));
+            self.status = format!("photo saved: {}", path.display());
+            let data = rgba.clone();
+            // O PNG comprime-se noutra thread.
+            std::thread::spawn(move || {
+                let write = || -> Result<(), Box<dyn std::error::Error>> {
+                    let mut e = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(&path)?), w, h);
+                    e.set_color(png::ColorType::Rgba);
+                    e.set_depth(png::BitDepth::Eight);
+                    e.write_header()?.write_image_data(&data)?;
+                    Ok(())
+                };
+                if let Err(e) = write() {
+                    log::error!("{}: {e}", path.display());
+                }
+            });
+        }
+        // VÍDEO: as imagens vão cruas para um ffmpeg (como na aplicação principal).
+        if !self.rec {
+            if self.rec_tx.take().is_some() {
+                self.status = format!("video saved: {} ({} images)", self.rec_path.display(), self.rec_frames);
+            }
+            return;
+        }
+        // (O x264 quer lados pares.)
+        let even = [w & !1, h & !1];
+        if self.rec_tx.is_none() {
+            let dir = std::path::Path::new("saves").join("videos");
+            let _ = std::fs::create_dir_all(&dir);
+            self.rec_path = dir.join(format!("microscopio_{stamp}.mp4"));
+            let child = std::process::Command::new("ffmpeg")
+                .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s"])
+                .arg(format!("{}x{}", even[0], even[1]))
+                .args(["-r", "60", "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p"])
+                .arg(&self.rec_path)
+                .stdin(std::process::Stdio::piped())
+                .spawn();
+            match child {
+                Ok(mut child) => {
+                    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+                    std::thread::spawn(move || {
+                        use std::io::Write;
+                        if let Some(mut pipe) = child.stdin.take() {
+                            for img in rx {
+                                if pipe.write_all(&img).is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        let _ = child.wait();
+                    });
+                    self.rec_tx = Some(tx);
+                    self.rec_size = even;
+                    self.rec_frames = 0;
+                }
+                Err(e) => {
+                    self.rec = false;
+                    self.status = format!("could not start ffmpeg ({e}): it must be installed and on the PATH");
+                    return;
+                }
+            }
+        }
+        if even != self.rec_size {
+            // A janela mudou de tamanho: a gravação acaba aqui.
+            self.rec = false;
+            self.rec_tx = None;
+            self.status = format!("window resized, video closed: {} ({} images)", self.rec_path.display(), self.rec_frames);
+            return;
+        }
+        let mut img = Vec::with_capacity((even[0] * even[1] * 4) as usize);
+        for y in 0..even[1] as usize {
+            img.extend_from_slice(&rgba[y * w as usize * 4..y * w as usize * 4 + even[0] as usize * 4]);
+        }
+        match self.rec_tx.as_ref().map(|tx| tx.try_send(img)) {
+            Some(Ok(())) => {
+                self.rec_frames += 1;
+                self.status = format!("recording: {} images ({:.1} s of video)", self.rec_frames, self.rec_frames as f32 / 60.0);
+            }
+            Some(Err(std::sync::mpsc::TrySendError::Disconnected(_))) => {
+                self.rec_tx = None;
+                self.rec = false;
+                self.status = "ffmpeg stopped in the middle of the recording".into();
+            }
+            _ => {}
+        }
     }
 
     fn redraw(&mut self) {
@@ -1469,7 +1781,42 @@ impl Running {
             }
         };
         let target = tex.texture.create_view(&Default::default());
-        self.scope.frame(&self.gpu, &target);
+        // Fotografia ou imagem de vídeo neste frame: a cena desenha-se também
+        // numa textura à parte (do tamanho da janela, ou do do arranque da
+        // gravação: o ffmpeg precisa de imagens iguais).
+        // (AUTOSHOT=n: fotografa sozinho ao frame n e sai 30 frames depois; para testes.)
+        if let Some(n) = std::env::var("AUTOSHOT").ok().and_then(|v| v.parse::<u32>().ok()) {
+            if self.scope.frame == n {
+                self.photo_now = true;
+            }
+            if self.scope.frame == n + 30 {
+                std::process::exit(0);
+            }
+        }
+        let shooting = self.photo_now || self.rec || self.rec_tx.is_some();
+        let size = [self.surface_cfg.width, self.surface_cfg.height];
+        if shooting && self.shot_tex.as_ref().is_none_or(|t| [t.width(), t.height()] != size) {
+            self.shot_tex = Some(self.gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("shot"),
+                size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.surface_cfg.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            }));
+        }
+        // MIRA: procura-se de novo de vez em quando (o agente mexe-se, a câmara
+        // também), nunca em todos os frames.
+        if self.scope.reticle && self.scope.subject.as_ref().is_none_or(|s| s.read_at.elapsed().as_secs_f32() > 1.0) {
+            self.scope.find_subject(&self.gpu);
+        }
+        let shot_view = self.shot_tex.as_ref().filter(|_| shooting).map(|t| t.create_view(&Default::default()));
+        self.scope.frame(&self.gpu, &target, shot_view.as_ref());
+        if let Some(view) = shot_view.as_ref() {
+            self.shoot(view, size);
+        }
         if self.scope.frame % 30 == 0 {
             let s = &self.scope;
             self.window.set_title(&format!(
@@ -1487,7 +1834,13 @@ impl Running {
         let ctx = self.egui_state.egui_ctx().clone();
         let marker = self.focused.filter(|(_, t)| t.elapsed().as_secs_f32() < 1.2).map(|(p, _)| p);
         let mut asked = Asked::default();
-        let mut out = ctx.run_ui(raw, |root| asked = interface(root, &mut self.scope, &mut self.panel, marker));
+        let recording = self.rec_tx.is_some();
+        let status = self.status.clone();
+        let mut out = ctx.run_ui(raw, |root| asked = interface(root, &mut self.scope, &mut self.panel, marker, recording, &status));
+        self.photo_now |= asked.photo;
+        if asked.rec {
+            self.rec = !self.rec;
+        }
         if asked.supersampling {
             self.scope.ss = if self.scope.ss >= 2 { 1 } else { 2 };
             let size = self.scope.size;
@@ -1622,6 +1975,12 @@ impl Running {
                     let size = self.scope.size;
                     self.scope.resize(&self.gpu.device, size);
                 }
+                Key::Character("t") => {
+                    self.scope.reticle = !self.scope.reticle;
+                    self.scope.subject = None;
+                }
+                Key::Character("p") => self.photo_now = true,
+                Key::Character("v") => self.rec = !self.rec,
                 Key::Character("m") => {
                     self.scope.monomers = if self.scope.monomers > 0.0 { 0.0 } else { 0.7 };
                     self.scope.last_orbit = None;
@@ -1677,13 +2036,13 @@ fn photo(path: &str, samples: u32) {
     scope.orbit.aperture = env("APERTURE", scope.orbit.aperture);
     scope.orbit.focal = 12.0 / env("LENS", 12.0 / scope.orbit.focal);
     // Uns passos para a grelha de desenho e as poses assentarem, depois parada.
-    scope.frame(&gpu, &gpu.device.create_texture(&target_desc(w, h, format)).create_view(&Default::default()));
+    scope.frame(&gpu, &gpu.device.create_texture(&target_desc(w, h, format)).create_view(&Default::default()), None);
     scope.paused = true;
     scope.last_orbit = None;
     let target = gpu.device.create_texture(&target_desc(w, h, format));
     let view = target.create_view(&Default::default());
     for _ in 0..samples.max(1) {
-        scope.frame(&gpu, &view);
+        scope.frame(&gpu, &view, None);
     }
     let readback = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("photo"),
