@@ -52,6 +52,8 @@ pub struct WorldView {
     /// morre (0 = não se desenham).
     pub epoch: std::cell::Cell<u32>,
     pub ghost_steps: std::cell::Cell<f32>,
+    /// Marcar na vista onde há fumarolas (ao pintá-las).
+    pub show_vents: std::cell::Cell<bool>,
     draw_args: wgpu::Buffer,
     /// Slot a desenhar sozinho (u32::MAX = todos).
     pub focus: std::cell::Cell<u32>,
@@ -321,6 +323,16 @@ impl WorldView {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 13,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -340,6 +352,7 @@ impl WorldView {
                 wgpu::BindGroupEntry { binding: 10, resource: world.contact_head_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 11, resource: world.contact_next_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 12, resource: world.kin_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 13, resource: world.heat_buf.as_entire_binding() },
             ],
         });
         let pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -500,6 +513,7 @@ impl WorldView {
             ghosts_pipeline,
             epoch: std::cell::Cell::new(0),
             ghost_steps: std::cell::Cell::new(0.0),
+            show_vents: std::cell::Cell::new(false),
             draw_args: world.draw_args_buf.clone(),
             focus: std::cell::Cell::new(u32::MAX),
             uv_depth: std::cell::Cell::new(11.0),
@@ -557,6 +571,10 @@ impl WorldView {
             focus_dy: self.focus_offset.get()[1],
             epoch: self.epoch.get(),
             ghost_steps: self.ghost_steps.get(),
+            show_vents: self.show_vents.get() as u32,
+            _pad_v0: 0,
+            _pad_v1: 0,
+            _pad_v2: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }

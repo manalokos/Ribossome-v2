@@ -218,7 +218,7 @@ pub struct World {
     pub redox_buf: wgpu::Buffer,
     /// Fonte de calor por célula do FLUIDO (força; o shader multiplica por
     /// TEMP_HEAT_RATE). Reconstruída no CPU quando algo muda.
-    heat_buf: wgpu::Buffer,
+    pub heat_buf: wgpu::Buffer,
     /// Assinatura do que está no heat_buf (para só reenviar quando muda).
     heat_key: Vec<u8>,
     /// O fluido estava ligado no último passo (ao desligar, as grelhas do

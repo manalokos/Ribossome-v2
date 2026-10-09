@@ -68,6 +68,9 @@ fn kin_map(w: vec2<f32>, px: f32) -> vec4<f32> {
     let fade = 1.0 - smoothstep(0.75 * KIN_REACH, KIN_REACH, d1);
     return vec4<f32>(col * (0.3 + 0.35 * edge), 0.85 * fade);
 }
+// Fontes das fumarolas (x = calor, y = química), na grelha do fluido: só
+// para as marcar na vista enquanto se pintam (view.show_vents).
+@group(0) @binding(13) var<storage, read> vent_src: array<vec2<f32>>;
 @group(0) @binding(7) var sprites_tex: texture_2d<f32>;
 @group(0) @binding(8) var sprites_samp: sampler;
 const SPRITE_COLS: f32 = 9.0;
@@ -476,6 +479,14 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     // A noite vê-se só na camada da luz (glow), que já vem escura do topo.
     var c = mix(back, hue, clamp(inten * view.monomer_brightness, 0.0, 1.0)) + glow;
     c = mix(c, rock_col, rock_m);
+    if (view.show_vents != 0u) {
+        // FUMAROLAS À VISTA (ao pintar): calor a laranja, química a
+        // verde-amarelo, mais forte onde a fonte é mais forte; por cima de
+        // tudo, rocha incluída.
+        let s = vent_src[fluid_index_at_world(world)];
+        c = mix(c, vec3<f32>(1.0, 0.45, 0.05), clamp(0.25 + 0.6 * s.x, 0.0, 0.85) * step(1e-4, s.x));
+        c = mix(c, vec3<f32>(0.75, 1.0, 0.1), clamp(0.25 + 0.6 * s.y, 0.0, 0.85) * step(1e-4, s.y) * select(1.0, 0.6, s.x > 1e-4));
+    }
     if (view.signal_view == 4u) {
         let km = kin_map(world, 1.0 / view.zoom);
         c = mix(c, km.rgb, km.a * (1.0 - rock_m));

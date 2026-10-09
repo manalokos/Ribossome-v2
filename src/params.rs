@@ -887,6 +887,12 @@ gpu_struct! {
         /// morre (0 = sem restos).
         pub epoch: u32,
         pub ghost_steps: f32,
+        /// 1 = marcar na vista onde há fumarolas (calor a laranja, química a
+        /// verde-amarelo): liga-se ao pintar fumarolas.
+        pub show_vents: u32,
+        pub _pad_v0: u32,
+        pub _pad_v1: u32,
+        pub _pad_v2: u32,
     }
 }
 

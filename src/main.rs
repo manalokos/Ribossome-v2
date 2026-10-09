@@ -1377,6 +1377,8 @@ impl Running {
         // o resto; com menos passos por frame a animação vê-se mais devagar.
         self.view.epoch.set(self.world.params.epoch);
         self.view.ghost_steps.set(GHOST_STEPS);
+        // Ao pintar fumarolas (ou a apagá-las), vê-se onde as há.
+        self.view.show_vents.set(self.ui.paint_on && (4..=6).contains(&self.ui.paint_material));
         self.view.daylight.set(self.world.params.daylight(self.world.params.epoch));
         self.view.mark_organ.set(self.ui.mark_organ);
         self.view.coc_radius.set(self.ui.coc_radius);
