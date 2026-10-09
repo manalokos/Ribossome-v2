@@ -1,96 +1,99 @@
-"""Atlas de sprites dos órgãos (teste do aspeto "microscopia eletrónica").
+"""Atlas de sprites do desenho dos agentes (aspeto "microscopia eletrónica").
 
-Lê as imagens geradas (cinzentas, fundo preto, vistas de cima) em
-saves/sprites/ e escreve assets/sprites.png: uma fila de mosaicos TILE×TILE,
-com a luminância em RGB e a máscara do objeto no alfa. O shader
-(agents_view.wgsl) pinta a luminância com a cor do órgão.
+Lê as imagens geradas em saves/sprites/fontes/ (cinzentas, fundo preto;
+NN_nome_K.png = uma variante, NN_nome_grelha.png = matriz 3x3) e escreve
+assets/sprites.png: cinzento + alfa, COLS colunas de variantes por ROWS
+linhas, mosaicos de TILE px. O shader (agents_view.wgsl) pinta a luminância
+com a cor do órgão e escolhe a coluna pelo código do órgão, por isso órgãos
+do mesmo tipo têm pequenas diferenças entre si.
 
-Mosaicos (a ordem é a de SPRITE_* no shader):
-  0 deposito.png      -> recortado à caixa do objeto e ESTICADO ao mosaico
-                         (o shader estica-o ao comprimento real do órgão)
-  1 sensor.png        -> coroa de antenas, centrado
-  2 sensor_lado.png   -> uma antena para CIMA, com a esfera no centro
+Linhas: 0..21 = tipo de órgão; 22 = troço de aminoácido (cápsula deitada);
+23 = um espigão da protease (ponta para cima); 24 = corpo da protease.
+Linhas com menos de COLS variantes repetem-nas.
+
+Encaixe no mosaico:
+  quadrado  (por omissão) a caixa do objeto, centrada
+  esticado  (depósito, aminoácido, espigão) a caixa esticada ao mosaico
+  haste     (sensores de um lado) a esfera no centro com raio STALK_BODY do
+            meio mosaico, a antena para cima
 
 Uso: python -X utf8 scripts/sprites_atlas.py
 """
+import glob
 import os
-from PIL import Image, ImageDraw, ImageFilter, ImageOps
+import re
+import sys
+from PIL import Image, ImageFilter, ImageOps
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from sprites_escolha import ORGANS, mask_of  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "saves", "sprites")
-TILE = 256
-THRESHOLD = 22  # luminância (0..255) acima da qual já é objeto
+SRC = os.path.join(ROOT, "saves", "sprites", "fontes")
+TILE, COLS, ROWS = 192, 9, 25
+STALK_BODY = 0.3
+STRETCH = {7, 22, 23}
+STALK = {8, 9}
+HOLES = {t for t, o in ORGANS.items() if o[2]}
 
 
-def mask_of(lum):
-    """Máscara do objeto: tudo o que não é fundo ligado às margens."""
-    binary = lum.point(lambda v: 255 if v > THRESHOLD else 0)
-    # Enche o fundo a partir dos cantos com um valor à parte; o que sobra a 0
-    # são buracos escuros DENTRO do objeto e contam como objeto.
-    filled = binary.copy()
-    for corner in [(0, 0), (lum.width - 1, 0), (0, lum.height - 1), (lum.width - 1, lum.height - 1)]:
-        if filled.getpixel(corner) == 0:
-            ImageDraw.floodfill(filled, corner, 128)
-    return filled.point(lambda v: 0 if v == 128 else 255)
-
-
-def load(name, fatten=0):
-    """Luminância e máscara. fatten (ímpar, píxeis da origem) engrossa os
-    traços finos (antenas), que de outro modo desaparecem ao reduzir."""
-    lum = Image.open(os.path.join(SRC, name)).convert("L")
-    if fatten:
-        lum = lum.filter(ImageFilter.MaxFilter(fatten))
-    mask = mask_of(lum)
-    # Contraste: estica a luminância DENTRO do objeto a toda a gama.
-    lum = ImageOps.autocontrast(lum, cutoff=1, mask=mask)
-    return lum, mask
-
-
-def tile(lum, mask, box):
-    """Recorta `box` (pode sair da imagem: enche de fundo) e reduz ao mosaico."""
+def fit(lum, mask, box):
     w, h = box[2] - box[0], box[3] - box[1]
     out_l = Image.new("L", (w, h), 0)
     out_m = Image.new("L", (w, h), 0)
     out_l.paste(lum, (-box[0], -box[1]))
     out_m.paste(mask, (-box[0], -box[1]))
     out_l = out_l.resize((TILE, TILE), Image.LANCZOS)
-    out_m = out_m.resize((TILE, TILE), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6))
-    return Image.merge("RGBA", (out_l, out_l, out_l, out_m))
+    out_m = out_m.resize((TILE, TILE), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.5))
+    return Image.merge("LA", (out_l, out_m))
 
 
-def square_around(cx, cy, half):
-    return (int(cx - half), int(cy - half), int(cx + half), int(cy + half))
+def tile(lum, row):
+    mask = mask_of(lum, row in HOLES)
+    clean = mask.filter(ImageFilter.MinFilter(5)).filter(ImageFilter.MaxFilter(5))
+    b = clean.getbbox()
+    if b is None:
+        return None
+    lum = ImageOps.autocontrast(lum, cutoff=1, mask=mask)
+    if row in STRETCH:
+        return fit(lum, mask, b)
+    cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+    half = max(b[2] - b[0], b[3] - b[1]) / 2 * 1.03
+    if row in STALK:
+        # A esfera é a parte larga (em baixo): centro e raio pelas linhas largas.
+        px = clean.load()
+        widths = [(sum(1 for x in range(b[0], b[2], 2) if px[x, y] > 127) * 2, y) for y in range(b[1], b[3])]
+        widest = max(w for w, _ in widths)
+        rows = [y for w, y in widths if w > 0.6 * widest]
+        cy = (rows[0] + rows[-1]) / 2
+        half = (widest / 2) / STALK_BODY
+    return fit(lum, mask, (int(cx - half), int(cy - half), int(cx + half), int(cy + half)))
 
 
 def main():
-    tiles = []
-    # 0: depósito, esticado à caixa.
-    lum, mask = load("deposito.png")
-    tiles.append(tile(lum, mask, mask.getbbox()))
-    # 1: coroa, quadrado centrado na caixa.
-    lum, mask = load("sensor.png", fatten=9)
-    b = mask.getbbox()
-    half = max(b[2] - b[0], b[3] - b[1]) / 2 * 1.02
-    tiles.append(tile(lum, mask, square_around((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, half)))
-    # 2: uma antena: a esfera é a parte larga; fica no centro do mosaico.
-    lum, mask = load("sensor_lado.png", fatten=9)
-    b = mask.getbbox()
-    px = mask.load()
-    widths = [(sum(1 for x in range(b[0], b[2]) if px[x, y] > 127), y) for y in range(b[1], b[3])]
-    widest = max(w for w, _ in widths)
-    rows = [y for w, y in widths if w > 0.5 * widest]
-    cy = (rows[0] + rows[-1]) / 2
-    cx = (b[0] + b[2]) / 2
-    half = max(cy - b[1], b[3] - cy, (b[2] - b[0]) / 2) * 1.02
-    tiles.append(tile(lum, mask, square_around(cx, cy, half)))
-    print("esfera do sensor de um lado: raio / meio mosaico = %.3f" % ((rows[-1] - rows[0]) / 2 / half))
-
-    atlas = Image.new("RGBA", (TILE * len(tiles), TILE), (0, 0, 0, 0))
-    for i, t in enumerate(tiles):
-        atlas.paste(t, (i * TILE, 0))
+    rows = {}
+    for path in sorted(glob.glob(os.path.join(SRC, "*.png"))):
+        m = re.match(r"(\d+)_(.+)_(grelha|\d+)\.png", os.path.basename(path))
+        if not m:
+            continue
+        row = int(m.group(1))
+        lum = Image.open(path).convert("L")
+        cells = [lum]
+        if m.group(3) == "grelha":
+            w, h = lum.size
+            cells = [lum.crop((c * w // 3, r * h // 3, (c + 1) * w // 3, (r + 1) * h // 3)) for r in range(3) for c in range(3)]
+        for cell in cells:
+            t = tile(cell, row)
+            if t is not None:
+                rows.setdefault(row, []).append(t)
+    atlas = Image.new("LA", (TILE * COLS, TILE * ROWS), (0, 0))
+    for row, tiles in rows.items():
+        assert row < ROWS, row
+        for c in range(COLS):
+            atlas.paste(tiles[c % len(tiles)], (c * TILE, row * TILE))
     out = os.path.join(ROOT, "assets", "sprites.png")
-    atlas.save(out)
-    print("escrito", out, atlas.size)
+    atlas.save(out, optimize=True)
+    print("escrito", out, atlas.size, "linhas:", {r: len(t) for r, t in sorted(rows.items())})
 
 
 if __name__ == "__main__":
