@@ -28,6 +28,8 @@ struct Running {
     /// Quanto da transição mapa → microscópio já se fez (0 = só o mapa, 1 =
     /// só o microscópio), pelo zoom; e se o botão direito está a rodar a câmara.
     micro_t: f32,
+    /// Quando saiu a última imagem (para o limite de fps do microscópio).
+    last_present: std::time::Instant,
     /// Zoom ainda por aplicar (logaritmo do fator) e o ponto do ecrã que fica
     /// fixo: a roda do rato aplica-se aos poucos, sem saltos.
     zoom_pending: f32,
@@ -400,6 +402,7 @@ impl Running {
             scope,
             scope_panel: true,
             micro_t: 0.0,
+            last_present: std::time::Instant::now(),
             zoom_pending: 0.0,
             zoom_anchor: [0.0; 2],
             orbiting: false,
@@ -1986,6 +1989,14 @@ impl Running {
         }
 
         self.runlog.after_frame(&self.world, &self.ui, &mut self.profiler);
+        // LIMITE DE FPS do microscópio: espera-se o que faltar para o intervalo.
+        if let Some(limit) = self.scope.as_ref().filter(|_| self.micro_t > 0.5).map(|s| s.fps_limit).filter(|&l| l > 0.0) {
+            let wait = std::time::Duration::from_secs_f32(1.0 / limit).saturating_sub(self.last_present.elapsed());
+            if !wait.is_zero() {
+                std::thread::sleep(wait);
+            }
+        }
+        self.last_present = std::time::Instant::now();
         self.window.pre_present_notify();
         self.gpu.queue.present(tex);
         for id in out.textures_delta.free.drain() {

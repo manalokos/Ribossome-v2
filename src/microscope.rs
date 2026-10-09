@@ -867,6 +867,9 @@ pub struct Scope {
     pub approach: f32,
     /// Imagens por segundo (média corrida), para a barra de dados.
     pub fps: f32,
+    /// Limite de imagens por segundo na aplicação principal, enquanto o
+    /// microscópio está à vista (0 = sem limite).
+    pub fps_limit: f32,
     /// FOTO / VÍDEO na aplicação principal: se houver esta textura (do
     /// tamanho da janela), a imagem final também é desenhada nela, no mesmo
     /// retângulo, sem fundido; `shot_ready` diz que já tem um frame.
@@ -1304,6 +1307,7 @@ impl Scope {
             epoch: world.params.epoch,
             approach: 1.0,
             fps: 60.0,
+            fps_limit: 24.0,
             shot: None,
             shot_ready: false,
             opacity: 1.0,
@@ -2030,6 +2034,18 @@ pub fn interface(root: &mut egui::Ui, screen: egui::Rect, s: &mut Scope, panel: 
         }
         ui.add(egui::Slider::new(&mut s.exposure, 0.05..=16.0).logarithmic(true).text("Exposure"));
         ui.add(egui::Slider::new(&mut s.shutter, 1.0 / 60.0..=8.0).logarithmic(true).suffix(" s").text("Shutter")).on_hover_text("exposure time while the simulation runs: longer = cleaner image, more motion blur");
+        if s.embedded {
+            let mut capped = s.fps_limit > 0.0;
+            ui.horizontal(|ui| {
+                let mut shown = if capped { s.fps_limit } else { 24.0 };
+                if ui.add_enabled(capped, egui::Slider::new(&mut shown, 5.0..=120.0).suffix(" fps").text("Frame rate")).changed() && capped {
+                    s.fps_limit = shown;
+                }
+                if ui.checkbox(&mut capped, "limit").on_hover_text("caps the frame rate while the microscope is on screen. The simulation gives the same steps per frame, so fewer frames also means a slower simulation").changed() {
+                    s.fps_limit = if capped { 24.0 } else { 0.0 };
+                }
+            });
+        }
         let mut full = s.rate <= 0.0;
         if !s.embedded {
         ui.horizontal(|ui| {
