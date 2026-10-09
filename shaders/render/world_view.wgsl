@@ -97,7 +97,8 @@ fn grain_sprite(row: f32, d: vec2<f32>, r: f32, h: u32, px: f32) -> vec3<f32> {
     let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
     let g = px / r;
     let s = textureSampleGrad(sprites_tex, sprites_samp, vec2<f32>((f32((h >> 12u) % 9u) + 0.5) / SPRITE_COLS, (row + 0.5) / SPRITE_ROWS) + clamp(q, vec2<f32>(-0.98), vec2<f32>(0.98)) * sc, vec2<f32>(g, 0.0) * sc, vec2<f32>(0.0, g) * sc);
-    return vec3<f32>(s.r, s.g, s.b);
+    // (Altura em 16 bits: azul = byte alto, alfa = byte baixo.)
+    return vec3<f32>(s.r, s.g, (s.b * 65280.0 + s.a * 255.0) / 65535.0);
 }
 
 // Célula do fluido debaixo de uma posição do mundo.
@@ -272,13 +273,14 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                                 // acaso), a primeira pousada no fundo e as
                                 // outras por cima, à distância de uma espessura.
                                 let lf = f32(((h >> 12u) & 0xFFu) % 3u);
-                                let top = cov * (MOL_RELIEF * t.b * r * mix(0.45, 1.3, t.r) + mol_thickness(r) * lf);
+                                let tb = (t.b * 65280.0 + t.a * 255.0) / 65535.0;
+                                let top = cov * (MOL_RELIEF * tb * r * mix(0.45, 1.3, t.r) + mol_thickness(r) * lf);
                                 if (top > s.top) {
                                     s.top = top;
                                     // (A forma insuflada é um calhau liso; a
                                     // luminância do sprite, onde se veem os
                                     // átomos, dá-lhe as bossas.)
-                                    s.h = cov * t.b * r * mix(0.45, 1.3, t.r);
+                                    s.h = cov * tb * r * mix(0.45, 1.3, t.r);
                                     s.lift = lf;
                                 }
                             }

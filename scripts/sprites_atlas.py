@@ -42,7 +42,7 @@ from sprites_escolha import ORGANS, mask_of  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "saves", "sprites", "fontes")
-TILE, COLS, ROWS = 192, 9, 32
+TILE, COLS, ROWS = 512, 9, 32
 STALK_BODY = 0.3
 STRETCH = {7, 22, 23}
 STALK = {8, 9}
@@ -59,7 +59,8 @@ def fit(lum, mask, box):
     out_m.paste(mask, (-box[0], -box[1]))
     out_l = out_l.resize((TILE, TILE), Image.LANCZOS)
     out_m = out_m.resize((TILE, TILE), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.5))
-    return Image.merge("RGBA", (out_l, out_m, inflate(out_l, out_m), Image.new("L", (TILE, TILE), 255)))
+    hi, lo = inflate(out_l, out_m)
+    return Image.merge("RGBA", (out_l, out_m, hi, lo))
 
 
 def inflate(lum, mask):
@@ -68,21 +69,34 @@ def inflate(lum, mask):
     luminância (as estrias e bossas do desenho)."""
     m = np.array(mask) > 127
     if not m.any():
-        return Image.new("L", mask.size, 0)
+        return Image.new("L", mask.size, 0), Image.new("L", mask.size, 0)
     d = ndi.distance_transform_edt(m)
-    w = np.zeros_like(d)
-    r = float(d.max())
+    # O raio da maior esfera que cobre cada ponto é um campo suave: calcula-se
+    # a um quarto da resolução (64 vezes mais depressa) e amplia-se. O
+    # contorno e o perfil vêm de `d`, à resolução inteira.
+    k = 4
+    ms = m[::k, ::k]
+    ds = ndi.distance_transform_edt(ms)
+    ws = np.zeros_like(ds)
+    r = float(ds.max())
     while r >= 1.0:
-        core = d >= r
+        core = ds >= r
         cover = ndi.distance_transform_edt(~core) <= r
-        w = np.where(cover & (w == 0), r, w)
+        ws = np.where(cover & (ws == 0), r, ws)
         r -= 1.0
+    ws = np.maximum(ws, ds) * k
+    w = ndi.zoom(ws, k, order=1)[:m.shape[0], :m.shape[1]]
+    w = ndi.gaussian_filter(w, k)
     w = np.where(m, np.maximum(w, d), 0.0)
     h = np.sqrt(np.clip(d * (2.0 * w - d), 0.0, None))
     relief = ndi.gaussian_filter(np.array(lum, dtype=np.float32) / 255.0, 1.0)
     h = np.where(m, h + 0.05 * (TILE / 2) * (relief - relief[m].mean()), 0.0)
     h = ndi.gaussian_filter(h, 0.8)
-    return Image.fromarray(np.clip(h / (TILE / 2) * 255.0, 0, 255).astype(np.uint8), "L")
+    # ALTURA EM 16 BITS, partida por dois canais (azul = byte alto, alfa = byte
+    # baixo): com 8 bits as encostas saíam em degraus no microscópio 3D. A
+    # interpolação e as médias dos mipmaps são lineares, por isso continuam certas.
+    v = np.clip(h / (TILE / 2) * 65535.0, 0, 65535).astype(np.uint16)
+    return Image.fromarray((v >> 8).astype(np.uint8), "L"), Image.fromarray((v & 255).astype(np.uint8), "L")
 
 
 def tile(lum, row):
@@ -133,7 +147,7 @@ def main():
             t = tile(cell, row)
             if t is not None:
                 rows.setdefault(row, []).append(t)
-    atlas = Image.new("RGBA", (TILE * COLS, TILE * ROWS), (0, 0, 0, 255))
+    atlas = Image.new("RGBA", (TILE * COLS, TILE * ROWS), (0, 0, 0, 0))
     for row, tiles in rows.items():
         # Mais variantes do que colunas: continuam nas linhas seguintes.
         for r in range((len(tiles) + COLS - 1) // COLS):

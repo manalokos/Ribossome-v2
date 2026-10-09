@@ -102,13 +102,14 @@ fn sprites_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture 
     let mut reader = png::Decoder::new(&include_bytes!("../../assets/sprites.png")[..]).read_info().expect("assets/sprites.png");
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).expect("assets/sprites.png");
-    // R = cinzento, G = máscara, B = altura da forma insuflada (ver o script).
+    // R = cinzento, G = máscara, B e A = altura da forma insuflada, em 16
+    // bits (byte alto e byte baixo; ver o script).
     assert!(info.color_type == png::ColorType::Rgba && info.bit_depth == png::BitDepth::Eight, "sprites.png must be 8-bit RGBA");
     buf.truncate(info.buffer_size());
     let (mut w, mut h) = (info.width, info.height);
-    // Cinco níveis (mosaicos de 192 a 12 px): abaixo disso os mosaicos
+    // Seis níveis (mosaicos de 512 a 16 px): abaixo disso os mosaicos
     // vizinhos misturavam-se.
-    let levels = 5;
+    let levels = 6;
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("sprites"),
         size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },

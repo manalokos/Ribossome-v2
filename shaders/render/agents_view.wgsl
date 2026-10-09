@@ -90,11 +90,12 @@ fn sprite(row: f32, col: f32, q: vec2<f32>, qx: vec2<f32>, qy: vec2<f32>) -> vec
     let qc = clamp(q, vec2<f32>(-0.98), vec2<f32>(0.98));
     let s = textureSampleGrad(sprites_tex, sprites_samp, vec2<f32>((col + 0.5) / SPRITE_COLS, (row + 0.5) / SPRITE_ROWS) + qc * sc, qx * sc, qy * sc);
     let inside = step(max(abs(q.x), abs(q.y)), 0.995);
-    return vec3<f32>(s.r, s.g * inside, s.b);
+    // (Altura em 16 bits: azul = byte alto, alfa = byte baixo.)
+    return vec3<f32>(s.r, s.g * inside, (s.b * 65280.0 + s.a * 255.0) / 65535.0);
 }
 // Máscara DESFOCADA do mosaico (um nível baixo do mipmap, escolhido à mão):
 // serve de sombra de contacto com a forma do sprite.
-const SPRITE_SOFT_LEVEL: f32 = 3.4;
+const SPRITE_SOFT_LEVEL: f32 = 4.8;
 fn sprite_soft(row: f32, col: f32, q: vec2<f32>) -> f32 {
     let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
     let qc = clamp(q, vec2<f32>(-0.94), vec2<f32>(0.94));
