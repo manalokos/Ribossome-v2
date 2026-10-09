@@ -820,6 +820,13 @@ pub struct Scope {
     /// (visto exatamente de cima, sem rotação nem desfoque, como o mapa) a 1
     /// (a câmara escolhida em `orbit`); `opacity` é o fundido da imagem.
     pub approach: f32,
+    /// Imagens por segundo (média corrida), para a barra de dados.
+    pub fps: f32,
+    /// FOTO / VÍDEO na aplicação principal: se houver esta textura (do
+    /// tamanho da janela), a imagem final também é desenhada nela, no mesmo
+    /// retângulo, sem fundido; `shot_ready` diz que já tem um frame.
+    pub shot: Option<wgpu::Texture>,
+    pub shot_ready: bool,
     pub opacity: f32,
     /// Dentro da aplicação principal (que dá os passos, grava e fotografa):
     /// o painel esconde os comandos que são dela.
@@ -1245,6 +1252,9 @@ impl Scope {
             last_step: std::time::Instant::now(),
             epoch: world.params.epoch,
             approach: 1.0,
+            fps: 60.0,
+            shot: None,
+            shot_ready: false,
             opacity: 1.0,
             embedded: false,
         }
@@ -1420,7 +1430,10 @@ impl Scope {
         let a = self.approach.clamp(0.0, 1.0);
         let mut o = self.orbit;
         o.pitch = 1.55 + (o.pitch - 1.55) * a;
-        o.yaw *= a;
+        // (Pelo caminho mais curto: depois de várias voltas, ou de mais de
+        // meia, desfaz-se para o lado mais perto e não tudo para trás.)
+        let tau = std::f32::consts::TAU;
+        o.yaw = (o.yaw - tau * (o.yaw / tau).round()) * a;
         o.aperture *= a;
         o
     }
@@ -1474,6 +1487,7 @@ impl Scope {
         // maneira). Parada, a média é a de todas as amostras.
         let dt = self.last_frame.elapsed().as_secs_f32().clamp(1e-3, 0.25);
         self.last_frame = std::time::Instant::now();
+        self.fps += (1.0 / dt - self.fps) * 0.05;
         let weight = if moving { (1.0 / (self.samples + 1) as f32).max((dt / self.shutter.max(1e-3)).min(1.0)) } else { 1.0 / (self.samples + 1) as f32 };
         self.samples += 1;
         self.frame += 1;
@@ -1762,6 +1776,29 @@ impl Scope {
                 pass.set_pipeline(&self.present_blend);
                 pass.set_bind_group(0, &bg, &[]);
                 pass.draw(0..3, 0..1);
+                drop(pass);
+                if let Some(tex) = self.shot.as_ref() {
+                    let view = tex.create_view(&Default::default());
+                    let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("scope shot"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    pass.set_viewport(vp[0], vp[1], vp[2], vp[3], 0.0, 1.0);
+                    pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, vp[2] as u32, vp[3] as u32);
+                    pass.set_pipeline(&self.present);
+                    pass.set_bind_group(0, &bg, &[]);
+                    pass.draw(0..3, 0..1);
+                    self.shot_ready = true;
+                }
             }
         }
         // (A mesma imagem para a fotografia / o vídeo, sem a interface.)
@@ -1817,7 +1854,8 @@ pub fn overlay(ctx: &egui::Context, screen: egui::Rect, s: &Scope, marker: Optio
     let dim = egui::Color32::from_gray(140);
     let bright = egui::Color32::from_gray(235);
     let mag_text = if mag >= 1e6 { format!("{:.2} M×", mag / 1e6) } else { format!("{:.0} k×", mag / 1e3) };
-    let fields: [(&str, String); 10] = [
+    let fields: [(&str, String); 11] = [
+        ("FPS", format!("{:.0}", s.fps)),
         ("HFW", nm_text(hfw)),
         ("Mag", mag_text),
         ("WD", nm_text(wd * NM_PER_UNIT)),
@@ -1989,6 +2027,9 @@ pub fn interface(root: &mut egui::Ui, screen: egui::Rect, s: &mut Scope, panel: 
                 s.orbit.focus_shift = 0.0;
             }
         });
+        if s.embedded {
+            ui.label(egui::RichText::new("Photo and video: the usual buttons of the simulator record this view while it is on screen.").small().weak());
+        }
         if !s.embedded {
         ui.horizontal(|ui| {
             if ui.button("📷 Photo").on_hover_text("saves the image with the data bar to saves/capturas (key P)").clicked() {

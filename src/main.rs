@@ -51,6 +51,9 @@ struct Running {
     rec_tx: Option<std::sync::mpsc::SyncSender<Vec<u8>>>,
     rec_path: std::path::PathBuf,
     rec_side: u32,
+    /// A gravação em curso é do microscópio (e o tamanho das imagens dela).
+    rec_micro: bool,
+    rec_dims: [u32; 2],
     rec_frames: u32,
     rec_tick: u32,
     cam: Camera,
@@ -385,6 +388,8 @@ impl Running {
             rec_tx: None,
             rec_path: std::path::PathBuf::new(),
             rec_side: 0,
+            rec_micro: false,
+            rec_dims: [0; 2],
             rec_frames: 0,
             rec_tick: 0,
             egui_renderer,
@@ -939,7 +944,178 @@ impl Running {
     /// (sem PNG, sem ficheiros intermédios) para um ffmpeg que escreve logo o
     /// MP4: uma thread à parte alimenta-o, e se o codificador se atrasar a
     /// imagem perde-se em vez de travar a simulação.
+    /// Foto e vídeo do MICROSCÓPIO (quando é ele que está à vista): a imagem
+    /// do frame anterior, do tamanho da vista, lida da textura `shot`.
+    fn photo_video_micro(&mut self) {
+        if !self.ui.rec && self.rec_tx.take().is_some() {
+            self.ui.rec_info = format!("video saved: {} ({} images)", self.rec_path.display(), self.rec_frames);
+        }
+        // Uma gravação começada no mapa tem outro tamanho: acaba aqui.
+        if self.rec_tx.is_some() && !self.rec_micro {
+            self.rec_tx = None;
+            self.ui.rec = false;
+            self.ui.rec_info = format!("view changed, video closed: {} ({} images)", self.rec_path.display(), self.rec_frames);
+        }
+        let Some(scope) = self.scope.as_mut() else { return };
+        if !self.ui.photo_now && !self.ui.rec {
+            scope.shot = None;
+            scope.shot_ready = false;
+            return;
+        }
+        let (sw, sh) = (self.surface_cfg.width, self.surface_cfg.height);
+        if scope.shot.as_ref().is_none_or(|t| t.width() != sw || t.height() != sh) {
+            scope.shot = Some(self.gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("scope shot"),
+                size: wgpu::Extent3d { width: sw, height: sh, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.surface_cfg.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            }));
+            scope.shot_ready = false;
+        }
+        if !scope.shot_ready {
+            // Ainda sem imagem: fica para o frame seguinte.
+            return;
+        }
+        let vp = self.viewport;
+        let (x, y) = (vp[0] as u32, vp[1] as u32);
+        // (O x264 quer lados pares.)
+        let (w, h) = (((vp[2] as u32).min(sw.saturating_sub(x))) & !1, ((vp[3] as u32).min(sh.saturating_sub(y))) & !1);
+        if w < 16 || h < 16 {
+            return;
+        }
+        let row = (w * 4).div_ceil(256) * 256;
+        let buf = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("scope shot"),
+            size: (row * h) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture: scope.shot.as_ref().unwrap(), mip_level: 0, origin: wgpu::Origin3d { x, y, z: 0 }, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        self.gpu.queue.submit([enc.finish()]);
+        buf.map_async(wgpu::MapMode::Read, .., |r| r.expect("map"));
+        self.gpu.wait_idle();
+        let bgra = matches!(self.surface_cfg.format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        {
+            let data = buf.get_mapped_range(..).expect("mapped");
+            for line in 0..h as usize {
+                for px in data[line * row as usize..line * row as usize + (w * 4) as usize].chunks_exact(4) {
+                    rgba.extend_from_slice(&if bgra { [px[2], px[1], px[0], 255] } else { [px[0], px[1], px[2], 255] });
+                }
+            }
+        }
+        buf.unmap();
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        if std::mem::take(&mut self.ui.photo_now) {
+            let dir = std::path::Path::new(SAVES_DIR).join("capturas");
+            let _ = std::fs::create_dir_all(&dir);
+            let path = dir.join(format!("microscopio_{}.png", self.world.params.epoch));
+            self.ui.scene_msg = format!("photo saved to {}", path.display());
+            let data = rgba.clone();
+            std::thread::spawn(move || {
+                let write = || -> Result<(), Box<dyn std::error::Error>> {
+                    let mut e = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(&path)?), w, h);
+                    e.set_color(png::ColorType::Rgba);
+                    e.set_depth(png::BitDepth::Eight);
+                    e.write_header()?.write_image_data(&data)?;
+                    Ok(())
+                };
+                if let Err(e) = write() {
+                    log::error!("{}: {e}", path.display());
+                }
+            });
+        }
+        if !self.ui.rec {
+            return;
+        }
+        if self.rec_tx.is_none() {
+            let dir = std::path::Path::new(SAVES_DIR).join("videos");
+            let _ = std::fs::create_dir_all(&dir);
+            self.rec_path = dir.join(format!("microscopio_{stamp}_epoch{}.mp4", self.world.params.epoch));
+            let child = std::process::Command::new("ffmpeg")
+                .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s"])
+                .arg(format!("{w}x{h}"))
+                .args(["-r", "60", "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p"])
+                .arg(&self.rec_path)
+                .stdin(std::process::Stdio::piped())
+                .spawn();
+            match child {
+                Ok(mut child) => {
+                    let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(8);
+                    std::thread::spawn(move || {
+                        use std::io::Write;
+                        if let Some(mut pipe) = child.stdin.take() {
+                            for img in rx {
+                                if pipe.write_all(&img).is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        let _ = child.wait();
+                    });
+                    self.rec_tx = Some(tx);
+                    self.rec_micro = true;
+                    self.rec_dims = [w, h];
+                    self.rec_frames = 0;
+                }
+                Err(e) => {
+                    self.ui.rec = false;
+                    self.ui.rec_info = format!("could not start ffmpeg ({e}): it must be installed and on the PATH");
+                    return;
+                }
+            }
+        }
+        if [w, h] != self.rec_dims {
+            // A vista mudou de tamanho: a gravação acaba aqui.
+            self.rec_tx = None;
+            self.ui.rec = false;
+            self.ui.rec_info = format!("view resized, video closed: {} ({} images)", self.rec_path.display(), self.rec_frames);
+            return;
+        }
+        match self.rec_tx.as_ref().map(|tx| tx.try_send(rgba)) {
+            Some(Ok(())) => {
+                self.rec_frames += 1;
+                self.ui.rec_info = format!("recording the microscope: {} images ({:.1} s of video)", self.rec_frames, self.rec_frames as f32 / 60.0);
+            }
+            Some(Err(std::sync::mpsc::TrySendError::Disconnected(_))) => {
+                self.rec_tx = None;
+                self.ui.rec = false;
+                self.ui.rec_info = "ffmpeg stopped in the middle of the recording".into();
+            }
+            _ => {}
+        }
+    }
+
     fn photo_video(&mut self) {
+        // (RIBO_AUTOSHOT=n: fotografa sozinho ao frame n; para testes.)
+        static FRAME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if std::env::var("RIBO_AUTOSHOT").ok().and_then(|v| v.parse::<u32>().ok()) == Some(frame) {
+            self.ui.photo_now = true;
+        }
+        if self.micro_t > 0.75 && self.scope.is_some() {
+            self.photo_video_micro();
+            return;
+        }
+        if let Some(scope) = self.scope.as_mut() {
+            scope.shot = None;
+            scope.shot_ready = false;
+        }
+        // Uma gravação começada no microscópio tem outro tamanho: acaba aqui.
+        if self.rec_tx.is_some() && self.rec_micro {
+            self.rec_tx = None;
+            self.ui.rec = false;
+            self.ui.rec_info = format!("view changed, video closed: {} ({} images)", self.rec_path.display(), self.rec_frames);
+        }
         let photo = std::mem::take(&mut self.ui.photo_now);
         // Paragem: fechar o canal faz a thread fechar o ffmpeg, que termina o ficheiro.
         if !self.ui.rec && self.rec_tx.take().is_some() {
@@ -988,6 +1164,7 @@ impl Running {
                     });
                     self.rec_tx = Some(tx);
                     self.rec_side = size;
+                    self.rec_micro = false;
                     self.rec_frames = 0;
                     self.rec_tick = 1;
                 }
@@ -1648,21 +1825,32 @@ impl Running {
         // fundido, visto de cima como o mapa, e depois inclina-se e ganha a
         // profundidade de campo até à câmara escolhida no painel.
         const MICRO_Z0: f32 = 0.6;
-        const MICRO_Z1: f32 = 2.5;
+        const MICRO_Z1: f32 = 3.2;
         let smooth = |a: f32, b: f32, x: f32| {
             let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
         };
         self.micro_t = if self.ui.microscope && !covered && vp[2] >= 32.0 && vp[3] >= 32.0 { smooth(MICRO_Z0.ln(), MICRO_Z1.ln(), self.cam.zoom.max(1e-6).ln()) } else { 0.0 };
         let micro = self.micro_t > 0.0;
-        let map_visible = self.micro_t < 0.4;
+        let map_visible = self.micro_t < 0.75;
         if micro {
             use ribossome::microscope::{REF_TAN, REGION_PER_DIST, Scope};
             let dist = (0.5 * screen[1] / self.cam.zoom / REF_TAN).clamp(25.0, 5000.0);
             let region = (dist * REGION_PER_DIST).clamp(30.0, 4000.0);
             let scope = self.scope.get_or_insert_with(|| Scope::new(&self.gpu, &self.world, self.surface_cfg.format, [vp[2] as u32, vp[3] as u32], self.cam.center, region));
-            scope.opacity = smooth(0.0, 0.4, self.micro_t);
-            scope.approach = smooth(0.3, 1.0, self.micro_t);
+            // (Fundido LONGO, e a câmara só se começa a inclinar quando o
+            // microscópio já pesa mais do que o mapa.)
+            scope.opacity = smooth(0.0, 0.75, self.micro_t);
+            scope.approach = smooth(0.5, 1.0, self.micro_t);
+            // SEGUIR: é o microscópio que leva a câmara (a do mapa vai atrás).
+            // MIRA: procura-se o agente do centro de vez em quando.
+            if scope.follow {
+                scope.orbit.centre = self.cam.center;
+                scope.follow_step(&self.gpu, &self.world);
+                self.cam.center = scope.orbit.centre;
+            } else if scope.reticle && scope.subject.as_ref().is_none_or(|s| s.read_at.elapsed().as_secs_f32() > 1.0) {
+                scope.find_subject(&self.gpu, &self.world);
+            }
             scope.orbit.centre = self.cam.center;
             scope.orbit.dist = dist;
             scope.region = region;
@@ -1837,6 +2025,10 @@ impl Running {
                     scope.orbit.pitch = (scope.orbit.pitch + d[1] * 0.006).clamp(0.12, 1.55);
                 }
                 if self.dragging {
+                    // (Deslocar à mão larga o agente que se estava a seguir.)
+                    if let Some(scope) = self.scope.as_mut().filter(|_| d[0] != 0.0 || d[1] != 0.0) {
+                        scope.follow = false;
+                    }
                     // Com a câmara rodada, arrastar desloca no referencial dela.
                     let yaw = self.scope.as_ref().filter(|_| self.micro_t > 0.0).map_or(0.0, |s| s.effective().yaw);
                     if yaw.abs() > 1e-3 {
