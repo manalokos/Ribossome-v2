@@ -734,6 +734,9 @@ struct Scope {
     /// mais arrasto). Parada, a exposição continua enquanto nada mudar.
     shutter: f32,
     last_frame: std::time::Instant,
+    /// Estado para que as camadas foram desenhadas, e há quantos frames.
+    layer_key: Option<([f32; 2], f32, f32, u32, Option<u32>)>,
+    layer_age: u32,
     /// Câmara do último frame (olho, direita, cima, frente), para projetar
     /// pontos do mundo no ecrã.
     cam: [[f32; 3]; 4],
@@ -1056,6 +1059,8 @@ impl Scope {
             rate: env("RATE", 2.0),
             shutter: env("SHUTTER", 0.25),
             last_frame: std::time::Instant::now(),
+            layer_key: None,
+            layer_age: 0,
             cam: [[0.0; 3]; 4],
             reticle: env("RETICLE", 0.0) != 0.0,
             subject: None,
@@ -1160,10 +1165,24 @@ impl Scope {
         self.frame += 1;
 
         let r = self.region;
+        // AS CAMADAS (a zona vista de cima: volumes, cores, chão, alisamento)
+        // só dependem do que lá está e de onde se olha a direito: rodar a
+        // câmara, mudar a lente ou o foco não as altera, e com a simulação
+        // parada nada as altera. Só se refazem quando mudam (e nos dois
+        // primeiros frames de cada estado, para a lista de desenho assentar).
+        let subject_slot = self.subject.as_ref().filter(|_| self.reticle).map(|s| s.slot);
+        let key = (o.centre, r, self.monomers, self.world.params.epoch + step_now as u32, subject_slot);
+        if self.layer_key != Some(key) {
+            self.layer_key = Some(key);
+            self.layer_age = 0;
+        } else {
+            self.layer_age += 1;
+        }
+        let cached = self.layer_age >= 2;
         // QUANTO TERRENO HÁ na zona (só o fundo, sem agentes), num envio à
         // parte: usa a mesma vista do passo dos volumes com outro modo, e os
         // parâmetros da vista são um só bloco, escrito antes de os comandos correrem.
-        {
+        if !cached {
             let cam = Camera { center: o.centre, zoom: PRES as f32 / (2.0 * r) };
             self.height_view.height_pass.set(2);
             self.height_view.update(&gpu.queue, &cam, [PRES as f32; 2], 0, 0.0, 0);
@@ -1195,6 +1214,7 @@ impl Scope {
             // (Em câmara lenta, um passo de cada vez.)
             self.world.encode_steps(&gpu.queue, &mut enc, if slow { 1 } else { self.steps.min(ribossome::world::MAX_STEPS_PER_FRAME) });
         }
+        if !cached {
         self.world.set_draw_rect(&gpu.queue, Some(([o.centre[0] - r, o.centre[1] - r], [o.centre[0] + r, o.centre[1] + r])));
         self.world.encode_draw_list(&mut enc);
         let cam = Camera { center: o.centre, zoom: TEX as f32 / (2.0 * r) };
@@ -1211,7 +1231,6 @@ impl Scope {
         // (Com monómeros: no passo dos volumes cada molécula é um grãozinho.)
         self.height_view.update(&gpu.queue, &cam, [TEX as f32; 2], 0, self.monomers, 0);
         // O agente da mira sozinho, com a mesma câmara e as mesmas cores.
-        let subject_slot = self.subject.as_ref().filter(|_| self.reticle).map(|s| s.slot);
         if let Some(slot) = subject_slot {
             self.subject_view.focus.set(slot);
             self.subject_view.relief_order.set(true);
@@ -1262,6 +1281,7 @@ impl Scope {
             }
             layer("world volumes", &world_vol, None, 0.0, &|pass| self.height_view.draw_world_only(pass));
             layer("world colour", &world_col, Some(&world_col_resolve), 0.0, &|pass| self.cap.view.draw_world_only(pass));
+        }
         }
         // Câmara: olha para o centro da zona, a meia altura do relevo.
         let target_pt = [o.centre[0], o.centre[1], 28.0];
@@ -1348,6 +1368,7 @@ impl Scope {
         };
         // O chão desfocado (lê "quanto terreno há"), a amostra do traçado de
         // raios e a imagem final.
+        if !cached {
         pass_to(&mut enc, &ground, &self.ground, &bind(&pres, &prev_view, &pres, &pres));
         // (Os passos que escrevem numa textura não a podem ler: leem outra.)
         let smooth_a = self.smooth_a.create_view(&Default::default());
@@ -1355,6 +1376,7 @@ impl Scope {
         pass_to(&mut enc, &smooth_a, &self.smooth[0], &bind(&height, &prev_view, &ground, &pres));
         pass_to(&mut enc, &smooth_b, &self.smooth[1], &bind(&height, &prev_view, &ground, &smooth_a));
         pass_to(&mut enc, &world_smooth, &self.smooth[2], &bind(&height, &prev_view, &ground, &smooth_b));
+        }
         pass_to(&mut enc, &next_view, &self.march, &bind(&height, &prev_view, &ground, &world_smooth));
         pass_to(&mut enc, target, &self.present, &bind(&height, &next_view, &ground, &world_smooth));
         // (A mesma imagem para a fotografia / o vídeo, sem a interface.)
