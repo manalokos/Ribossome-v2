@@ -28,6 +28,10 @@ struct Running {
     /// Quanto da transição mapa → microscópio já se fez (0 = só o mapa, 1 =
     /// só o microscópio), pelo zoom; e se o botão direito está a rodar a câmara.
     micro_t: f32,
+    /// Zoom ainda por aplicar (logaritmo do fator) e o ponto do ecrã que fica
+    /// fixo: a roda do rato aplica-se aos poucos, sem saltos.
+    zoom_pending: f32,
+    zoom_anchor: [f32; 2],
     orbiting: bool,
     /// Alvo com várias amostras onde o mundo é desenhado (do tamanho da
     /// janela; refeito quando ela muda). Resolve para a imagem da janela.
@@ -331,7 +335,11 @@ impl Running {
 
         // O MICROSCÓPIO fica já pronto (pipelines e texturas): criado só ao
         // aproximar, a transição dava um soluço na primeira vez.
-        let scope = Some(ribossome::microscope::Scope::new(&gpu, &world, format, [64, 64], cam.center, 420.0));
+        let mut scope = Some(ribossome::microscope::Scope::new(&gpu, &world, format, [64, 64], cam.center, 420.0));
+        // (Sem rotação: ao aproximar, a câmara só se inclina. Roda-se à mão.)
+        if let Some(s) = scope.as_mut() {
+            s.orbit.yaw = 0.0;
+        }
         let egui_ctx = egui::Context::default();
         let egui_state = egui_winit::State::new(
             egui_ctx,
@@ -387,6 +395,8 @@ impl Running {
             scope,
             scope_panel: true,
             micro_t: 0.0,
+            zoom_pending: 0.0,
+            zoom_anchor: [0.0; 2],
             orbiting: false,
             covered: false,
             dragging: false,
@@ -1623,6 +1633,12 @@ impl Running {
             self.write_page(&format!("arvore_{epoch}.html"), html, "tree");
         }
         let n_steps = self.adaptive_steps();
+        // ZOOM SUAVE: em cada frame aplica-se uma parte do que a roda pediu.
+        if self.zoom_pending.abs() > 1e-4 {
+            let part = self.zoom_pending * 0.18;
+            self.zoom_pending -= part;
+            self.cam.zoom_at(part.exp(), self.zoom_anchor, screen);
+        }
         let (vp, covered) = (self.viewport, self.covered);
         // MICROSCÓPIO 3D: a câmara do mapa continua a mandar (deslocar e
         // aproximar como sempre); o microscópio olha para o mesmo ponto com o
@@ -1631,8 +1647,8 @@ impl Running {
         // de MICRO_Z0 é só o mapa; daí até MICRO_Z1 o microscópio entra em
         // fundido, visto de cima como o mapa, e depois inclina-se e ganha a
         // profundidade de campo até à câmara escolhida no painel.
-        const MICRO_Z0: f32 = 1.5;
-        const MICRO_Z1: f32 = 4.0;
+        const MICRO_Z0: f32 = 0.6;
+        const MICRO_Z1: f32 = 2.5;
         let smooth = |a: f32, b: f32, x: f32| {
             let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
@@ -1880,7 +1896,9 @@ impl Running {
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 60.0,
                 };
                 let screen = self.screen();
-                self.cam.zoom_at(1.15f32.powf(lines), self.cursor, screen);
+                let _ = screen;
+                self.zoom_pending += lines * 1.15f32.ln();
+                self.zoom_anchor = self.cursor;
             }
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed && !egui_keys && !resp.consumed =>
