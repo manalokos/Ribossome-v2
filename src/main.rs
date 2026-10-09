@@ -55,6 +55,7 @@ struct Running {
     rec_side: u32,
     /// A gravação em curso é do microscópio (e o tamanho das imagens dela).
     rec_micro: bool,
+    rec_start: std::time::Instant,
     /// CAPTURA DA VISTA: cópia do retângulo da vista tirada da imagem da
     /// janela (antes ou depois da interface, conforme o modo); pede-se num
     /// frame e lê-se no seguinte.
@@ -398,6 +399,7 @@ impl Running {
             rec_path: std::path::PathBuf::new(),
             rec_side: 0,
             rec_micro: false,
+            rec_start: std::time::Instant::now(),
             view_shot: None,
             view_shot_want: false,
             view_shot_ready: false,
@@ -1069,6 +1071,7 @@ impl Running {
                     });
                     self.rec_tx = Some(tx);
                     self.rec_micro = true;
+                    self.rec_start = std::time::Instant::now();
                     self.rec_dims = [w, h];
                     self.rec_frames = 0;
                 }
@@ -1086,18 +1089,25 @@ impl Running {
             self.ui.rec_info = format!("view resized, video closed: {} ({} images)", self.rec_path.display(), self.rec_frames);
             return;
         }
-        match self.rec_tx.as_ref().map(|tx| tx.try_send(rgba)) {
-            Some(Ok(())) => {
-                self.rec_frames += 1;
-                self.ui.rec_info = format!("recording the view: {} images ({:.1} s of video)", self.rec_frames, self.rec_frames as f32 / 60.0);
+        // TEMPO REAL: o vídeo tem 60 imagens por segundo certas, e a vista pode
+        // estar a 24 (microscópio) ou a 60 (mapa), ou a variar. Cada imagem
+        // vai as vezes que forem precisas para o vídeo acompanhar o relógio:
+        // o que se vê em 1 s dá sempre 1 s de vídeo.
+        let due = (self.rec_start.elapsed().as_secs_f32() * 60.0) as u32 + 1;
+        let copies = due.saturating_sub(self.rec_frames).min(30);
+        for _ in 0..copies {
+            match self.rec_tx.as_ref().map(|tx| tx.send(rgba.clone())) {
+                Some(Ok(())) => self.rec_frames += 1,
+                Some(Err(_)) => {
+                    self.rec_tx = None;
+                    self.ui.rec = false;
+                    self.ui.rec_info = "ffmpeg stopped in the middle of the recording".into();
+                    return;
+                }
+                None => return,
             }
-            Some(Err(std::sync::mpsc::TrySendError::Disconnected(_))) => {
-                self.rec_tx = None;
-                self.ui.rec = false;
-                self.ui.rec_info = "ffmpeg stopped in the middle of the recording".into();
-            }
-            _ => {}
         }
+        self.ui.rec_info = format!("recording the view: {:.1} s of video", self.rec_frames as f32 / 60.0);
     }
 
     fn photo_video(&mut self) {
