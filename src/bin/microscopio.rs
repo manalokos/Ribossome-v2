@@ -20,8 +20,11 @@
 //! Rato: arrastar com o botão esquerdo roda a câmara, com o direito desloca a
 //! zona, a roda aproxima. Começa PARADO (a imagem converge e fica nítida);
 //! Espaço põe a simulação a correr e volta a parar. F/G fecham e abrem o
-//! diafragma (profundidade de campo); C liga a cor (por omissão é a preto e
-//! branco); M mostra os monómeros; Esc sai.
+//! diafragma (profundidade de campo); Z/X alongam e encurtam a lente (longa =
+//! quase axonométrica; por omissão 135 mm); E/R clareiam e escurecem a
+//! exposição; C liga a cor (por omissão é a preto e branco); M esconde os
+//! monómeros; S liga a superamostragem; Esc sai.
+//!   LENS=mm, APERTURE, EXPOSURE  arrancam com esses valores
 //!   TERRAIN=1 centra numa zona com rocha, entulho e água (em vez de num agente)
 //!   COLOR=1, MONOMERS=0.7  arrancam com cor / com monómeros
 
@@ -50,6 +53,8 @@ const HMAX: f32 = 95.0;
 /// Lado da textura de "quanto terreno há" e da do chão desfocado.
 const PRES: u32 = 512;
 const GROUND: u32 = 256;
+/// Tangente de meio campo de uma lente de 33 mm (a referência de `Orbit::dist`).
+const REF_TAN: f32 = 0.36;
 /// Meio lado da zona desenhada, em distâncias da câmara ao ponto que ela olha:
 /// larga, para a cena se apagar com a distância sem acabar num corte.
 const REGION_PER_DIST: f32 = 1.7;
@@ -73,6 +78,8 @@ struct U {
     // quanto da cor das peças se mantém (0 = preto e branco), lado da textura
     // do chão, raio do desfoque do chão (em fração da zona), superamostragem
     opts: vec4<f32>,
+    // exposição (multiplica a imagem final), livre × 3
+    photo: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var color_tex: texture_2d<f32>;
@@ -102,12 +109,21 @@ fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
 }
 
+fn pcg(v: u32) -> u32 {
+    let x = v * 747796405u + 2891336453u;
+    let w = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+// Três números ao acaso (0..1) a partir de três inteiros. CADA saída depende
+// das TRÊS entradas: na versão anterior cada uma só misturava duas, e a que
+// escolhia o ponto da lente dependia do píxel mas não do frame, por isso
+// repetia-se sempre e o desfoque nunca limpava.
 fn hash3(p: vec3<u32>) -> vec3<f32> {
-    var v = p * vec3<u32>(1664525u, 1013904223u, 2891336453u) + p.yzx * 747796405u;
-    v = (v ^ (v >> vec3<u32>(16u))) * 2246822519u;
-    v = (v ^ (v >> vec3<u32>(13u))) * 3266489917u;
-    v = v ^ (v >> vec3<u32>(16u));
-    return vec3<f32>(v) / 4294967295.0;
+    let a = pcg(pcg(pcg(p.x) ^ p.y) ^ p.z);
+    let b = pcg(a ^ 0x9E3779B9u);
+    let c = pcg(b ^ 0x7F4A7C15u);
+    return vec3<f32>(vec3<u32>(a, b, c)) / 4294967295.0;
 }
 
 // Ruído suave (0..1) para o grão do chão.
@@ -341,21 +357,31 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             let rr = select(9.0, 22.0, (k & 1) == 1);
             occ += clamp((top_at(p.xy + vec2<f32>(cos(a), sin(a)) * rr) - p.z) / rr, 0.0, 1.5);
         }
-        let ao = 1.0 / (1.0 + 0.8 * occ);
+        var ao = 1.0 / (1.0 + 0.8 * occ);
+        // Na metade de BAIXO de uma peça isto contava o cimo da própria peça
+        // como coisa por cima, e ficava uma faixa preta logo abaixo do
+        // equador de cada bola. Aí a oclusão é só a proximidade do chão.
+        if (n.z < 0.0) { ao = mix(0.5, 0.95, clamp((p.z - s.g) / 9.0, 0.0, 1.0)); }
         // PRETO E BRANCO, como uma micrografia: fica só o claro-escuro das
         // peças (opts.x repõe a cor).
         let gray = vec3<f32>(dot(albedo, vec3<f32>(0.33, 0.45, 0.22)) * 1.35);
-        let base = max(mix(gray, albedo, u.opts.x), vec3<f32>(0.03, 0.031, 0.034));
+        // COR FALSA (opts.x = 1): a micrografia continua a ser o cinzento, e
+        // só os agentes levam por cima o TOM da sua cor (saturado), como nas
+        // imagens de microscópio eletrónico coloridas depois.
+        let lum = max(max(albedo.r, albedo.g), albedo.b);
+        let hue = pow(albedo / max(lum, 1e-3), vec3<f32>(1.6));
+        var tinted = gray;
+        if (u.opts.x > 1.5) { tinted = albedo; } else if (u.opts.x > 0.5 && on_agent) { tinted = gray * 1.25 * hue; }
+        let base = max(tinted, vec3<f32>(0.03, 0.031, 0.034));
         col = base * (0.95 + 1.5 * edge) * ao + vec3<f32>(0.25) * edge * edge * select(0.0, 1.0, !on_ground);
         // O campo de visão não acaba num quadrado: esbate-se com a distância
         // ao centro da zona e com a distância para lá do plano de focagem.
-        // O brilho cai com a DISTÂNCIA ao ponto para onde a câmara olha
-        // (uma divisão, sem horizonte marcado): a cena vai-se apagando
-        // devagar. Só mesmo na borda da zona desenhada há um corte suave.
-        let away = length(p.xy - u.region.xy) / u.lens.x;
-        col /= 1.0 + 1.1 * away * away;
-        let rel = abs(p.xy - u.region.xy) / u.region.z;
-        col *= 1.0 - smoothstep(0.86, 1.0, max(rel.x, rel.y));
+        // O brilho cai com a DISTÂNCIA ao ponto para onde a câmara olha (uma
+        // divisão, sem horizonte marcado), e chega a zero num CÍRCULO antes
+        // da borda da zona desenhada, para nunca se ver o quadrado dela.
+        let away = length(p.xy - u.region.xy) / u.region.z;
+        col /= 1.0 + 7.0 * away * away;
+        col *= 1.0 - smoothstep(0.7, 0.98, away);
     }
     // Grão do detetor (desaparece com a acumulação).
     col += (rnd.z - 0.5) * 0.03;
@@ -374,7 +400,7 @@ fn fs_present(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             c += textureLoad(prev_tex, vec2<i32>(pos.xy) * ss + vec2<i32>(i, j), 0).rgb;
         }
     }
-    c /= f32(ss * ss);
+    c = c / f32(ss * ss) * u.photo.x;
     // Curva suave nos claros, para as arestas não queimarem.
     return vec4<f32>(c / (1.0 + 0.25 * c), 1.0);
 }
@@ -386,8 +412,12 @@ struct Orbit {
     centre: [f32; 2],
     yaw: f32,
     pitch: f32,
+    /// Tamanho do enquadramento (a distância a que uma lente de 33 mm o daria).
     dist: f32,
     aperture: f32,
+    /// Tangente de meio campo de visão vertical: pequena = lente longa
+    /// (quase axonométrica), grande = grande angular.
+    focal: f32,
 }
 
 struct Scope {
@@ -421,11 +451,15 @@ struct Scope {
     steps: u32,
     paused: bool,
     /// Manter a cor das peças (por omissão é a preto e branco).
-    colour: bool,
+    /// 0 = preto e branco; 1 = cor falsa (só os agentes, tingidos por cima
+    /// do cinzento, como nas micrografias coloridas à mão); 2 = cor inteira.
+    colour: u32,
     /// Brilho dos monómeros na zona (0 = não se desenham).
     monomers: f32,
     /// Superamostragem: lado da imagem acumulada em múltiplos do do ecrã.
     ss: u32,
+    /// Exposição: multiplica a imagem final.
+    exposure: f32,
 }
 
 /// Alvo de várias amostras de onde também se lê (uma amostra de cada vez).
@@ -557,7 +591,7 @@ impl Scope {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scope"),
-            size: 8 * 16,
+            size: 9 * 16,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -675,16 +709,17 @@ impl Scope {
             accum: [accum_texture(device, size[0], size[1]), accum_texture(device, size[0], size[1])],
             size,
             region,
-            orbit: Orbit { centre, yaw: 0.6, pitch: 0.75, dist: region / REGION_PER_DIST, aperture: env("APERTURE", 1.5) },
+            orbit: Orbit { centre, yaw: 0.6, pitch: 0.75, dist: region / REGION_PER_DIST, aperture: env("APERTURE", 1.5), focal: 12.0 / env("LENS", 135.0) },
             last_orbit: None,
             samples: 0,
             frame: 0,
             steps: env("STEPS", 2.0) as u32,
             // Começa PARADO: é assim que a imagem converge e se vê bem.
             paused: true,
-            colour: env("COLOR", 0.0) != 0.0,
+            colour: env("COLOR", 0.0) as u32,
             monomers: env("MONOMERS", 0.7),
             ss: 1,
+            exposure: env("EXPOSURE", 1.0),
             world,
         }
     }
@@ -792,7 +827,10 @@ impl Scope {
         let target_pt = [o.centre[0], o.centre[1], 0.3 * HMAX];
         let (sp, cp) = o.pitch.sin_cos();
         let (sy, cy) = o.yaw.sin_cos();
-        let eye = [target_pt[0] + o.dist * cp * sy, target_pt[1] - o.dist * cp * cy, target_pt[2] + o.dist * sp];
+        // Com uma lente mais longa a câmara recua na mesma proporção: o
+        // enquadramento fica igual e a perspetiva achata.
+        let eye_dist = o.dist * REF_TAN / o.focal;
+        let eye = [target_pt[0] + eye_dist * cp * sy, target_pt[1] - eye_dist * cp * cy, target_pt[2] + eye_dist * sp];
         let norm = |v: [f32; 3]| {
             let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
             [v[0] / l, v[1] / l, v[2] / l]
@@ -802,15 +840,16 @@ impl Scope {
         let right = norm(cross(fwd, [0.0, 0.0, 1.0]));
         let up = cross(right, fwd);
         let v4 = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
-        let data: [[f32; 4]; 8] = [
+        let data: [[f32; 4]; 9] = [
             v4(eye),
             v4(right),
             v4(up),
             v4(fwd),
             [o.centre[0], o.centre[1], r, HMAX],
             [(self.size[0] * self.ss) as f32, (self.size[1] * self.ss) as f32, self.frame as f32, weight],
-            [o.dist, o.aperture, 0.36, 1.0],
-            [if self.colour { 1.0 } else { 0.0 }, GROUND as f32, GROUND_BLUR / (2.0 * r), self.ss as f32],
+            [eye_dist, o.aperture * REF_TAN / o.focal, o.focal, 1.0],
+            [self.colour as f32, GROUND as f32, GROUND_BLUR / (2.0 * r), self.ss as f32],
+            [self.exposure, 0.0, 0.0, 0.0],
         ];
         gpu.queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&data));
         let (src, dst) = ((self.frame % 2) as usize, ((self.frame + 1) % 2) as usize);
@@ -920,11 +959,13 @@ impl Running {
         if self.scope.frame % 30 == 0 {
             let s = &self.scope;
             self.window.set_title(&format!(
-                "Ribossome: microscope   {} samples{}   {}   aperture {:.1}   (drag: orbit, right drag: move, wheel: zoom in/out, space: run/pause, F/G: aperture, C: colour, M: monomers, S: supersampling)",
+                "Ribossome: microscope   {} samples{}   {}   lens {:.0} mm   aperture {:.1}   exposure {:.2}   (drag: orbit, right drag: move, wheel: zoom in/out, space: run/pause, Z/X: lens, F/G: aperture, E/R: exposure, C: colour, M: monomers, S: supersampling)",
                 s.samples,
                 if s.ss > 1 { " ×4 (supersampled)" } else { "" },
                 if s.paused || s.steps == 0 { "paused" } else { "running" },
-                s.orbit.aperture
+                12.0 / s.orbit.focal,
+                s.orbit.aperture,
+                s.exposure
             ));
         }
         self.window.pre_present_notify();
@@ -975,8 +1016,8 @@ impl Running {
                 // ZOOM: a câmara afasta-se e a zona desenhada cresce com ela (a
                 // de perto é pequena e detalhada, a de longe apanha mais mundo).
                 let o = &mut self.scope.orbit;
-                o.dist = (o.dist * 0.9f32.powf(lines)).clamp(90.0, 5000.0);
-                self.scope.region = (o.dist * REGION_PER_DIST).clamp(50.0, 4000.0);
+                o.dist = (o.dist * 0.9f32.powf(lines)).clamp(25.0, 5000.0);
+                self.scope.region = (o.dist * REGION_PER_DIST).clamp(30.0, 4000.0);
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => match event.logical_key.as_ref() {
                 Key::Named(NamedKey::Escape) => event_loop.exit(),
@@ -987,9 +1028,15 @@ impl Running {
                 Key::Character("f") => self.scope.orbit.aperture = (self.scope.orbit.aperture - 1.0).max(0.0),
                 Key::Character("g") => self.scope.orbit.aperture = (self.scope.orbit.aperture + 1.0).min(30.0),
                 Key::Character("c") => {
-                    self.scope.colour = !self.scope.colour;
+                    self.scope.colour = (self.scope.colour + 1) % 3;
                     self.scope.last_orbit = None;
                 }
+                // LENTE: Z alonga (mais axonométrica), X encurta (grande angular).
+                Key::Character("z") => self.scope.orbit.focal = (self.scope.orbit.focal / 1.15).max(12.0 / 800.0),
+                Key::Character("x") => self.scope.orbit.focal = (self.scope.orbit.focal * 1.15).min(12.0 / 14.0),
+                // EXPOSIÇÃO: E clareia, R escurece (não reinicia a acumulação).
+                Key::Character("e") => self.scope.exposure = (self.scope.exposure * 1.12).min(16.0),
+                Key::Character("r") => self.scope.exposure = (self.scope.exposure / 1.12).max(0.05),
                 Key::Character("s") => {
                     self.scope.ss = if self.scope.ss >= 2 { 1 } else { 2 };
                     let size = self.scope.size;
@@ -1045,9 +1092,10 @@ fn photo(path: &str, samples: u32) {
     scope.orbit.pitch = env("PITCH", scope.orbit.pitch);
     scope.orbit.dist = env("DIST", scope.orbit.dist);
     if std::env::var("REGION").is_err() {
-        scope.region = (scope.orbit.dist * REGION_PER_DIST).clamp(50.0, 4000.0);
+        scope.region = (scope.orbit.dist * REGION_PER_DIST).clamp(30.0, 4000.0);
     }
     scope.orbit.aperture = env("APERTURE", scope.orbit.aperture);
+    scope.orbit.focal = 12.0 / env("LENS", 12.0 / scope.orbit.focal);
     // Uns passos para a grelha de desenho e as poses assentarem, depois parada.
     scope.frame(&gpu, &gpu.device.create_texture(&target_desc(w, h, format)).create_view(&Default::default()));
     scope.paused = true;

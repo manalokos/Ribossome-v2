@@ -490,6 +490,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     var pebble_h = 0.3;
     var rock_h = 0.0;
     var pebble_r = 0.3;
+    var rock_field = 1.0;
     var ground_shadow = 1.0;
     // De perto, o terreno em grãos (ver ground_at) em vez de células.
     let grains = 1.0 - smoothstep(GRAIN_PIXEL_FULL, GRAIN_PIXEL_NONE, pixel_cells);
@@ -504,6 +505,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         pebble_h = gr.pebble_h;
         rock_h = gr.rock_h;
         pebble_r = gr.pebble_r;
+        rock_field = gr.rock;
         ground_shadow = 1.0 - GRAIN_SHADOW * gr.shadow * grains;
     }
     // PARA O MICROSCÓPIO 3D: o VOLUME de cada pedra e de cada molécula (cimo,
@@ -514,7 +516,12 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         let cell = f32(WORLD_UNITS_PER_CELL);
         var vol = vec2<f32>(0.0);
         if (rock_m > 0.5) {
-            vol = vec2<f32>(2.0 + 0.8 * rock_h * cell, -30.0);
+            // O contorno da rocha é a curva de nível de um campo suave, e não
+            // o do sprite do bloco: numa célula de rocha isolada cortava a
+            // cúpula a pique e ficava um cilindro. A altura desce com o campo
+            // até ao contorno (um ombro redondo).
+            let shoulder = sqrt(clamp((rock_field - 0.45) / 0.35, 0.0, 1.0));
+            vol = vec2<f32>((2.0 + 0.8 * rock_h * cell) * shoulder + 0.3, -30.0);
         } else if (rubble_m > 0.5) {
             vol = vec2<f32>(0.45 * pebble_r + pebble_h, 0.45 * pebble_r - pebble_h) * cell;
         }

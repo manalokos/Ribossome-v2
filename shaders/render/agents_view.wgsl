@@ -1282,12 +1282,14 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
                     let s = sprite(SPRITE_ROW_SPIKE, (col_f + i) % SPRITE_COLS, q, vec2<f32>(g / wb, 0.0), vec2<f32>(0.0, 2.0 * g / max(len - a0, 1e-3)));
                     if (s.y >= 0.5 && s.x > spike_l) {
                         spike_l = s.x;
-                        g_h = s.z * in.size * wb;
+                        // (com uma espessura mínima: um espigão mais fino do
+                        // que um texel do relevo desfazia-se em farelo.)
+                        g_h = max(s.z * in.size * wb, 0.05 * in.size);
                         // No microscópio 3D os espigões apontam para TODOS os
                         // lados, não só no plano: cada um sobe ou desce ao
                         // longo do seu comprimento, com a sua inclinação.
                         let r3 = fract(sin(i * 37.719 + 2.3) * 15731.743);
-                        g_lift = (along - a0) * in.size * tan(mix(-0.55, 1.15, r3));
+                        g_lift = (along - a0) * in.size * tan(mix(-0.25, 0.5, r3));
                         g_c = in.size * hub;
                         tip = len;
                     }
