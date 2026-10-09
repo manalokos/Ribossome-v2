@@ -1195,7 +1195,7 @@ impl Scope {
             ss: 1,
             exposure: env("EXPOSURE", 1.0),
             rate: env("RATE", 2.0),
-            shutter: env("SHUTTER", 0.25),
+            shutter: env("SHUTTER", 1.0 / 60.0),
             last_frame: std::time::Instant::now(),
             layer_key: None,
             layer_age: 0,
