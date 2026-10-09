@@ -233,7 +233,6 @@ fn spawn_seeds(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var w = 0u; w < GENOME_WORDS; w++) { genomes[slot * GENOME_WORDS + w] = g[w]; }
     new_agent(slot, vec2<f32>(req.pos_x, req.pos_y), rng_f4(ri, params.epoch, S_SPAWN).y * 6.2831853,
         params.spawn_energy, n, 0u, 0xFFFFFFFFu);
-    rna_tail[slot * 4u + 1u] = vec4<f32>(0.0);
     atomicAdd(&life_counters[LC_SPAWNED], 1u);
 }
 
@@ -413,9 +412,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // água (corrente nos resíduos, com rotação) entra sem ganho.
     var swim_v = vec2<f32>(0.0);
     var aux = rna_tail[slot * 4u + 1u];
-    // Slot reutilizado: sem herança da média da natação (.x fica: é a
-    // imunidade herdada do pai, escrita ao nascer; ver contact.wgsl).
-    if (a.age == 0u) { aux = vec4<f32>(aux.x, 0.0, 0.0, 0.0); }
+    if (a.age == 0u) { aux = vec4<f32>(0.0); } // slot reutilizado: sem herança
     // Orientação a meio do passo (o corpo roda durante o passo).
     // Transporte pela água × flow_coupling (1 = físico).
     // CORPOS PESADOS (órgãos densos, depósitos) seguem MENOS a corrente:
@@ -934,14 +931,6 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     // capacidade do filho. O filho nasce primeiro com 0 para se saber a sua.
     // Orientação ao acaso.
     new_agent(child, cp, mr.w * 6.2831853, 0.0, n, a.generation + 1u, a.id);
-    // IMUNIDADE HERDADA: as famílias de protease a que o pai é imune (pelos
-    // seus inibidores), um bit por família.
-    let pex = protease_exposed(slot, a.body_len);
-    var immune_mask = 0u;
-    for (var i = 0u; i < 4u; i++) {
-        if (pex[i] < 0.5) { immune_mask |= 1u << i; }
-    }
-    rna_tail[child * 4u + 1u] = vec4<f32>(f32(immune_mask), 0.0, 0.0, 0.0);
     var born = agents[child];
     let cap_child = energy_capacity(child, born);
     let cap_parent = energy_capacity(slot, a);

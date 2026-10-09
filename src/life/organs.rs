@@ -374,7 +374,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             fmt_canal(v("canal")),
             v("meia_vida")
         ),
-        21 => format!("inhibitor [pale disc]: blocks {:.0}% of the damage from proteases of the family set by the next residue (D/E = family 1, K/R = family 2, F/L/W/Y/I/V = family 3, other = generalist). A protease alone gives no immunity; a newborn carries its parent's immunity for a while", (v("protecao") * g).clamp(0.0, 1.0) * 100.0),
+        21 => format!("inhibitor [pale disc]: blocks {:.0}% of the damage from proteases of the family set by the next residue (D/E = family 1, K/R = family 2, F/L/W/Y/I/V = family 3, other = generalist). A protease alone gives no immunity, and nothing is inherited: each form of the lineage needs its own", (v("protecao") * g).clamp(0.0, 1.0) * 100.0),
         _ => ORGAN_NAMES_EN.get(t).map_or_else(|| row.nome.clone(), |n| n.to_string()),
     }
 }

@@ -118,13 +118,6 @@ const PROTEASE_FAR_FROM: f32 = 70.0;
 // reta até REACH_EDGE da força. Quem tem alcance morde primeiro mas fraco;
 // quem aguenta a aproximação e chega perto morde forte.
 const REACH_EDGE: f32 = 0.5;
-// IMUNIDADE HERDADA: um recém-nascido traz os inibidores do pai durante
-// MATERNAL_STEPS passos (as famílias a que o pai era imune ficam guardadas
-// ao nascer em rna_tail[slot*4+1].x, um bit por família). Protege-o do pai
-// e de todos os que usam as mesmas proteases, sem regra de "tréguas": é
-// matéria do pai que o filho leva. Um pai armado SEM inibidor não dá nada
-// ao filho e desfá-lo.
-const MATERNAL_STEPS: u32 = 400u;
 fn reach_falloff(dist: f32, reach: f32) -> f32 {
     return 1.0 - (1.0 - REACH_EDGE) * clamp(dist / max(reach, 1.0), 0.0, 1.0);
 }
@@ -227,13 +220,10 @@ fn protease_targets(slot: u32, n: u32) -> vec3<f32> {
 // famílias 1, 2 e 3 e fração de prolina, cada um 0..1 em 5 bits, e no bit 20
 // se tem uma protease generalista (fica imune às generalistas dos outros).
 fn pack_defence(slot: u32, n: u32) -> f32 {
-    var ex = protease_exposed(slot, n);
-    if (agents[slot].age < MATERNAL_STEPS) {
-        let mask = u32(max(rna_tail[slot * 4u + 1u].x, 0.0));
-        for (var i = 0u; i < 4u; i++) {
-            if (((mask >> i) & 1u) != 0u) { ex[i] = min(ex[i], 1.0 - PROTEASE_IMMUNITY); }
-        }
-    }
+    // Só conta o que o PRÓPRIO corpo tem: nada é herdado do pai nem há
+    // tréguas. Um filho (a outra forma da linhagem) só está a salvo das
+    // proteases do pai e dos parentes se o seu corpo também tiver o inibidor.
+    let ex = protease_exposed(slot, n);
     let t = protease_targets(slot, n) * ex.xyz;
     let q = vec4<u32>(round(clamp(vec4<f32>(t, proline_fraction(slot, n)), vec4<f32>(0.0), vec4<f32>(1.0)) * 31.0));
     return f32(q.x | (q.y << 5u) | (q.z << 10u) | (q.w << 15u) | (select(0u, 1u, ex.w < 1.0) << 20u));
