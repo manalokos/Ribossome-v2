@@ -387,8 +387,8 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 let sa = select(k - 1u, k, k == 0u);
                 let sb = select(k + 1u, k, k + 1u >= a.body_len);
                 let seg = length(body_pos_view[base + sb] - body_pos_view[base + sa]) / f32(max(sb - sa, 1u));
-                r_world = max(0.56 * seg / 1.5, 2.0);
-                phase = 1.5;
+                r_world = max(0.56 * seg / 1.1, 2.0);
+                phase = 1.1;
             }
             if (organ == ORGAN_INHIBITOR) { col = vec3<f32>(0.95, 0.8, 0.9); }
             if (organ == ORGAN_HOLDFAST) { col = vec3<f32>(0.85, 0.6, 0.3); }
