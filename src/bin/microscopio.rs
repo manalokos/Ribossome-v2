@@ -228,7 +228,10 @@ fn surf(xy: vec2<f32>) -> Surf {
         let ta = textureLoad(vol_tex, c, 0).rg * u.lens.w;
         let tw = textureLoad(world_smooth, c, 0).rg * u.lens.w;
         if (ta.x > 0.25) { s.a = s.g + support_at(xy) + ta; }
-        if (tw.x > 0.25) { s.w = vec2<f32>(s.g + tw.x, s.g + tw.y); }
+        // Uma MOLÉCULA SOLTA (o fundo dela está no ar) assenta no relevo
+        // suave do entulho, como os agentes: senão as que caem nos intervalos
+        // entre as pedras ficavam lá no fundo, escondidas.
+        if (tw.x > 0.25) { s.w = vec2<f32>(s.g + tw.x, s.g + tw.y) + select(0.0, support_at(xy), tw.y > 0.0); }
     }
     return s;
 }
@@ -297,7 +300,7 @@ fn lerp_low(t: texture_multisampled_2d<f32>, uv: vec2<f32>, g: f32) -> vec2<f32>
 }
 
 // O mesmo para o volume do mundo (já alisado, uma amostra por texel).
-fn lerp_world(uv: vec2<f32>, g: f32) -> vec2<f32> {
+fn lerp_world(uv: vec2<f32>, g: f32, support: f32) -> vec2<f32> {
     let dim = vec2<f32>(textureDimensions(world_smooth));
     let x = uv * dim - 0.5;
     let c = vec2<i32>(floor(x));
@@ -307,8 +310,10 @@ fn lerp_world(uv: vec2<f32>, g: f32) -> vec2<f32> {
     var wsum = 0.0;
     for (var k = 0; k < 4; k++) {
         let o = vec2<i32>(k & 1, k >> 1);
-        let v = textureLoad(world_smooth, clamp(c + o, vec2<i32>(0), hi), 0).rg;
+        var v = textureLoad(world_smooth, clamp(c + o, vec2<i32>(0), hi), 0).rg;
         let w = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1) * step(0.25, v.x);
+        // (Molécula solta: sobe para o relevo suave do entulho.)
+        if (v.y > 0.0) { v += vec2<f32>(support); }
         sum += v * w;
         wsum += w;
     }
@@ -409,7 +414,7 @@ fn surf_smooth(xy: vec2<f32>) -> Surf {
     if (all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0))) {
         s.b = lerp_low(low_vol, uv, s.g + support_at(xy));
         s.a = lerp_volume(vol_tex, uv, s.g + support_at(xy));
-        s.w = lerp_world(uv, s.g);
+        s.w = lerp_world(uv, s.g, support_at(xy));
     }
     return s;
 }
