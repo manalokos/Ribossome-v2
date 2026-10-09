@@ -54,15 +54,29 @@ fn main() {
         }
         c
     };
+    // Células de rocha (3 ou mais grãos) dentro do disco de um monte.
+    let rock = |w: &World, cx: f32| {
+        let g = w.read_gamma_blocking(&gpu);
+        let mut c = 0u32;
+        for y in 0..cfg.grid_size {
+            for xx in 0..cfg.grid_size {
+                let (dx, dy) = (xx as f32 - cx, y as f32 - (floor + r));
+                if dx * dx + dy * dy <= r * r && g[(y * cfg.grid_size + xx) as usize] >= 3 {
+                    c += 1;
+                }
+            }
+        }
+        c
+    };
     // Grãos soltos bem acima do chão (em suspensão, a espalharem-se pelo mundo).
     let afloat = |w: &World| {
         let g = w.read_gamma_blocking(&gpu);
         let y0 = (floor + 4.0 * r) as u32;
         (y0..cfg.grid_size).flat_map(|y| (0..cfg.grid_size).map(move |x| (x, y))).map(|(x, y)| g[(y * cfg.grid_size + x) as usize]).filter(|&v| v > 0 && v < 3).sum::<u32>()
     };
-    println!("{:>7} {:>22} {:>22} {:>14}", "passos", "grãos sobre a fumarola", "grãos no monte ao lado", "em suspensão");
+    println!("{:>7} {:>22} {:>22} {:>14} {:>16} {:>14}", "passos", "grãos sobre a fumarola", "grãos no monte ao lado", "em suspensão", "rocha no monte", "rocha no mundo");
     let mut done = 0;
-    println!("{done:>7} {:>22} {:>22} {:>14}", count(&w, vent_x), count(&w, plain_x), afloat(&w));
+    println!("{done:>7} {:>22} {:>22} {:>14} {:>16} {:>14}", count(&w, vent_x), count(&w, plain_x), afloat(&w), rock(&w, plain_x), w.read_gamma_blocking(&gpu).iter().filter(|&&v| v >= 3).count());
     while done < steps {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         w.encode_steps(&gpu.queue, &mut enc, 64);
@@ -70,7 +84,7 @@ fn main() {
         gpu.wait_idle();
         done += 64;
         if done % 512 < 64 {
-            println!("{done:>7} {:>22} {:>22} {:>14}", count(&w, vent_x), count(&w, plain_x), afloat(&w));
+            println!("{done:>7} {:>22} {:>22} {:>14} {:>16} {:>14}", count(&w, vent_x), count(&w, plain_x), afloat(&w), rock(&w, plain_x), w.read_gamma_blocking(&gpu).iter().filter(|&&v| v >= 3).count());
         }
     }
 }

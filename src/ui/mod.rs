@@ -968,7 +968,7 @@ fn tab_world(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
         c.slider("rubble cohesion", slider(&mut p.sediment_cohesion, 0.0..=3.0))
             .tip("each neighbouring grain adds this fraction to the critical entrainment velocity: 0.5 = a grain with two neighbours needs twice the current to be lifted. It only resists the current, not falling. 0 = no cohesion");
         c.slider("rubble compaction into rock", slider(&mut p.sediment_compaction, 0.0..=0.05).logarithmic(true).smallest_positive(0.0001))
-            .tip("buried rubble (grains in 7 or 8 of the cells around it) slowly packs: each step, with this probability, a cell hands one grain to its fullest loose neighbour. Three grains in a cell are rock, so dense rubble turns into porous rock (the grains are conserved, pores open between them). 0 = off. This is not the monomer aggregation of the Soup tab");
+            .tip("clumped rubble slowly packs: each step, with this probability (for a cell surrounded on all sides; less with fewer neighbours, nothing below 3), a cell hands one grain to its fullest loose neighbour. Three grains in a cell are rock, so after a while a clump of rubble collapses into rock a third of its size (the grains are conserved). It does not depend on gravity. 0 = off. This is not the monomer aggregation of the Soup tab");
         c.slider("gravity on rubble GRAINS ×", slider(&mut p.sediment_settle, 0.0..=5.0))
             .tip("fall speed (×0.5 fluid cells/s): a loose grain moves with the current minus the fall — it rises where the upward current is stronger (suspension) and settles where it slows down. 0 = they float");
         c.slider("bioturbation (pushing rubble)", slider(&mut p.bioturbation, 0.0..=0.5));

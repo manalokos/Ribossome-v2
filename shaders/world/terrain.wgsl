@@ -26,6 +26,9 @@ fn fluid_vel_at_cell(cx: u32, cy: u32) -> vec2<f32> {
     let fyi = min((cy * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
     return sanitize_vec2(velocity_in[fgrid(fxi, fyi)]);
 }
+// Quanta de uma célula de rocha maciça (ROCK em terrain.rs): a compactação
+// não enche uma célula de rocha além disto.
+const GAMMA_ROCK_FULL: u32 = 6u;
 // Velocidade (células do fluido por segundo) com que uma fumarola de força 1
 // sopra o entulho que tem em cima da saída.
 const VENT_BLOW: f32 = 8.0;
@@ -129,6 +132,30 @@ fn compute_gamma_slope(@builtin(global_invocation_id) gid: vec3<u32>) {
     slope_grid[gid.y * GRID_SIZE + gid.x] = vec2<f32>(dx, dy) / f32(WORLD_UNITS_PER_CELL);
 }
 
+// Um grão pode passar de `src` (com n grãos) para a vizinha `dst` (com c) sem
+// a pilha de areia o desfazer? Depois da troca, `dst` não pode ficar
+// SANDPILE_DIFF acima da mais baixa das suas 4 vizinhas, nem `src` ficar
+// SANDPILE_DIFF abaixo da mais alta das suas (senão escorregava de volta).
+fn compaction_stable(src: u32, dst: u32, n: u32, c: u32) -> bool {
+    var d4 = array<vec2<i32>, 4>(vec2<i32>(1, 0), vec2<i32>(-1, 0), vec2<i32>(0, 1), vec2<i32>(0, -1));
+    var ok = true;
+    for (var k = 0u; k < 4u; k++) {
+        let qd = vec2<i32>(i32(dst % GRID_SIZE), i32(dst / GRID_SIZE)) + d4[k];
+        if (qd.x >= 0 && qd.y >= 0 && qd.x < i32(GRID_SIZE) && qd.y < i32(GRID_SIZE)) {
+            let qi = u32(qd.y) * GRID_SIZE + u32(qd.x);
+            let low = select(gamma_count(qi), n - 1u, qi == src);
+            if (c + 1u >= low + SANDPILE_DIFF) { ok = false; }
+        }
+        let qs = vec2<i32>(i32(src % GRID_SIZE), i32(src / GRID_SIZE)) + d4[k];
+        if (qs.x >= 0 && qs.y >= 0 && qs.x < i32(GRID_SIZE) && qs.y < i32(GRID_SIZE)) {
+            let qi = u32(qs.y) * GRID_SIZE + u32(qs.x);
+            let high = select(gamma_count(qi), c + 1u, qi == dst);
+            if (high >= n - 1u + SANDPILE_DIFF) { ok = false; }
+        }
+    }
+    return ok;
+}
+
 fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
     let x = gid.x;
     let y = gid.y;
@@ -153,6 +180,10 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
         var tie_h = rr.x;
         var comp_idx = idx;
         var comp_c = 0u;
+        // A compactação é rara: só se procuram candidatos nos passos em que
+        // o sorteio a deixa tentar.
+        let comp_roll = f32(hash(rr.x ^ 0x5bd1e995u) >> 8u) * (1.0 / 16777216.0);
+        let try_comp = comp_roll < params.sediment_compaction;
         for (var dy = -1i; dy <= 1i; dy++) {
             for (var dx = -1i; dx <= 1i; dx++) {
                 if (dx == 0i && dy == 0i) { continue; }
@@ -162,8 +193,11 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
                 let ni = u32(ny) * GRID_SIZE + u32(nx);
                 let c = gamma_count(ni);
                 if (c >= 1u) { bonds += 1u; }
-                // Para a compactação: a vizinha SOLTA mais cheia.
-                if (c >= 1u && c < GAMMA_SOLID_THRESHOLD && (c > comp_c || (c == comp_c && (hash(tie_h ^ (ni * 31u)) & 1u) == 1u))) {
+                // Para a compactação: a vizinha mais cheia (solta ou já rocha,
+                // até GAMMA_ROCK_FULL) para onde um grão pode passar SEM criar
+                // um degrau que a pilha de areia desfaça logo a seguir.
+                if (try_comp && c >= 1u && c < GAMMA_ROCK_FULL && (c > comp_c || (c == comp_c && (hash(tie_h ^ (ni * 31u)) & 1u) == 1u))
+                    && compaction_stable(idx, ni, n, c)) {
                     comp_c = c;
                     comp_idx = ni;
                 }
@@ -197,11 +231,16 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
             }
         }
         let mob = pow(0.25, f32(bonds));
-        // COMPACTAÇÃO (litificação): entulho enterrado, com grãos em quase
-        // todas as vizinhas, vai passando grãos à vizinha solta mais cheia.
-        // Juntam-se três a três (3 grãos = rocha) e ficam poros entre eles:
-        // o entulho denso vira rocha porosa. Conserva os grãos.
-        if (bonds >= 7u && comp_idx != idx && f32(hash(rr.x ^ 0x5bd1e995u) >> 8u) * (1.0 / 16777216.0) < params.sediment_compaction) {
+        // COMPACTAÇÃO (litificação): entulho AGLOMERADO (com grãos em 3 ou
+        // mais das 8 vizinhas) vai passando grãos à vizinha mais cheia, tanto
+        // mais depressa quanto mais rodeado está (1/6 da taxa com 3 vizinhas,
+        // a taxa inteira com 8). Uma célula com 3 grãos é rocha: ao fim de
+        // algum tempo o aglomerado fica com um miolo de rocha. Só se dá o
+        // passo se o resultado for ESTÁVEL para a pilha de areia (senão a
+        // rocha nova desfazia-se logo e o terreno ficava só a mudar de forma,
+        // sem ganhar rocha). Não depende da gravidade (serve num mundo visto
+        // de cima) e conserva os grãos.
+        if (try_comp && bonds >= 3u && comp_idx != idx && comp_roll < params.sediment_compaction * f32(bonds - 2u) / 6.0) {
             gamma_move_one(idx, comp_idx);
             return;
         }
@@ -261,7 +300,7 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
         let rw = f32(rr.z >> 8u) * (1.0 / 16777216.0);
         let rw2 = f32(rr.w >> 8u) * (1.0 / 16777216.0);
         var dest = idx;
-        if (n >= 2u && em_found && rw2 < GAMMA_SHED_P) {
+        if (n >= 2u && em_found && rw2 < GAMMA_SHED_P * clamp(params.sediment_settle, 0.0, 1.0)) {
             // Mini-falésia: o quantum de cima desce para a vaga mais aninhada.
             dest = em_idx;
         } else if (rw < p_sed) {
@@ -322,7 +361,11 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
     if (y > 0u) { let c = gamma_count(idx - GRID_SIZE); if (c < best_count) { best_count = c; best_idx = idx - GRID_SIZE; } }
     if (y + 1u < GRID_SIZE) { let c = gamma_count(idx + GRID_SIZE); if (c < best_count) { best_count = c; best_idx = idx + GRID_SIZE; } }
     if (best_idx == idx || n - best_count < SANDPILE_DIFF) { return; }
-    if (rng_f4(idx, params.epoch, S_SAND + phase).x < GAMMA_RELAX_P) {
+    // Desmoronar é coisa da GRAVIDADE: com a gravidade dos grãos a zero (um
+    // mundo visto de cima) não há ângulo de repouso e a rocha não escorrega.
+    // (Sem isto, os grãos caídos flutuavam para longe, a face ficava outra
+    // vez a pique e a rocha desfazia-se sem parar em entulho.)
+    if (rng_f4(idx, params.epoch, S_SAND + phase).x < GAMMA_RELAX_P * clamp(params.sediment_settle, 0.0, 1.0)) {
         gamma_move_one(idx, best_idx);
     }
 }
