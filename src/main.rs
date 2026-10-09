@@ -80,6 +80,8 @@ struct Running {
     lineages: ribossome::lineage::Lineages,
     /// Um preset pediu população: semeia-se no frame a seguir ao mundo novo.
     pending_seed: bool,
+    /// Preset pedido por RIBO_PRESET, a lançar no primeiro frame.
+    startup_preset: Option<String>,
     last_frame: std::time::Instant,
     steps_eff: f32,
     /// Estimativa de frame = o + n·s (ver adaptive_steps): médias de n, f,
@@ -186,6 +188,9 @@ fn startup_terrain(world: &mut World) {
 /// Monómeros ativados por canal e célula na piscina do modo laboratório.
 const LAB_PER_CHANNEL: f32 = 1.5;
 
+/// Onde fica o tamanho do mundo escolhido na interface (células de lado).
+const WORLD_SIZE_FILE: &str = "saves/world_size.txt";
+
 fn world_config_from_env() -> WorldConfig {
     let mut cfg = WorldConfig::DEFAULT;
     if lab_mode() {
@@ -193,7 +198,11 @@ fn world_config_from_env() -> WorldConfig {
         cfg.fluid_size = 512;
         cfg.max_agents = 100_000;
     }
-    if let Some(g) = std::env::var("RIBO_GRID").ok().and_then(|v| v.parse::<u32>().ok()) {
+    // TAMANHO DO MUNDO: RIBO_GRID manda; sem ele, o último tamanho escolhido
+    // na interface (guardado em WORLD_SIZE_FILE), para o programa reabrir no
+    // tamanho em que se fechou.
+    let chosen = std::env::var("RIBO_GRID").ok().or_else(|| if lab_mode() { None } else { std::fs::read_to_string(WORLD_SIZE_FILE).ok() });
+    if let Some(g) = chosen.and_then(|v| v.trim().parse::<u32>().ok()).filter(|g| g.is_power_of_two() && (64..=4096).contains(g) && *g != WorldConfig::DEFAULT.grid_size) {
         cfg.grid_size = g;
         cfg.fluid_size = (g / 2).max(16);
         // A capacidade de agentes escala com a área (400 000 a 2048²).
@@ -211,7 +220,10 @@ impl Running {
             event_loop
                 .create_window(
                     Window::default_attributes()
-                        .with_title("Ribossome")
+                        .with_title({
+                            let g = world_config_from_env().grid_size;
+                            if g == WorldConfig::DEFAULT.grid_size { "Ribossome".to_string() } else { format!("Ribossome ({g} × {g})") }
+                        })
                         .with_window_icon({
                             // Ícone da janela: o mesmo do executável (assets/icon.png).
                             let dec = png::Decoder::new(std::io::Cursor::new(&include_bytes!("../assets/icon.png")[..]));
@@ -370,6 +382,7 @@ impl Running {
             kin_frames: 0,
             lineages: resumed_lineages.unwrap_or_default(),
             pending_seed: false,
+            startup_preset: std::env::var("RIBO_PRESET").ok().filter(|v| !v.is_empty()),
             last_frame: std::time::Instant::now(),
             steps_eff: 1.0,
             fit: [0.0; 5],
@@ -1096,7 +1109,11 @@ impl Running {
                 if lab_mode() {
                     self.world.configure_lab();
                 }
-                self.ui.seed_count = p.seeds.max(1);
+                // A população do preset é para o mundo de tamanho normal: num
+                // mundo mais pequeno semeia-se na proporção da área.
+                let (g, g0) = (self.world.cfg.grid_size as u64, WorldConfig::DEFAULT.grid_size as u64);
+                let seeds = ((p.seeds as u64 * g * g) / (g0 * g0)).max(p.seeds.min(50) as u64) as u32;
+                self.ui.seed_count = seeds.max(1);
                 self.ui.seed_len = p.seed_len;
                 if p.steps_per_frame > 0 {
                     self.ui.steps_per_frame = p.steps_per_frame.clamp(1, ribossome::world::MAX_STEPS_PER_FRAME);
@@ -1108,7 +1125,7 @@ impl Running {
                 if !unknown.is_empty() {
                     note += &format!(" (unknown parameters ignored: {})", unknown.join(", "));
                 }
-                self.ui.preset_msg = format!("launched \"{}\"{note}", p.name);
+                self.ui.preset_msg = format!("launched \"{}\" in the {1} × {1} world, {seeds} seeds{note}", p.name, self.world.cfg.grid_size);
                 log::info!("preset: {}", self.ui.preset_msg);
             }
             PresetAction::SaveCurrent => {
@@ -1304,6 +1321,15 @@ impl Running {
         }
         if let Some(action) = self.ui.terrain_action.take() {
             self.terrain_action(action);
+        }
+        // RIBO_PRESET=nome do ficheiro (sem .json) ou número: lança esse preset
+        // ao arrancar (para atalhos .bat).
+        if let Some(want) = self.startup_preset.take() {
+            let found = self.ui.presets.iter().position(|(path, _)| path.file_stem().is_some_and(|s| s.to_string_lossy() == want)).or_else(|| want.parse::<usize>().ok().filter(|i| (1..=self.ui.presets.len()).contains(i)).map(|i| i - 1));
+            match found {
+                Some(i) => self.ui.preset_action = Some(ribossome::ui::PresetAction::Launch(i)),
+                None => log::warn!("RIBO_PRESET={want}: no such preset"),
+            }
         }
         if let Some(action) = self.ui.preset_action.take() {
             self.preset_action(action);
@@ -1682,10 +1708,15 @@ impl Running {
                 // grava-se, fecha-se e abre-se o programa de novo com ele.
                 if let Some(grid) = self.ui.relaunch_grid.take() {
                     self.on_close();
+                    // Fica escolhido para as próximas vezes que o programa abrir.
+                    if let Err(e) = std::fs::write(WORLD_SIZE_FILE, format!("{grid}
+")) {
+                        log::warn!("world size: could not write {WORLD_SIZE_FILE}: {e}");
+                    }
                     match std::env::current_exe().and_then(|exe| {
                         let mut cmd = std::process::Command::new(exe);
                         cmd.env("RIBO_NO_SPLASH", "1");
-                        if grid == WorldConfig::DEFAULT.grid_size { cmd.env_remove("RIBO_GRID") } else { cmd.env("RIBO_GRID", grid.to_string()) };
+                        cmd.env_remove("RIBO_GRID");
                         cmd.spawn()
                     }) {
                         Ok(_) => event_loop.exit(),
