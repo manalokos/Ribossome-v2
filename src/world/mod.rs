@@ -1191,6 +1191,16 @@ impl World {
         self.fumaroles.clear();
     }
 
+    /// Terreno por ruído (com as suas fumarolas) na próxima sementeira.
+    pub fn use_noise_terrain(&mut self, o: &terrain::NoiseTerrain) {
+        let (g, h, c) = terrain::noise_terrain(&self.cfg, o);
+        self.custom_terrain = Some((g, h));
+        self.custom_chem = c;
+        self.heat_image = None;
+        self.chem_image = None;
+        self.fumaroles.clear();
+    }
+
     /// Volta ao terreno gerado (com a fumarola por omissão) na próxima sementeira.
     pub fn use_generated_terrain(&mut self) {
         self.custom_terrain = None;

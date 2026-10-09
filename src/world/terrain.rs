@@ -45,6 +45,142 @@ fn fbm(x: f32, y: f32, seed: u32) -> f32 {
     sum / total
 }
 
+/// TERRENO POR RUÍDO: ruído de Perlin em várias oitavas com um limiar para a
+/// rocha e uma faixa de entulho por baixo dele, e fumarolas postas
+/// automaticamente no fundo.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct NoiseTerrain {
+    pub seed: u32,
+    /// Manchas de lado a lado do mundo (maior = formas mais pequenas).
+    pub scale: f32,
+    /// Oitavas do ruído (mais = contornos mais recortados).
+    pub octaves: u32,
+    /// Limiar da rocha, 0..1 (menor = mais rocha).
+    pub rock: f32,
+    /// Largura da faixa de entulho abaixo do limiar (0 = sem entulho).
+    pub rubble: f32,
+    /// Quanto o fundo tem mais rocha do que o topo (0 = igual em todo o lado).
+    pub depth: f32,
+    /// Fumarolas automáticas (0 = nenhuma) e a sua força (0..1).
+    pub vents: u32,
+    pub vent_strength: f32,
+}
+
+impl Default for NoiseTerrain {
+    fn default() -> Self {
+        Self { seed: 1, scale: 7.0, octaves: 4, rock: 0.57, rubble: 0.05, depth: 0.28, vents: 6, vent_strength: 0.8 }
+    }
+}
+
+/// Ruído de Perlin 2D (gradientes), em cerca de [-0,7, 0,7].
+fn perlin(x: f32, y: f32, seed: u32) -> f32 {
+    let grad = |ix: i32, iy: i32| -> (f32, f32) {
+        let mut h = (ix as u32).wrapping_mul(0x8DA6_B343) ^ (iy as u32).wrapping_mul(0xD816_3841) ^ seed.wrapping_mul(0xCB1A_B31F);
+        h ^= h >> 15;
+        h = h.wrapping_mul(0x2C1B_3C6D);
+        h ^= h >> 12;
+        h = h.wrapping_mul(0x297A_2D39);
+        h ^= h >> 15;
+        let a = h as f32 / u32::MAX as f32 * std::f32::consts::TAU;
+        (a.cos(), a.sin())
+    };
+    let (x0, y0) = (x.floor(), y.floor());
+    let (fx, fy) = (x - x0, y - y0);
+    let fade = |t: f32| t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+    let (ix, iy) = (x0 as i32, y0 as i32);
+    let dot = |dx: i32, dy: i32| {
+        let g = grad(ix + dx, iy + dy);
+        g.0 * (fx - dx as f32) + g.1 * (fy - dy as f32)
+    };
+    let (u, v) = (fade(fx), fade(fy));
+    let a = dot(0, 0) + (dot(1, 0) - dot(0, 0)) * u;
+    let b = dot(0, 1) + (dot(1, 1) - dot(0, 1)) * u;
+    a + (b - a) * v
+}
+
+/// Terreno (quanta por célula), calor e química das fumarolas, por célula.
+/// y = 0 é o fundo. Determinista para as opções dadas.
+pub fn noise_terrain(cfg: &WorldConfig, o: &NoiseTerrain) -> (Vec<u32>, Vec<f32>, Option<Vec<f32>>) {
+    let n = cfg.grid_size as usize;
+    let mut g = vec![0u32; n * n];
+    let octaves = o.octaves.clamp(1, 8);
+    for y in 0..n {
+        let yf = y as f32 / n as f32;
+        // O topo fica aberto (a luz entra por cima) e o fundo tem um leito.
+        let open_top = ((yf - 0.85) / 0.15).clamp(0.0, 1.0);
+        for x in 0..n {
+            let xf = x as f32 / n as f32;
+            let (mut sum, mut total, mut amp, mut freq) = (0.0, 0.0, 1.0, o.scale.max(0.1));
+            for k in 0..octaves {
+                sum += perlin(xf * freq, yf * freq, o.seed.wrapping_add(k * 7919)) * amp;
+                total += amp;
+                amp *= 0.5;
+                freq *= 2.0;
+            }
+            let v = 0.5 + 0.7 * sum / total + o.depth * (0.5 - yf) - 0.6 * open_top;
+            g[y * n + x] = if yf < 0.012 || v > o.rock {
+                ROCK
+            } else if v > o.rock - 0.5 * o.rubble {
+                2
+            } else if v > o.rock - o.rubble {
+                1
+            } else {
+                0
+            };
+        }
+    }
+    // FUMAROLAS: em colunas repartidas pelo mundo (com um desvio), no ponto
+    // MAIS FUNDO de cada coluna que ainda tem ligação à água aberta (e não
+    // numa caverna fechada nem no cimo de uma rocha). A água aberta acha-se
+    // enchendo a partir da linha de cima.
+    let mut open = vec![false; n * n];
+    let mut stack: Vec<usize> = (0..n).map(|x| (n - 1) * n + x).filter(|&c| g[c] == 0).collect();
+    for &c in &stack {
+        open[c] = true;
+    }
+    while let Some(c) = stack.pop() {
+        let (x, y) = (c % n, c / n);
+        let mut visit = |nx: usize, ny: usize| {
+            let k = ny * n + nx;
+            if g[k] == 0 && !open[k] {
+                open[k] = true;
+                stack.push(k);
+            }
+        };
+        if x > 0 { visit(x - 1, y) }
+        if x + 1 < n { visit(x + 1, y) }
+        if y > 0 { visit(x, y - 1) }
+        if y + 1 < n { visit(x, y + 1) }
+    }
+    let mut heat = vec![0f32; n * n];
+    let mut chem = vec![0f32; n * n];
+    let r = (n as f32 / 2048.0 * 10.0).max(3.0);
+    for i in 0..o.vents.min(64) {
+        let jitter = perlin(i as f32 * 3.7 + 0.5, 0.5, o.seed ^ 0x5EED) * 0.6;
+        let x = (((i as f32 + 0.5 + jitter) / o.vents as f32).clamp(0.02, 0.98) * n as f32) as usize;
+        let Some(y) = (1..n).find(|&y| open[y * n + x] && g[(y - 1) * n + x] != 0) else { continue };
+        let ri = r.ceil() as i32;
+        for dy in -ri..=ri {
+            for dx in -ri..=ri {
+                let (cx, cy) = (x as i32 + dx, y as i32 + dy + ri / 2);
+                let d = ((dx * dx + dy * dy) as f32).sqrt();
+                if d > r || cx < 0 || cy < 0 || cx >= n as i32 || cy >= n as i32 {
+                    continue;
+                }
+                let c = cy as usize * n + cx as usize;
+                if g[c] == 0 {
+                    let s = o.vent_strength.clamp(0.0, 1.0) * (1.0 - d / r);
+                    heat[c] = heat[c].max(s);
+                    chem[c] = chem[c].max(s);
+                }
+            }
+        }
+    }
+    let has = chem.iter().any(|&c| c > 0.0);
+    (g, heat, has.then_some(chem))
+}
+
 /// Quanta de gamma por célula do ambiente. Cada fumarola fica numa
 /// chaminé aberta no leito (senão o calor ficava enterrado na rocha).
 pub fn generate(cfg: &WorldConfig, seed: u32, fumaroles: &[Fumarole]) -> Vec<u32> {

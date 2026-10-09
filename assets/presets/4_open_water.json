@@ -1,0 +1,14 @@
+{
+  "name": "Open water",
+  "description": "water only, no terrain, no vents and no fluid, with the default settings: a clean pool for experiments and for painting by hand",
+  "fluid": false,
+  "terrain": {
+    "kind": "empty"
+  },
+  "params": {},
+  "seeds": 1000,
+  "seed_len": [
+    12,
+    120
+  ]
+}

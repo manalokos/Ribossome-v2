@@ -42,6 +42,17 @@ pub struct UiState {
     /// Terreno em imagem: caminho, ação pedida e resultado da última.
     pub terrain_path: String,
     pub terrain_action: Option<TerrainAction>,
+    /// Opções do terreno por ruído.
+    pub noise: crate::world::terrain::NoiseTerrain,
+    /// Presets de lançamento lidos de assets/presets/ e o que fazer com eles.
+    pub presets: Vec<(std::path::PathBuf, crate::presets::Preset)>,
+    pub preset_action: Option<PresetAction>,
+    pub preset_name: String,
+    pub preset_msg: String,
+    /// Tamanho do mundo escolhido para relançar o programa (células de lado)
+    /// e o pedido de relançamento.
+    pub grid_choice: u32,
+    pub relaunch_grid: Option<u32>,
     /// Pincel do terreno: ligado, material (ver PAINT_MATERIALS), raio em
     /// células e força das fumarolas (0..1).
     pub paint_on: bool,
@@ -165,6 +176,19 @@ pub enum TerrainAction {
     Save,
     /// Volta ao terreno gerado e semeia de novo.
     Generated,
+    /// Gera o terreno por ruído (UiState::noise) e semeia de novo.
+    Noise,
+}
+
+/// Presets de lançamento (ver presets.rs).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresetAction {
+    /// Aplica o preset com este índice em `UiState::presets` e lança.
+    Launch(usize),
+    /// Grava o estado atual (parâmetros, fluido, terreno) como preset.
+    SaveCurrent,
+    /// Relê a pasta dos presets.
+    Refresh,
 }
 
 /// Materiais do pincel (o índice é `UiState::paint_material`).
@@ -250,6 +274,13 @@ impl UiState {
             charts: Default::default(),
             terrain_path: std::env::var("RIBO_TERRAIN").unwrap_or_else(|_| "assets/terreno.png".into()),
             terrain_action: None,
+            noise: Default::default(),
+            presets: crate::presets::list(),
+            preset_action: None,
+            preset_name: String::new(),
+            preset_msg: String::new(),
+            grid_choice: 0,
+            relaunch_grid: None,
             paint_on: false,
             paint_material: 3,
             paint_radius: 12.0,
@@ -553,6 +584,60 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
     changed_params(ui, world);
     ui.separator();
     ui.label("A scene = the whole world (matter, terrain, water, agents) and all the parameters.");
+    ui.separator();
+    ui.strong("Launch presets");
+    ui.small("one click sets every setting, the fluid and the terrain, seeds a new world and launches the population (files in assets/presets/)");
+    ui.horizontal_wrapped(|ui| {
+        for (i, (_, p)) in st.presets.iter().enumerate() {
+            let mut b = ui.button(&p.name);
+            if !p.description.is_empty() {
+                b = b.on_hover_text(&p.description);
+            }
+            if b.clicked() {
+                st.preset_action = Some(PresetAction::Launch(i));
+            }
+        }
+        if st.presets.is_empty() {
+            ui.label("no presets found");
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.add(egui::TextEdit::singleline(&mut st.preset_name).hint_text("name of a new preset").desired_width(150.0));
+        if ui
+            .add_enabled(!st.preset_name.trim().is_empty(), egui::Button::new("save current as preset"))
+            .on_hover_text("saves the current settings, the fluid switch, the seeding numbers and the current terrain (as a picture) as a new preset")
+            .clicked()
+        {
+            st.preset_action = Some(PresetAction::SaveCurrent);
+        }
+        if ui.button("⟳").on_hover_text("read the presets folder again").clicked() {
+            st.preset_action = Some(PresetAction::Refresh);
+        }
+    });
+    if !st.preset_msg.is_empty() {
+        ui.small(&st.preset_msg);
+    }
+    ui.separator();
+    ui.strong("World size");
+    ui.horizontal(|ui| {
+        if st.grid_choice == 0 {
+            st.grid_choice = world.cfg.grid_size;
+        }
+        egui::ComboBox::from_id_salt("grid size").selected_text(format!("{0} × {0} cells", st.grid_choice)).show_ui(ui, |ui| {
+            for g in [2048u32, 1024, 512] {
+                ui.selectable_value(&mut st.grid_choice, g, format!("{g} × {g} cells"));
+            }
+        });
+        if ui
+            .add_enabled(st.grid_choice != world.cfg.grid_size, egui::Button::new("restart the program at this size"))
+            .on_hover_text("the world size is chosen at startup: this saves the autosave, closes the program and opens it again with the new size. The cells and the rules are the same; a smaller world is a smaller area (1024 = a quarter, 512 = a sixteenth) and runs faster. Each size has its own autosave")
+            .clicked()
+        {
+            st.relaunch_grid = Some(st.grid_choice);
+        }
+    });
+    ui.small(format!("now: {0} × {0} cells, up to {1} agents", world.cfg.grid_size, world.cfg.max_agents));
+    ui.separator();
     ui.label("The amino acid and organ tables always come from assets/ (not from the scene).");
     ui.horizontal(|ui| {
         if ui.button("save scene…").clicked() {
@@ -829,6 +914,23 @@ fn tab_world(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
                     st.terrain_action = Some(TerrainAction::Empty);
                 }
             });
+        });
+    });
+    section(ui, b, T, "Procedural terrain (noise)", |c| {
+        let n = &mut st.noise;
+        c.slider("noise seed", slider(&mut n.seed, 1..=9999)).tip("each seed gives a different terrain with the same settings");
+        c.slider("blobs across the world", slider(&mut n.scale, 1.0..=40.0).logarithmic(true))
+            .tip("how many rock masses fit from side to side: larger = smaller, more numerous shapes");
+        c.slider("noise octaves", slider(&mut n.octaves, 1..=8)).tip("more octaves = more jagged outlines");
+        c.slider("rock threshold", slider(&mut n.rock, 0.3..=0.8)).tip("where the noise is above this value there is rock: lower = more rock");
+        c.slider("rubble band", slider(&mut n.rubble, 0.0..=0.2)).tip("width of the band of loose rubble around the rock (0 = none)");
+        c.slider("more rock toward the bottom", slider(&mut n.depth, 0.0..=1.0)).tip("0 = the same everywhere; 1 = a mostly solid bottom and open water above");
+        c.slider("automatic vents", slider(&mut n.vents, 0..=24)).tip("vents (heat and reductant) placed on the bottom, spread across the world; 0 = none (paint them by hand)");
+        c.slider("automatic vent strength", slider(&mut n.vent_strength, 0.05..=1.0));
+        c.row("", |ui| {
+            if ui.button("generate terrain (world seeded again)").clicked() {
+                st.terrain_action = Some(TerrainAction::Noise);
+            }
         });
     });
     section(ui, b, T, "Brush", |c| {

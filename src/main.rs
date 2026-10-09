@@ -78,6 +78,8 @@ struct Running {
     /// placa está a aguentar (ver `adaptive_steps`).
     /// Registo das linhagens (árvore da vida da corrida); guardado com a cena.
     lineages: ribossome::lineage::Lineages,
+    /// Um preset pediu população: semeia-se no frame a seguir ao mundo novo.
+    pending_seed: bool,
     last_frame: std::time::Instant,
     steps_eff: f32,
     /// Estimativa de frame = o + n·s (ver adaptive_steps): médias de n, f,
@@ -147,7 +149,19 @@ const SAVES_DIR: &str = "saves";
 
 /// O autosave deste modo (o laboratório tem outro tamanho de mundo).
 fn autosave_file() -> &'static str {
-    if lab_mode() { "saves/autosave_lab.ribo" } else { "saves/autosave.ribo" }
+    // Cada tamanho de mundo tem o seu (uma cena de um tamanho não carrega
+    // noutro, e não pode ser gravada por cima do autosave do tamanho normal).
+    static FILE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    FILE.get_or_init(|| {
+        let grid = world_config_from_env().grid_size;
+        if lab_mode() {
+            "saves/autosave_lab.ribo".into()
+        } else if grid != WorldConfig::DEFAULT.grid_size {
+            format!("saves/autosave_{grid}.ribo")
+        } else {
+            "saves/autosave.ribo".into()
+        }
+    })
 }
 
 /// Terreno de arranque. De uma imagem: RIBO_TERRAIN=caminho.png; por omissão
@@ -355,6 +369,7 @@ impl Running {
             kin_id: None,
             kin_frames: 0,
             lineages: resumed_lineages.unwrap_or_default(),
+            pending_seed: false,
             last_frame: std::time::Instant::now(),
             steps_eff: 1.0,
             fit: [0.0; 5],
@@ -992,7 +1007,7 @@ impl Running {
         let chosen = match action {
             TerrainAction::Load => dialog.set_title("Load terrain").pick_file(),
             TerrainAction::Save => dialog.set_title("Save terrain").set_file_name(&name).save_file(),
-            TerrainAction::Generated | TerrainAction::Empty => Some(last.clone()),
+            TerrainAction::Generated | TerrainAction::Empty | TerrainAction::Noise => Some(last.clone()),
         };
         let Some(path) = chosen else {
             self.ui.terrain_msg = "canceled".into();
@@ -1029,11 +1044,103 @@ impl Running {
                 self.ui.terrain_msg = "empty world (water only); seeded again".into();
                 true
             }
+            TerrainAction::Noise => {
+                self.world.use_noise_terrain(&self.ui.noise);
+                self.ui.terrain_msg = format!("noise terrain (seed {}); world seeded again", self.ui.noise.seed);
+                true
+            }
         };
         if resow {
             // Mesma semente: só o terreno muda.
             self.seed -= 1;
             self.ui.reseed = true;
+        }
+    }
+
+    /// PRESETS DE LANÇAMENTO (ver presets.rs).
+    fn preset_action(&mut self, action: ribossome::ui::PresetAction) {
+        use ribossome::presets::{self, Preset, PresetTerrain};
+        use ribossome::ui::PresetAction;
+        match action {
+            PresetAction::Refresh => {
+                self.ui.presets = presets::list();
+                self.ui.preset_msg = format!("{} presets in {}", self.ui.presets.len(), presets::DIR);
+            }
+            PresetAction::Launch(i) => {
+                let Some((_, p)) = self.ui.presets.get(i).cloned() else { return };
+                // Tudo por omissão, depois o que o preset muda.
+                self.world.reset_settings();
+                let mut unknown = Vec::new();
+                for (k, v) in &p.params {
+                    if k.starts_with('_') || !self.world.params.set_named(k, *v) {
+                        unknown.push(k.clone());
+                    }
+                }
+                self.world.settings.fluid_enabled = p.fluid;
+                self.world.fumarole_gain = p.fumarole_gain;
+                let mut note = String::new();
+                match &p.terrain {
+                    PresetTerrain::Default => startup_terrain(&mut self.world),
+                    PresetTerrain::Empty => self.world.use_empty_terrain(),
+                    PresetTerrain::Image { path } => {
+                        if let Err(e) = self.world.load_terrain_png(std::path::Path::new(path)) {
+                            note = format!(" (terrain {path}: {e}; using the default terrain)");
+                            startup_terrain(&mut self.world);
+                        }
+                    }
+                    PresetTerrain::Noise(o) => {
+                        self.ui.noise = *o;
+                        self.world.use_noise_terrain(o);
+                    }
+                }
+                if lab_mode() {
+                    self.world.configure_lab();
+                }
+                self.ui.seed_count = p.seeds.max(1);
+                self.ui.seed_len = p.seed_len;
+                if p.steps_per_frame > 0 {
+                    self.ui.steps_per_frame = p.steps_per_frame.clamp(1, ribossome::world::MAX_STEPS_PER_FRAME);
+                }
+                self.pending_seed = p.seeds > 0;
+                self.seed = 0;
+                self.ui.reseed = true;
+                self.last_autosave = 0;
+                if !unknown.is_empty() {
+                    note += &format!(" (unknown parameters ignored: {})", unknown.join(", "));
+                }
+                self.ui.preset_msg = format!("launched \"{}\"{note}", p.name);
+                log::info!("preset: {}", self.ui.preset_msg);
+            }
+            PresetAction::SaveCurrent => {
+                let name = self.ui.preset_name.trim().to_string();
+                let stem = presets::file_stem(&name);
+                // O terreno atual vai para uma imagem ao lado do preset.
+                let png = format!("{}/{stem}.png", presets::DIR);
+                let _ = std::fs::create_dir_all(presets::DIR);
+                let terrain = match self.world.save_terrain_png(&self.gpu, std::path::Path::new(&png)) {
+                    Ok(()) => PresetTerrain::Image { path: png },
+                    Err(e) => {
+                        log::warn!("preset: terrain not saved ({e}); the preset uses the default terrain");
+                        PresetTerrain::Default
+                    }
+                };
+                let preset = Preset {
+                    name: name.clone(),
+                    description: format!("saved at epoch {} from {}", self.world.params.epoch, self.ui.scene_name.replace('_', " ")),
+                    fluid: self.world.settings.fluid_enabled,
+                    terrain,
+                    fumarole_gain: self.world.fumarole_gain,
+                    params: self.world.params.changed_from_default().into_iter().map(|(k, v, _)| (k.to_string(), v)).collect(),
+                    seeds: self.ui.seed_count,
+                    seed_len: self.ui.seed_len,
+                    steps_per_frame: self.ui.steps_per_frame,
+                };
+                self.ui.preset_msg = match presets::save(&preset) {
+                    Ok(path) => format!("preset saved to {}", path.display()),
+                    Err(e) => format!("save preset: {e}"),
+                };
+                self.ui.presets = presets::list();
+            }
         }
     }
 
@@ -1198,6 +1305,9 @@ impl Running {
         if let Some(action) = self.ui.terrain_action.take() {
             self.terrain_action(action);
         }
+        if let Some(action) = self.ui.preset_action.take() {
+            self.preset_action(action);
+        }
         if self.ui.restart {
             self.ui.restart = false;
             self.seed += 1;
@@ -1230,6 +1340,10 @@ impl Running {
             self.ui.history.next_epoch = self.world.params.epoch;
             self.ui.scene_name = ribossome::names::new_scene_name(&self.world, self.seed);
             log::info!("world seeded again: {}", self.ui.scene_name);
+            // Preset: a população é lançada no frame seguinte, já no mundo novo.
+            if std::mem::take(&mut self.pending_seed) {
+                self.ui.seed_now = true;
+            }
         }
         let want_vsync = matches!(self.surface_cfg.present_mode, wgpu::PresentMode::AutoVsync);
         if want_vsync != self.ui.vsync {
@@ -1562,7 +1676,23 @@ impl Running {
                 self.surface_cfg.height = size.height.max(1);
                 self.reconfigure();
             }
-            WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::RedrawRequested => {
+                self.redraw();
+                // OUTRO TAMANHO DE MUNDO: escolhe-se ao arrancar, por isso
+                // grava-se, fecha-se e abre-se o programa de novo com ele.
+                if let Some(grid) = self.ui.relaunch_grid.take() {
+                    self.on_close();
+                    match std::env::current_exe().and_then(|exe| {
+                        let mut cmd = std::process::Command::new(exe);
+                        cmd.env("RIBO_NO_SPLASH", "1");
+                        if grid == WorldConfig::DEFAULT.grid_size { cmd.env_remove("RIBO_GRID") } else { cmd.env("RIBO_GRID", grid.to_string()) };
+                        cmd.spawn()
+                    }) {
+                        Ok(_) => event_loop.exit(),
+                        Err(e) => self.ui.preset_msg = format!("could not restart the program: {e}"),
+                    }
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 let p = [position.x as f32 - self.viewport[0], position.y as f32 - self.viewport[1]];
                 if self.dragging {

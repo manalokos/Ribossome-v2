@@ -8,6 +8,7 @@ pub mod lineage;
 pub mod mcp;
 pub mod names;
 pub mod params;
+pub mod presets;
 pub mod render;
 pub mod report;
 pub mod runlog;

@@ -1,0 +1,14 @@
+{
+  "name": "Program defaults",
+  "description": "every setting at the program's default value, on the project terrain",
+  "fluid": true,
+  "terrain": {
+    "kind": "default"
+  },
+  "params": {},
+  "seeds": 500,
+  "seed_len": [
+    12,
+    120
+  ]
+}
