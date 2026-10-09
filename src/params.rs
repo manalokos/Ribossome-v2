@@ -872,8 +872,10 @@ gpu_struct! {
         /// posição atual desse agente (unidades do mundo).
         pub focus_dx: f32,
         pub focus_dy: f32,
-        pub _pad_w0: u32,
-        pub _pad_w1: u32,
+        /// Epoch atual e duração (em passos) da animação dos restos de quem
+        /// morre (0 = sem restos).
+        pub epoch: u32,
+        pub ghost_steps: f32,
     }
 }
 

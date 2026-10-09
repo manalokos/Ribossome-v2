@@ -249,6 +249,31 @@ fn agent_matter(slot: u32) -> vec4<u32> {
     return m;
 }
 
+// Cópia do corpo de quem morre à vista, para o desenho dos restos (ver
+// GHOST_MAX em bindings.wgsl). draw_args[8..11] é o retângulo da câmara.
+// (Sem saídas dentro dos ciclos: é chamado a partir de agents_step.)
+fn ghost_record(slot: u32, a: Agent) {
+    if (a.body_len == 0u) { return; }
+    let lo = vec2<f32>(bitcast<f32>(atomicLoad(&draw_args[8])), bitcast<f32>(atomicLoad(&draw_args[9])));
+    let hi = vec2<f32>(bitcast<f32>(atomicLoad(&draw_args[10])), bitcast<f32>(atomicLoad(&draw_args[11])));
+    let p = vec2<f32>(a.pos_x, a.pos_y);
+    if (any(p < lo) || any(p > hi) || hi.x - lo.x > GHOST_VIEW_MAX) { return; }
+    let g = GHOST_HEAD + (atomicAdd(&ghosts[0], 1u) % GHOST_MAX) * GHOST_WORDS;
+    atomicStore(&ghosts[g], bitcast<u32>(a.pos_x));
+    atomicStore(&ghosts[g + 1u], bitcast<u32>(a.pos_y));
+    atomicStore(&ghosts[g + 2u], bitcast<u32>(a.rot));
+    atomicStore(&ghosts[g + 3u], params.epoch);
+    atomicStore(&ghosts[g + 4u], a.body_len);
+    atomicStore(&ghosts[g + 5u], a.id);
+    for (var i = 0u; i < 16u; i++) { atomicStore(&ghosts[g + 8u + i], bodies[slot * 16u + i]); }
+    for (var i = 0u; i < 32u; i++) { atomicStore(&ghosts[g + 24u + i], organs[slot * 32u + i]); }
+    for (var k = 0u; k < MAX_BODY; k++) {
+        let bp = body_pos[slot * MAX_BODY + k];
+        atomicStore(&ghosts[g + 56u + 2u * k], bitcast<u32>(bp.x));
+        atomicStore(&ghosts[g + 57u + 2u * k], bitcast<u32>(bp.y));
+    }
+}
+
 // MORTE: toda a matéria volta ao meio, repartida pelas células onde estão
 // os resíduos do corpo (os restos ficam onde o corpo estava, sem despejar
 // tudo numa célula só). O genoma volta GASTO; os complementos já capturados
@@ -263,6 +288,7 @@ fn die(slot: u32, a_in: Agent) {
 // pedaços). Primeiro os do próprio agente; o que sobrar do orçamento
 // reativa gastos das células onde o corpo estava.
 fn die_release(slot: u32, a_in: Agent, budget_in: u32) {
+    ghost_record(slot, a_in);
     var a = a_in;
     var m_act = vec4<u32>(0u);
     for (var i = 0u; i < min(a.pair_count, a.gene_len); i++) { m_act[genome_get(slot, i) ^ 1u] += 1u; }

@@ -249,6 +249,8 @@ pub struct World {
     /// Ligações entre agentes (BOND_STRIDE vec4<u32> por slot).
     pub bonds_buf: wgpu::Buffer,
     pub life_counters_buf: wgpu::Buffer,
+    /// Cópias dos corpos de quem morreu à vista (só para o desenho).
+    pub ghosts_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
     spawn_buf: wgpu::Buffer,
     /// Pedidos de sementes à espera do próximo `encode_steps`.
@@ -378,6 +380,11 @@ fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
         count: None,
     }
 }
+
+/// Restos de quem morre (GHOST_* em shaders/life/bindings.wgsl).
+pub const GHOST_MAX: u64 = 2048;
+const GHOST_WORDS: u64 = 192;
+const GHOST_HEAD: u64 = 16;
 
 fn storage_buffer(device: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
@@ -517,6 +524,8 @@ impl World {
         let free_buf = storage_buffer(device, "free slots", max_agents * 4);
         gpu.queue.write_buffer(&free_buf, 0, bytemuck::cast_slice(&free_slots));
         let life_counters_buf = storage_buffer(device, "life counters", 8 * 4);
+        // Restos de quem morre à vista, para o desenho (ghosts em bindings.wgsl).
+        let ghosts_buf = storage_buffer(device, "ghosts", (GHOST_HEAD + GHOST_MAX * GHOST_WORDS) * 4);
         gpu.queue.write_buffer(&life_counters_buf, 0, bytemuck::cast_slice(&[cfg.max_agents, 0, 0, 0, 0, 0, 0, 0u32]));
         let spawn_buf =
             storage_buffer(device, "spawn requests", (MAX_SPAWN_REQUESTS * size_of::<SpawnRequest>()) as u64);
@@ -548,7 +557,7 @@ impl World {
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
         let life_entries: Vec<_> =
-            (0..34).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
+            (0..35).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -706,6 +715,7 @@ impl World {
                 &body_grid,
                 &sensor_avg,
                 &matter_claim,
+                &ghosts_buf,
             ],
         );
 
@@ -841,6 +851,7 @@ impl World {
             draw_args_buf,
             bonds_buf,
             life_counters_buf,
+            ghosts_buf,
             free_buf,
             spawn_buf,
             pending_spawns: Vec::new(),

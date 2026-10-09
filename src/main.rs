@@ -139,6 +139,8 @@ const DEFAULT_TERRAIN: &str = "assets/terreno.png";
 
 /// Pasta das cenas gravadas e do autosave.
 /// Duração do ecrã de entrada (segundos).
+/// Frames que duram os restos de um agente morto (as peças a separarem-se).
+const GHOST_FRAMES: f32 = 60.0;
 const SPLASH_SECS: f32 = 5.0;
 const SAVES_DIR: &str = "saves";
 
@@ -1370,6 +1372,9 @@ impl Running {
             }
         }
         self.view.uv_depth.set(self.world.params.uv_depth);
+        // Restos de quem morre: uns 60 frames ao ritmo atual da simulação.
+        self.view.epoch.set(self.world.params.epoch);
+        self.view.ghost_steps.set(GHOST_FRAMES * self.ui.steps_per_frame as f32);
         self.view.daylight.set(self.world.params.daylight(self.world.params.epoch));
         self.view.mark_organ.set(self.ui.mark_organ);
         self.view.coc_radius.set(self.ui.coc_radius);

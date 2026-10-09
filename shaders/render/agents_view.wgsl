@@ -283,6 +283,110 @@ fn organ_extent(t: u32) -> f32 {
     }
 }
 
+// RESTOS (só para o desenho): quando um agente morre À VISTA da câmara,
+// guarda-se aqui uma cópia do corpo; o desenho mostra as peças a separarem-se
+// e a flutuar durante uns 60 frames (vs_ghost em agents_view.wgsl). Não é
+// matéria: a do morto já voltou à sopa. Palavra 0 = contador (anel de
+// GHOST_MAX registos de GHOST_WORDS palavras, a partir de GHOST_HEAD):
+//   0 pos_x, 1 pos_y, 2 rot (bits de f32), 3 epoch da morte, 4 resíduos,
+//   5 id; 8.. corpo (16 palavras); 24.. órgãos (32); 56.. posições (128).
+const GHOST_MAX: u32 = 2048u;
+const GHOST_WORDS: u32 = 192u;
+const GHOST_HEAD: u32 = 16u;
+@group(0) @binding(16) var<storage, read> ghosts_view: array<u32>;
+// Instâncias por registo: 64 tubos e 64 órgãos (GHOST_INSTANCES em render/mod.rs).
+const GHOST_INSTANCES: u32 = 2u * MAX_BODY_V;
+
+fn ghost_f(i: u32) -> f32 {
+    return bitcast<f32>(ghosts_view[i]);
+}
+
+@vertex
+fn vs_ghost(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) -> AgentVsOut {
+    var o: AgentVsOut;
+    o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    let glyph = (inst % GHOST_INSTANCES) >= MAX_BODY_V;
+    let k = inst % MAX_BODY_V;
+    let g = GHOST_HEAD + (inst / GHOST_INSTANCES) * GHOST_WORDS;
+    let n = min(ghosts_view[g + 4u], MAX_BODY_V);
+    let died = ghosts_view[g + 3u];
+    let age = f32(view.epoch - died);
+    if (view.ghost_steps <= 0.0 || view.lod != 0u || view.focus_slot != 0xFFFFFFFFu || k >= n || view.epoch < died || age >= view.ghost_steps) {
+        return o;
+    }
+    let t = age / view.ghost_steps;
+    let aa = (ghosts_view[g + 8u + k / 4u] >> ((k % 4u) * 8u)) & 0xFFu;
+    let oc = (ghosts_view[g + 24u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
+    var organ = NO_ORGAN;
+    if (oc != 0u) { organ = (oc & 0x1Fu) - 1u; }
+    if (glyph && (organ == NO_ORGAN || organ == ORGAN_LINKER)) { return o; }
+    let rot = ghost_f(g + 2u);
+    let cr = cos(rot);
+    let sr = sin(rot);
+    let origin = vec2<f32>(ghost_f(g), ghost_f(g + 1u));
+    let lp = vec2<f32>(ghost_f(g + 56u + 2u * k), ghost_f(g + 57u + 2u * k));
+    let k1 = min(k + 1u, n - 1u);
+    let lp1 = vec2<f32>(ghost_f(g + 56u + 2u * k1), ghost_f(g + 57u + 2u * k1));
+    // Cada peça deriva para o seu lado (um hash do agente e do resíduo),
+    // roda um pouco, encolhe e escurece até desaparecer.
+    var h = (ghosts_view[g + 5u] * 64u + k) * 747796405u + 2891336453u;
+    h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+    h = (h >> 22u) ^ h;
+    let ang = f32(h & 0xFFFu) * (6.2831853 / 4096.0);
+    let ease = 1.0 - (1.0 - t) * (1.0 - t);
+    let off = vec2<f32>(cos(ang), sin(ang)) * (15.0 + 45.0 * f32((h >> 12u) & 0xFFu) / 255.0) * ease;
+    let spin = (f32((h >> 20u) & 0xFFu) / 255.0 - 0.5) * 3.0 * t;
+    let fade = 1.0 - t * t;
+    let cs = cos(spin);
+    let sn = sin(spin);
+    let seg_l = lp1 - lp;
+    var seg = vec2<f32>(cr * seg_l.x - sr * seg_l.y, sr * seg_l.x + cr * seg_l.y);
+    seg = vec2<f32>(seg.x * cs - seg.y * sn, seg.x * sn + seg.y * cs);
+    let pk = origin + vec2<f32>(cr * lp.x - sr * lp.y, sr * lp.x + cr * lp.y) + off;
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
+        vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
+    let c = corners[vi];
+    let r_base = TUBE_FAT * (0.9 + 3.0 * pow(aa_props_view[aa].volume / 130.0, 1.4));
+    let tone = mix(1.0, 0.4, t);
+    let l = length(seg);
+    let e = select(vec2<f32>(1.0, 0.0), seg / l, l > 1e-4);
+    var w = pk;
+    if (!glyph) {
+        let r_tube = select(r_base, 0.9, organ == ORGAN_LINKER) * fade * detail_fat();
+        let nn = vec2<f32>(-e.y, e.x);
+        let rq = r_tube * TUBE_SHADOW;
+        w = pk + e * select(-rq, l + rq, c.x > 0.0) + nn * (c.y * rq);
+        o.mode = 0u;
+        o.local = w - pk;
+        o.tangent = seg;
+        o.core_phase = vec2<f32>(r_tube, 0.0);
+        o.organ = organ;
+        o.sprite = select(0u, 0x100u | (aa % SPRITE_COLS_U), organ != ORGAN_LINKER);
+        o.color = class_color(aa) * tone;
+    } else {
+        var phase = 0.0;
+        if (organ == ORGAN_PROTEASE) { phase = 8.99; }
+        if (organ == ORGAN_STORAGE) { phase = 1.5; }
+        if (organ == ORGAN_FOOD_SENSOR_DIR || organ == ORGAN_LIGHT_SENSOR_DIR) { phase = 1.0; }
+        var ext = organ_extent(organ);
+        if (organ == ORGAN_STORAGE) { ext = phase * SHADOW_MARGIN; }
+        if (organ != ORGAN_STORAGE && organ != ORGAN_PROTEASE) { ext *= SHADOW_MARGIN; }
+        w = pk + c * (r_base * ORGAN_SCALE * fade * ext * detail_fat());
+        o.mode = 1u;
+        o.local = c;
+        o.tangent = e;
+        o.core_phase = vec2<f32>(1.0 / ext, phase);
+        o.organ = organ;
+        o.sprite = ((oc >> 5u) * 7u + organ) % SPRITE_COLS_U;
+        o.color = organ_lod_color(organ, oc, class_color(aa)) * tone;
+    }
+    let px = (w - cam_center()) * view.zoom;
+    // Abaixo de todos os agentes vivos (ver agent_z); os órgãos por cima dos tubos.
+    o.pos = vec4<f32>(px.x / (0.5 * view.screen_w), px.y / (0.5 * view.screen_h), select(0.010, 0.011, glyph), 1.0);
+    return o;
+}
+
 // ALTURA DE CADA PEÇA (profundidade): a lista de desenho sai da GPU por uma
 // ordem que muda de frame para frame, e dois agentes sobrepostos trocavam de
 // lugar (cintilavam). Cada agente tem uma altura fixa (um hash do slot) e,

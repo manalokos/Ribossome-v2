@@ -47,6 +47,11 @@ pub struct WorldView {
     agents_bg: wgpu::BindGroup,
     agents_pipeline: wgpu::RenderPipeline,
     shadows_pipeline: wgpu::RenderPipeline,
+    ghosts_pipeline: wgpu::RenderPipeline,
+    /// Epoch atual e duração, em passos, da animação dos restos de quem
+    /// morre (0 = não se desenham).
+    pub epoch: std::cell::Cell<u32>,
+    pub ghost_steps: std::cell::Cell<f32>,
     draw_args: wgpu::Buffer,
     /// Slot a desenhar sozinho (u32::MAX = todos).
     pub focus: std::cell::Cell<u32>,
@@ -69,6 +74,8 @@ pub struct WorldView {
 
 /// Instâncias por agente no desenho completo (AGENT_INSTANCES em agents_view.wgsl).
 const AGENT_INSTANCES: u32 = 197;
+/// Instâncias por resto de agente morto (GHOST_INSTANCES em agents_view.wgsl).
+const GHOST_INSTANCES: u32 = 128;
 /// SUAVIZAÇÃO: amostras por píxel do alvo onde o mundo é desenhado. O fundo
 /// corre uma vez por píxel; os agentes, uma vez por amostra (a forma dos
 /// órgãos é recortada no shader de fragmentos, por isso só amostrando lá
@@ -357,6 +364,7 @@ impl WorldView {
                 vertex_storage(11),
                 vertex_storage(12),
                 vertex_storage(13),
+                vertex_storage(16),
                 wgpu::BindGroupLayoutEntry {
                     binding: 14,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -395,6 +403,7 @@ impl WorldView {
                 wgpu::BindGroupEntry { binding: 13, resource: world.contact_disp_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 14, resource: wgpu::BindingResource::TextureView(&sprites) },
                 wgpu::BindGroupEntry { binding: 15, resource: wgpu::BindingResource::Sampler(&sprites_sampler) },
+                wgpu::BindGroupEntry { binding: 16, resource: world.ghosts_buf.as_entire_binding() },
             ],
         });
         let agents_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -408,13 +417,13 @@ impl WorldView {
         // as peças opacas escrevem a altura (cada agente tem a sua, fixa, e o
         // mais alto tapa o mais baixo seja qual for a ordem da lista); as
         // sombras são transparentes e só escurecem o que está mais baixo.
-        let agent_pipeline = |label: &str, entry: &'static str, write: bool, blend: Option<wgpu::BlendState>| {
+        let agent_pipeline = |label: &str, vertex: &'static str, entry: &'static str, write: bool, blend: Option<wgpu::BlendState>| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&agents_pl_layout),
                 vertex: wgpu::VertexState {
                     module: &amodule,
-                    entry_point: Some(shaders::entry(adef, "vs_agent")),
+                    entry_point: Some(shaders::entry(adef, vertex)),
                     compilation_options: Default::default(),
                     buffers: &[],
                 },
@@ -431,8 +440,10 @@ impl WorldView {
                 cache: None,
             })
         };
-        let agents_pipeline = agent_pipeline("agents view", "fs_agent", true, None);
-        let shadows_pipeline = agent_pipeline("agents view shadows", "fs_agent_shadow", false, Some(wgpu::BlendState::ALPHA_BLENDING));
+        let agents_pipeline = agent_pipeline("agents view", "vs_agent", "fs_agent", true, None);
+        let shadows_pipeline = agent_pipeline("agents view shadows", "vs_agent", "fs_agent_shadow", false, Some(wgpu::BlendState::ALPHA_BLENDING));
+        // Restos de quem morreu: as peças a separarem-se (vs_ghost).
+        let ghosts_pipeline = agent_pipeline("ghosts view", "vs_ghost", "fs_agent", true, None);
         Self {
             view_buf,
             bind_group,
@@ -440,6 +451,9 @@ impl WorldView {
             agents_bg,
             agents_pipeline,
             shadows_pipeline,
+            ghosts_pipeline,
+            epoch: std::cell::Cell::new(0),
+            ghost_steps: std::cell::Cell::new(0.0),
             draw_args: world.draw_args_buf.clone(),
             focus: std::cell::Cell::new(u32::MAX),
             uv_depth: std::cell::Cell::new(11.0),
@@ -495,8 +509,8 @@ impl WorldView {
             lod,
             focus_dx: self.focus_offset.get()[0],
             focus_dy: self.focus_offset.get()[1],
-            _pad_w0: 0,
-            _pad_w1: 0,
+            epoch: self.epoch.get(),
+            ghost_steps: self.ghost_steps.get(),
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }
@@ -513,6 +527,11 @@ impl WorldView {
             }
             pass.set_pipeline(if shadows { &self.shadows_pipeline } else { &self.agents_pipeline });
             self.draw_agents(pass);
+            // Entre os dois: os restos de quem morreu há pouco (só de perto).
+            if !shadows && self.lod.get() == 0 && self.focus.get() == u32::MAX && self.ghost_steps.get() > 0.0 {
+                pass.set_pipeline(&self.ghosts_pipeline);
+                pass.draw(0..6, 0..GHOST_INSTANCES * crate::world::GHOST_MAX as u32);
+            }
         }
     }
 

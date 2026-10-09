@@ -75,6 +75,20 @@
 // PARTILHA DE MATÉRIA pelas ligações: reserva por agente, para que cada um
 // dê ou receba no máximo UM complemento por passo (ver bonds.wgsl).
 @group(3) @binding(33) var<storage, read_write> matter_claim: array<atomic<u32>>;
+// RESTOS (só para o desenho): quando um agente morre À VISTA da câmara,
+// guarda-se aqui uma cópia do corpo; o desenho mostra as peças a separarem-se
+// e a flutuar durante uns 60 frames (vs_ghost em agents_view.wgsl). Não é
+// matéria: a do morto já voltou à sopa. Palavra 0 = contador (anel de
+// GHOST_MAX registos de GHOST_WORDS palavras, a partir de GHOST_HEAD):
+//   0 pos_x, 1 pos_y, 2 rot (bits de f32), 3 epoch da morte, 4 resíduos,
+//   5 id; 8.. corpo (16 palavras); 24.. órgãos (32); 56.. posições (128).
+const GHOST_MAX: u32 = 2048u;
+const GHOST_WORDS: u32 = 192u;
+const GHOST_HEAD: u32 = 16u;
+// Com a câmara mais larga do que isto (unidades do mundo) as peças não se
+// veem: não se guarda nada.
+const GHOST_VIEW_MAX: f32 = 12000.0;
+@group(3) @binding(34) var<storage, read_write> ghosts: array<atomic<u32>>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;
