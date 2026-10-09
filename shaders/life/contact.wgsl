@@ -118,6 +118,8 @@ const PROTEASE_FAR_FROM: f32 = 70.0;
 // reta até REACH_EDGE da força. Quem tem alcance morde primeiro mas fraco;
 // quem aguenta a aproximação e chega perto morde forte.
 const REACH_EDGE: f32 = 0.5;
+// Passos de vida de um filho em que pai e filho nao se mordem.
+const BIRTH_TRUCE: u32 = 400u;
 fn reach_falloff(dist: f32, reach: f32) -> f32 {
     return 1.0 - (1.0 - REACH_EDGE) * clamp(dist / max(reach, 1.0), 0.0, 1.0);
 }
@@ -282,7 +284,15 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (overlap > 0.0) { sites += arms.near; }
                     if (-overlap < arms.r_mid) { sites += arms.mid * reach_falloff(-overlap, arms.r_mid); }
                     if (-overlap < arms.r_far) { sites += arms.far * reach_falloff(-overlap, arms.r_far); }
-                    if (armed && sites.x + sites.y + sites.z + sites.w > 0.0 && b.energy > 0.0) {
+                    // TREGUA DO NASCIMENTO: durante os primeiros BIRTH_TRUCE passos
+                    // de vida de um filho, pai e filho nao se mordem. O filho
+                    // nasce encostado ao pai e e a OUTRA forma da linhagem (o
+                    // complemento), que pode nao ter a mesma protease nem a
+                    // sua imunidade: sem isto um predador sempre armado
+                    // desfazia os proprios filhos antes de se afastarem. Nao
+                    // compara genomas: so quem brotou de quem, e ha quanto tempo.
+                    let truce = (b.parent == a.id && b.age < BIRTH_TRUCE) || (a.parent == b.id && a.age < BIRTH_TRUCE);
+                    if (armed && !truce && sites.x + sites.y + sites.z + sites.w > 0.0 && b.energy > 0.0) {
                         let power = dot(sites, unpack_targets(contact_disp[e].w)) * PRED_SITE_SCALE;
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * unpack_proline(contact_disp[e].w);
                         let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist, b.energy);
