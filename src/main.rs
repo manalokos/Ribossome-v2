@@ -25,6 +25,10 @@ struct Running {
     /// na placa) e o seu painel.
     scope: Option<ribossome::microscope::Scope>,
     scope_panel: bool,
+    /// Quanto da transição mapa → microscópio já se fez (0 = só o mapa, 1 =
+    /// só o microscópio), pelo zoom; e se o botão direito está a rodar a câmara.
+    micro_t: f32,
+    orbiting: bool,
     /// Alvo com várias amostras onde o mundo é desenhado (do tamanho da
     /// janela; refeito quando ela muda). Resolve para a imagem da janela.
     msaa: Option<wgpu::Texture>,
@@ -315,8 +319,19 @@ impl Running {
             }
         }
         let view = WorldView::new(&gpu.device, &gpu.queue, &world, format);
-        let cam = Camera::fit(&cfg, [surface_cfg.width as f32, surface_cfg.height as f32]);
+        let mut cam = Camera::fit(&cfg, [surface_cfg.width as f32, surface_cfg.height as f32]);
+        // (RIBO_ZOOM = píxeis por unidade do mundo e RIBO_CENTER = x,y: câmara
+        // de arranque, para testes.)
+        if let Some(z) = std::env::var("RIBO_ZOOM").ok().and_then(|v| v.parse::<f32>().ok()) {
+            cam.zoom = z;
+        }
+        if let Some((x, y)) = std::env::var("RIBO_CENTER").ok().and_then(|v| v.split_once(',').and_then(|(x, y)| Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?)))) {
+            cam.center = [x, y];
+        }
 
+        // O MICROSCÓPIO fica já pronto (pipelines e texturas): criado só ao
+        // aproximar, a transição dava um soluço na primeira vez.
+        let scope = Some(ribossome::microscope::Scope::new(&gpu, &world, format, [64, 64], cam.center, 420.0));
         let egui_ctx = egui::Context::default();
         let egui_state = egui_winit::State::new(
             egui_ctx,
@@ -369,8 +384,10 @@ impl Running {
             ui: UiState::new(baseline),
             cursor: [0.0; 2],
             viewport: [0.0; 4],
-            scope: None,
+            scope,
             scope_panel: true,
+            micro_t: 0.0,
+            orbiting: false,
             covered: false,
             dragging: false,
             painting: false,
@@ -1406,7 +1423,7 @@ impl Running {
         let mut out = ctx.run_ui(raw, |root| {
             free = ui::draw(root, &mut self.ui, &mut self.world, &mut self.profiler, &mut self.inspector);
             // MICROSCÓPIO: a barra de dados e o painel por cima da vista.
-            if let (true, Some(r), Some(scope)) = (self.ui.microscope, free, self.scope.as_mut()) {
+            if let (true, Some(r), Some(scope)) = (self.micro_t >= 0.6, free, self.scope.as_mut()) {
                 micro_asked = ribossome::microscope::interface(root, r, scope, &mut self.scope_panel, None, false, "");
             }
             // ECRÃ DE ENTRADA por cima de tudo, a desvanecer no fim.
@@ -1446,7 +1463,7 @@ impl Running {
             }
             // Por cima da vista: mira do agente selecionado e do enquadramento
             // (são do mapa: no microscópio a perspetiva é outra).
-            if let Some(r) = free.filter(|_| !self.ui.microscope) {
+            if let Some(r) = free.filter(|_| self.micro_t < 0.4) {
                 let ppp = root.ctx().pixels_per_point();
                 let painter = root.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("mira"))).with_clip_rect(r);
                 let centre = r.center();
@@ -1508,8 +1525,17 @@ impl Running {
             let (side, old_side) = (w.min(h), old[2].min(old[3]));
             if old_side <= 0.0 {
                 // Primeiro frame: o mundo inteiro à vista.
-                self.cam = Camera::fit(&self.world.cfg, [w, h]);
-            } else if old_side != side {
+                // (A menos que o arranque tenha pedido outra câmara, para testes.)
+                match std::env::var("RIBO_ZOOM").ok().and_then(|v| v.parse::<f32>().ok()) {
+                    Some(z) => {
+                        self.cam.zoom = z;
+                        if let Some((x, y)) = std::env::var("RIBO_CENTER").ok().and_then(|v| v.split_once(',').and_then(|(x, y)| Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?)))) {
+                            self.cam.center = [x, y];
+                        }
+                    }
+                    None => self.cam = Camera::fit(&self.world.cfg, [w, h]),
+                }
+            } else if old_side != side && std::env::var("RIBO_ZOOM").is_err() {
                 // O mesmo pedaço de mundo continua à vista quando a área muda.
                 self.cam.zoom *= side / old_side;
             }
@@ -1601,15 +1627,26 @@ impl Running {
         // MICROSCÓPIO 3D: a câmara do mapa continua a mandar (deslocar e
         // aproximar como sempre); o microscópio olha para o mesmo ponto com o
         // mesmo enquadramento em altura.
-        let micro = self.ui.microscope && !covered && vp[2] >= 32.0 && vp[3] >= 32.0;
-        if !self.ui.microscope {
-            self.scope = None;
-        }
+        // TRANSIÇÃO CONTÍNUA pelo zoom (píxeis por unidade do mundo): abaixo
+        // de MICRO_Z0 é só o mapa; daí até MICRO_Z1 o microscópio entra em
+        // fundido, visto de cima como o mapa, e depois inclina-se e ganha a
+        // profundidade de campo até à câmara escolhida no painel.
+        const MICRO_Z0: f32 = 1.5;
+        const MICRO_Z1: f32 = 4.0;
+        let smooth = |a: f32, b: f32, x: f32| {
+            let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        self.micro_t = if self.ui.microscope && !covered && vp[2] >= 32.0 && vp[3] >= 32.0 { smooth(MICRO_Z0.ln(), MICRO_Z1.ln(), self.cam.zoom.max(1e-6).ln()) } else { 0.0 };
+        let micro = self.micro_t > 0.0;
+        let map_visible = self.micro_t < 0.4;
         if micro {
             use ribossome::microscope::{REF_TAN, REGION_PER_DIST, Scope};
             let dist = (0.5 * screen[1] / self.cam.zoom / REF_TAN).clamp(25.0, 5000.0);
             let region = (dist * REGION_PER_DIST).clamp(30.0, 4000.0);
             let scope = self.scope.get_or_insert_with(|| Scope::new(&self.gpu, &self.world, self.surface_cfg.format, [vp[2] as u32, vp[3] as u32], self.cam.center, region));
+            scope.opacity = smooth(0.0, 0.4, self.micro_t);
+            scope.approach = smooth(0.3, 1.0, self.micro_t);
             scope.orbit.centre = self.cam.center;
             scope.orbit.dist = dist;
             scope.region = region;
@@ -1694,7 +1731,7 @@ impl Running {
                 if !covered && w >= 1.0 && h >= 1.0 {
                     pass.set_viewport(vp[0], vp[1], w, h, 0.0, 1.0);
                     pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, w as u32, h as u32);
-                    if !micro {
+                    if map_visible {
                         view.draw(&mut pass);
                     }
                 }
@@ -1777,8 +1814,23 @@ impl Running {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let p = [position.x as f32 - self.viewport[0], position.y as f32 - self.viewport[1]];
+                let d = [p[0] - self.cursor[0], p[1] - self.cursor[1]];
+                // Botão direito no microscópio: roda e inclina a câmara.
+                if let (true, Some(scope)) = (self.orbiting, self.scope.as_mut()) {
+                    scope.orbit.yaw -= d[0] * 0.006;
+                    scope.orbit.pitch = (scope.orbit.pitch + d[1] * 0.006).clamp(0.12, 1.55);
+                }
                 if self.dragging {
-                    self.cam.pan_pixels([p[0] - self.cursor[0], p[1] - self.cursor[1]]);
+                    // Com a câmara rodada, arrastar desloca no referencial dela.
+                    let yaw = self.scope.as_ref().filter(|_| self.micro_t > 0.0).map_or(0.0, |s| s.effective().yaw);
+                    if yaw.abs() > 1e-3 {
+                        let (sy, cy) = yaw.sin_cos();
+                        let k = 1.0 / self.cam.zoom;
+                        self.cam.center[0] += (-d[0] * cy - d[1] * sy) * k;
+                        self.cam.center[1] += (-d[0] * sy + d[1] * cy) * k;
+                    } else {
+                        self.cam.pan_pixels(d);
+                    }
                     let (dx, dy) = (p[0] - self.press_pos[0], p[1] - self.press_pos[1]);
                     if dx * dx + dy * dy > 16.0 {
                         self.press_moved = true;
@@ -1788,7 +1840,9 @@ impl Running {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let pan_button = matches!(button, MouseButton::Left | MouseButton::Right | MouseButton::Middle);
-                if button == MouseButton::Left && self.ui.paint_on {
+                if button == MouseButton::Right && (self.micro_t > 0.5 || self.orbiting) {
+                    self.orbiting = state == ElementState::Pressed && !egui_mouse;
+                } else if button == MouseButton::Left && self.ui.paint_on {
                     // Pincel ligado: o botão esquerdo pinta (não arrasta nem seleciona).
                     self.painting = state == ElementState::Pressed && !egui_mouse;
                 } else if pan_button {
@@ -1804,7 +1858,14 @@ impl Running {
                         && was_dragging
                         && !self.press_moved
                     {
-                        let w = self.cam.screen_to_world(self.cursor, self.screen());
+                        // No microscópio o ponto clicado vem da profundidade da
+                        // imagem (a vista está inclinada), e o clique também foca.
+                        let seen = self.scope.as_mut().filter(|_| self.micro_t > 0.5).and_then(|s| {
+                            let w = s.world_at(&self.gpu, self.cursor);
+                            s.focus_at(&self.gpu, self.cursor);
+                            w
+                        });
+                        let w = seen.unwrap_or_else(|| self.cam.screen_to_world(self.cursor, self.screen()));
                         match self.loaded_agent.as_ref().filter(|_| self.ui.place_agent) {
                             // Agente carregado + "pôr com o rato": nasce uma cópia aqui.
                             Some(g) => self.world.request_seeds(&[ribossome::params::SpawnRequest::with_genome(w[0], w[1], g)]),

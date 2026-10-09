@@ -254,7 +254,7 @@ impl UiState {
             vsync: true,
             monomer_brightness: 0.5,
             coc_radius: 0.35,
-            microscope: std::env::var("RIBO_MICROSCOPE").is_ok_and(|v| v != "0"),
+            microscope: std::env::var("RIBO_MICROSCOPE").map_or(true, |v| v != "0"),
             signal_view: 0,
             mark_organ: 0,
             stats: Stats::default(),
@@ -753,7 +753,7 @@ fn tab_view(ui: &mut egui::Ui, b: &Busca, st: &mut UiState) {
             });
         });
         c.row("microscope", |ui| {
-            ui.checkbox(&mut st.microscope, "Microscope (3D close-up)").on_hover_text("shows what the camera frames as an electron micrograph in 3D: zoom in first (it only makes sense close up). Pan and zoom as usual; tilt, rotation, lens and focus are in its own panel. The simulation keeps running");
+            ui.checkbox(&mut st.microscope, "Microscope when zoomed in").on_hover_text("zooming in close fades the map into a 3D electron-micrograph view of the same spot, tilting as you approach; zooming out comes back to the map. Left drag moves, right drag turns and tilts, a click focuses and selects. Lens, focus, colour and the rest are in its own panel. Off = always the flat map");
         });
         c.slider("monomer brightness", slider(&mut st.monomer_brightness, 0.0..=1.0));
         c.slider("monomer circle of confusion (cells)", slider(&mut st.coc_radius, 0.0..=1.0))

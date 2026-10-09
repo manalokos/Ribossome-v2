@@ -54,7 +54,8 @@ struct U {
     // exposição (multiplica a imagem final), só o agente da mira a cores,
     // canto (x, y) do retângulo da janela onde a imagem é desenhada
     photo: vec4<f32>,
-    // esbatimento com a distância: centro (x, y) e raio, em unidades do mundo
+    // esbatimento com a distância: centro (x, y) e raio, em unidades do mundo;
+    // opacidade da imagem final
     fade: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> u: U;
@@ -667,7 +668,9 @@ fn fs_present(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     c = c / f32(ss * ss) * u.photo.x;
     // Curva AgX: os claros comprimem-se e PERDEM COR a caminho do branco, em
     // vez de cada canal saturar por si (que dava amarelos e cianos crus).
-    return vec4<f32>(agx(pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.2))), 1.0);
+    // (O alfa é a opacidade: na aplicação principal a imagem entra em fundido
+    // por cima do mapa.)
+    return vec4<f32>(agx(pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.2))), u.fade.w);
 }
 "#;
 
@@ -813,6 +816,11 @@ pub struct Orbit {
 pub struct Scope {
     /// Epoch do mundo no último frame (para a legenda).
     pub epoch: u32,
+    /// TRANSIÇÃO a partir do mapa (aplicação principal): `approach` vai de 0
+    /// (visto exatamente de cima, sem rotação nem desfoque, como o mapa) a 1
+    /// (a câmara escolhida em `orbit`); `opacity` é o fundido da imagem.
+    pub approach: f32,
+    pub opacity: f32,
     /// Dentro da aplicação principal (que dá os passos, grava e fotografa):
     /// o painel esconde os comandos que são dela.
     pub embedded: bool,
@@ -848,6 +856,8 @@ pub struct Scope {
     pub sampler: wgpu::Sampler,
     pub march: wgpu::RenderPipeline,
     pub present: wgpu::RenderPipeline,
+    /// A mesma imagem final, mas misturada com o que já lá está (fundido).
+    pub present_blend: wgpu::RenderPipeline,
     pub accum: [wgpu::Texture; 2],
     pub size: [u32; 2],
     pub region: f32,
@@ -884,7 +894,7 @@ pub struct Scope {
     /// intermédio entre os dois últimos passos, e o tremor das moléculas
     /// continua entre eles.
     pub smooth_motion: bool,
-    pub tween: Tween,
+    pub tween: Option<Tween>,
     /// Câmara do último frame (olho, direita, cima, frente), para projetar
     /// pontos do mundo no ecrã.
     pub cam: [[f32; 3]; 4],
@@ -1135,7 +1145,7 @@ impl Scope {
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("microscopio"), source: wgpu::ShaderSource::Wgsl(MARCH_WGSL.into()) });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("scope"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
-        let pipeline = |entry: &'static str, format: wgpu::TextureFormat| {
+        let pipeline_with = |entry: &'static str, format: wgpu::TextureFormat, blend: Option<wgpu::BlendState>| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(entry),
                 layout: Some(&pl),
@@ -1143,11 +1153,12 @@ impl Scope {
                 primitive: Default::default(),
                 depth_stencil: None,
                 multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState { module: &module, entry_point: Some(entry), compilation_options: Default::default(), targets: &[Some(format.into())] }),
+                fragment: Some(wgpu::FragmentState { module: &module, entry_point: Some(entry), compilation_options: Default::default(), targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })] }),
                 multiview_mask: None,
                 cache: None,
             })
         };
+        let pipeline = |entry: &'static str, format: wgpu::TextureFormat| pipeline_with(entry, format, None);
         Self {
             cap,
             height_view,
@@ -1202,6 +1213,7 @@ impl Scope {
             uniform,
             march: pipeline("fs_march", ACCUM_FORMAT),
             present: pipeline("fs_present", target_format),
+            present_blend: pipeline_with("fs_present", target_format, Some(wgpu::BlendState::ALPHA_BLENDING)),
             layout,
             sampler,
             accum: [accum_texture(device, size[0], size[1]), accum_texture(device, size[0], size[1])],
@@ -1224,7 +1236,7 @@ impl Scope {
             layer_key: None,
             layer_age: 0,
             smooth_motion: env("SMOOTH", 0.0) != 0.0,
-            tween: Tween::new(device, world),
+            tween: None,
             cam: [[0.0; 3]; 4],
             reticle: env("RETICLE", 0.0) != 0.0,
             follow: env("FOLLOW", 0.0) != 0.0,
@@ -1232,6 +1244,8 @@ impl Scope {
             subject: None,
             last_step: std::time::Instant::now(),
             epoch: world.params.epoch,
+            approach: 1.0,
+            opacity: 1.0,
             embedded: false,
         }
     }
@@ -1276,7 +1290,7 @@ impl Scope {
     /// esbatimento (para lá dele a imagem é preta), mais uma margem para a
     /// oclusão e os desfoques. Devolve o centro e o meio lado do quadrado.
     pub fn footprint(&self, fade_r: f32) -> ([f32; 2], f32) {
-        let o = self.orbit;
+        let o = self.effective();
         let aspect = self.size[0] as f32 / self.size[1].max(1) as f32;
         let (sp, cp) = o.pitch.sin_cos();
         let (sy, cy) = o.yaw.sin_cos();
@@ -1344,7 +1358,8 @@ impl Scope {
 
     /// AUTOFOCO: põe o plano de focagem no que se vê no píxel `px` do ecrã
     /// (lê a distância acumulada no alfa da imagem). Devolve se conseguiu.
-    pub fn focus_at(&mut self, gpu: &Gpu, px: [f32; 2]) -> bool {
+    /// Distância (ao longo do eixo da câmara) do que se vê no píxel `px`.
+    pub fn depth_at(&self, gpu: &Gpu, px: [f32; 2]) -> Option<f32> {
         let tex = &self.accum[((self.frame + 1) % 2) as usize];
         let x = ((px[0].max(0.0) as u32) * self.ss).min(tex.width() - 1);
         let y = ((px[1].max(0.0) as u32) * self.ss).min(tex.height() - 1);
@@ -1365,9 +1380,13 @@ impl Scope {
         gpu.wait_idle();
         let depth = bytemuck::pod_read_unaligned::<[f32; 4]>(&buf.get_mapped_range(..).expect("mapped")[..16])[3];
         buf.unmap();
-        if !(depth.is_finite() && depth > 1.0) {
+        (depth.is_finite() && depth > 1.0).then_some(depth)
+    }
+
+    pub fn focus_at(&mut self, gpu: &Gpu, px: [f32; 2]) -> bool {
+        let Some(depth) = self.depth_at(gpu, px) else {
             return false;
-        }
+        };
         let o = &mut self.orbit;
         o.focus_shift = depth - o.dist * REF_TAN / o.focal;
         true
@@ -1395,6 +1414,30 @@ impl Scope {
         self.encode(gpu, world, enc, target, None, Some((viewport, moving)));
     }
 
+    /// A câmara deste frame: a de `orbit`, puxada para "de cima" enquanto a
+    /// transição a partir do mapa não acaba.
+    pub fn effective(&self) -> Orbit {
+        let a = self.approach.clamp(0.0, 1.0);
+        let mut o = self.orbit;
+        o.pitch = 1.55 + (o.pitch - 1.55) * a;
+        o.yaw *= a;
+        o.aperture *= a;
+        o
+    }
+
+    /// O ponto do MUNDO (x, y) que se vê no píxel `px` da vista: a distância
+    /// vem da imagem acumulada (como no autofoco) e o raio da câmara do
+    /// último frame. Para selecionar com um clique numa vista inclinada.
+    pub fn world_at(&self, gpu: &Gpu, px: [f32; 2]) -> Option<[f32; 2]> {
+        let depth = self.depth_at(gpu, px)?;
+        let [eye, right, up, fwd] = self.cam;
+        let o = self.effective();
+        let aspect = self.size[0] as f32 / self.size[1].max(1) as f32;
+        let ndc = [px[0] / self.size[0].max(1) as f32 * 2.0 - 1.0, 1.0 - px[1] / self.size[1].max(1) as f32 * 2.0];
+        let at = |k: usize| eye[k] + (fwd[k] + right[k] * ndc[0] * o.focal * aspect + up[k] * ndc[1] * o.focal) * depth;
+        Some([at(0), at(1)])
+    }
+
     /// A zona (centro e meio lado) que as camadas cobrem neste momento.
     pub fn zone(&self) -> ([f32; 2], f32) {
         self.footprint(self.region)
@@ -1402,7 +1445,7 @@ impl Scope {
 
     fn encode(&mut self, gpu: &Gpu, world: &mut World, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, copy: Option<&wgpu::TextureView>, embed: Option<([f32; 4], bool)>) {
         self.epoch = world.params.epoch;
-        let o = self.orbit;
+        let o = self.effective();
         let alone = embed.is_none();
         let moving = match embed {
             Some((_, running)) => running,
@@ -1489,35 +1532,41 @@ impl Scope {
             gpu.queue.submit([enc.finish()]);
             self.height_view.height_pass.set(1);
         }
+        if tweening && self.tween.is_none() {
+            self.tween = Some(Tween::new(&gpu.device, world));
+        }
         // Sem movimento suave (ou parada, ou a toda a velocidade) os buffers
         // vivos têm de ter o estado verdadeiro.
         if !tweening {
-            self.tween.restore(enc, world);
+            if let Some(tw) = self.tween.as_mut() {
+                tw.restore(enc, world);
+            }
         }
         if step_now {
             if tweening {
                 // Estado verdadeiro de volta, guarda-se como "antes", um passo,
                 // guarda-se como "depois".
-                self.tween.restore(enc, world);
-                Tween::copy(enc, &world.agents_buf, &self.tween.prev_agents);
-                Tween::copy(enc, &world.body_pos_buf, &self.tween.prev_body);
+                self.tween.as_mut().unwrap().restore(enc, world);
+                Tween::copy(enc, &world.agents_buf, &self.tween.as_ref().unwrap().prev_agents);
+                Tween::copy(enc, &world.body_pos_buf, &self.tween.as_ref().unwrap().prev_body);
             }
             // (Em câmara lenta, um passo de cada vez.)
             world.encode_steps(&gpu.queue, enc, if slow { 1 } else { self.steps.min(crate::world::MAX_STEPS_PER_FRAME) });
             if tweening {
-                Tween::copy(enc, &world.agents_buf, &self.tween.cur_agents);
-                Tween::copy(enc, &world.body_pos_buf, &self.tween.cur_body);
-                self.tween.have = true;
+                Tween::copy(enc, &world.agents_buf, &self.tween.as_ref().unwrap().cur_agents);
+                Tween::copy(enc, &world.body_pos_buf, &self.tween.as_ref().unwrap().cur_body);
+                self.tween.as_mut().unwrap().have = true;
             }
         }
         let mut clock = (world.params.epoch, 0.0f32);
-        if tweening && self.tween.have {
+        if tweening && self.tween.as_ref().is_some_and(|t| t.have) {
+            let tw = self.tween.as_ref().unwrap();
             // O ponto intermédio deste frame, entre o passo anterior e o último.
-            gpu.queue.write_buffer(&self.tween.uniform, 0, bytemuck::cast_slice(&[tween_t, 0.0, 0.0, 0.0f32]));
+            gpu.queue.write_buffer(&tw.uniform, 0, bytemuck::cast_slice(&[tween_t, 0.0, 0.0, 0.0f32]));
             let mut pass = enc.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&self.tween.pipeline);
-            pass.set_bind_group(0, &self.tween.bind, &[]);
-            pass.dispatch_workgroups(self.tween.groups, 1, 1);
+            pass.set_pipeline(&tw.pipeline);
+            pass.set_bind_group(0, &tw.bind, &[]);
+            pass.dispatch_workgroups(tw.groups, 1, 1);
             // O relógio do tremor das moléculas acompanha: passo anterior + fração.
             clock = (world.params.epoch.wrapping_sub(1), tween_t);
         }
@@ -1622,7 +1671,7 @@ impl Scope {
             [(eye_dist + o.focus_shift).max(1.0), o.aperture * REF_TAN / o.focal, o.focal, 1.0],
             [self.colour as f32, GROUND as f32, GROUND_BLUR / (2.0 * r), self.ss as f32],
             [self.exposure, if subject_slot.is_some() { 1.0 } else { 0.0 }, embed.map_or(0.0, |e| e.0[0]), embed.map_or(0.0, |e| e.0[1])],
-            [o.centre[0], o.centre[1], fade_r, 0.0],
+            [o.centre[0], o.centre[1], fade_r, self.opacity],
         ];
         gpu.queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&data));
         let (src, dst) = ((self.frame % 2) as usize, ((self.frame + 1) % 2) as usize);
@@ -1710,7 +1759,7 @@ impl Scope {
                 });
                 pass.set_viewport(vp[0], vp[1], vp[2], vp[3], 0.0, 1.0);
                 pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, vp[2] as u32, vp[3] as u32);
-                pass.set_pipeline(&self.present);
+                pass.set_pipeline(&self.present_blend);
                 pass.set_bind_group(0, &bg, &[]);
                 pass.draw(0..3, 0..1);
             }
