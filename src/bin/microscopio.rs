@@ -25,6 +25,9 @@
 //! exposição; C liga a cor (por omissão é a preto e branco); M esconde os
 //! monómeros; S liga a superamostragem; Esc sai.
 //!   LENS=mm, APERTURE, EXPOSURE  arrancam com esses valores
+//! Um CLIQUE (sem arrastar) foca no ponto clicado; Tab mostra e esconde o
+//! painel de controlos; por baixo da imagem fica a barra de dados com a
+//! escala em nanómetros (ver NM_PER_UNIT: é uma convenção).
 //!   TERRAIN=1 centra numa zona com rocha, entulho e água (em vez de num agente)
 //!   COLOR=1, MONOMERS=0.7  arrancam com cor / com monómeros
 
@@ -282,6 +285,9 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         dir = normalize(focus - org);
     }
     var col = vec3<f32>(0.0);
+    // Distância (ao longo do eixo da câmara) do ponto visto: fica no alfa da
+    // imagem acumulada, para o autofoco a ler onde se clica.
+    var depth = u.lens.x;
     if (dir.z < -1e-4) {
         // Do topo do relevo até ao fundo, em passos; ao entrar numa peça ou
         // no chão, afina por bisseção.
@@ -308,6 +314,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             if (solid(p, surf_smooth(p.xy))) { hi = m; } else { lo = m; }
         }
         let p = org + dir * hi;
+        depth = dot(p - u.eye.xyz, u.fwd.xyz);
         let s = surf_smooth(p.xy);
         let e = 2.0 * u.region.z / f32(textureDimensions(vol_tex).x) * 1.5;
         // Onde bateu: num agente, numa peça do mundo, ou no chão?
@@ -398,8 +405,8 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     }
     // Grão do detetor (desaparece com a acumulação).
     col += (rnd.z - 0.5) * 0.03;
-    let prev = textureLoad(prev_tex, vec2<i32>(pos.xy), 0).rgb;
-    return vec4<f32>(mix(prev, max(col, vec3<f32>(0.0)), u.screen.w), 1.0);
+    let prev = textureLoad(prev_tex, vec2<i32>(pos.xy), 0);
+    return mix(prev, vec4<f32>(max(col, vec3<f32>(0.0)), depth), u.screen.w);
 }
 
 @fragment
@@ -431,6 +438,9 @@ struct Orbit {
     /// Tangente de meio campo de visão vertical: pequena = lente longa
     /// (quase axonométrica), grande = grande angular.
     focal: f32,
+    /// Plano de focagem: quanto fica para lá (+) ou para cá (−) do ponto para
+    /// onde a câmara olha, ao longo do eixo dela (unidades do mundo).
+    focus_shift: f32,
 }
 
 struct Scope {
@@ -511,7 +521,7 @@ fn accum_texture(device: &wgpu::Device, w: u32, h: u32) -> wgpu::Texture {
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: ACCUM_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     })
 }
@@ -722,7 +732,7 @@ impl Scope {
             accum: [accum_texture(device, size[0], size[1]), accum_texture(device, size[0], size[1])],
             size,
             region,
-            orbit: Orbit { centre, yaw: 0.6, pitch: 0.75, dist: region / REGION_PER_DIST, aperture: env("APERTURE", 1.5), focal: 12.0 / env("LENS", 135.0) },
+            orbit: Orbit { centre, yaw: 0.6, pitch: 0.75, dist: region / REGION_PER_DIST, aperture: env("APERTURE", 1.5), focal: 12.0 / env("LENS", 135.0), focus_shift: 0.0 },
             last_orbit: None,
             samples: 0,
             frame: 0,
@@ -742,6 +752,37 @@ impl Scope {
         let (w, h) = (size[0] * self.ss, size[1] * self.ss);
         self.accum = [accum_texture(device, w, h), accum_texture(device, w, h)];
         self.last_orbit = None;
+    }
+
+    /// AUTOFOCO: põe o plano de focagem no que se vê no píxel `px` do ecrã
+    /// (lê a distância acumulada no alfa da imagem). Devolve se conseguiu.
+    fn focus_at(&mut self, gpu: &Gpu, px: [f32; 2]) -> bool {
+        let tex = &self.accum[((self.frame + 1) % 2) as usize];
+        let x = ((px[0].max(0.0) as u32) * self.ss).min(tex.width() - 1);
+        let y = ((px[1].max(0.0) as u32) * self.ss).min(tex.height() - 1);
+        let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("focus"),
+            size: 16,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture: tex, mip_level: 0, origin: wgpu::Origin3d { x, y, z: 0 }, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None } },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        gpu.queue.submit([enc.finish()]);
+        buf.map_async(wgpu::MapMode::Read, .., |r| r.expect("map"));
+        gpu.wait_idle();
+        let depth = bytemuck::pod_read_unaligned::<[f32; 4]>(&buf.get_mapped_range(..).expect("mapped")[..16])[3];
+        buf.unmap();
+        if !(depth.is_finite() && depth > 1.0) {
+            return false;
+        }
+        let o = &mut self.orbit;
+        o.focus_shift = depth - o.dist * REF_TAN / o.focal;
+        true
     }
 
     /// Um frame: passos da simulação, a zona vista de cima (cor e altura),
@@ -862,7 +903,7 @@ impl Scope {
             v4(fwd),
             [o.centre[0], o.centre[1], r, HMAX],
             [(self.size[0] * self.ss) as f32, (self.size[1] * self.ss) as f32, self.frame as f32, weight],
-            [eye_dist, o.aperture * REF_TAN / o.focal, o.focal, 1.0],
+            [(eye_dist + o.focus_shift).max(1.0), o.aperture * REF_TAN / o.focal, o.focal, 1.0],
             [self.colour as f32, GROUND as f32, GROUND_BLUR / (2.0 * r), self.ss as f32],
             [self.exposure, 0.0, 0.0, 0.0],
         ];
@@ -921,6 +962,136 @@ impl Scope {
     }
 }
 
+/// Nanómetros por unidade do mundo. CONVENÇÃO (não sai da simulação): um
+/// resíduo do corpo (11 unidades) vale 0,5 nm, mais ou menos uma volta de
+/// hélice; um órgão fica com 2 a 3 nm, o tamanho de um domínio de proteína.
+const NM_PER_UNIT: f32 = 0.5 / 11.0;
+
+fn nm_text(nm: f32) -> String {
+    if nm >= 1000.0 {
+        format!("{:.2} µm", nm / 1000.0)
+    } else if nm >= 10.0 {
+        format!("{nm:.0} nm")
+    } else {
+        format!("{nm:.1} nm")
+    }
+}
+
+/// O que a interface pede que só se pode fazer fora do desenho dela.
+#[derive(Default)]
+struct Asked {
+    supersampling: bool,
+}
+
+/// INTERFACE de microscópio eletrónico: a barra de dados por baixo da imagem
+/// (campo, ampliação, distância de trabalho, lente, inclinação, amostras e a
+/// escala em nanómetros), a marca do último ponto focado e o painel de
+/// controlos (Tab esconde-o).
+fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: Option<[f32; 2]>) -> Asked {
+    let mut asked = Asked::default();
+    let ctx = root.ctx().clone();
+    let ppp = ctx.pixels_per_point();
+    let screen = root.max_rect();
+    let o = s.orbit;
+    let eye_dist = o.dist * REF_TAN / o.focal;
+    let wd = (eye_dist + o.focus_shift).max(1.0);
+    let aspect = s.size[0] as f32 / s.size[1].max(1) as f32;
+    // Largura do campo no plano de focagem, em nanómetros.
+    let hfw = 2.0 * wd * o.focal * aspect * NM_PER_UNIT;
+    // Ampliação como nos microscópios: tamanho no ecrã (a 96 pontos por
+    // polegada, 0,2646 mm cada) sobre o tamanho real.
+    let mag = screen.width() * 0.2646e6 / hfw.max(1e-6);
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("barra de dados")));
+    let bar_h = 44.0;
+    let bar = egui::Rect::from_min_max(egui::pos2(screen.left(), screen.bottom() - bar_h), screen.right_bottom());
+    painter.rect_filled(bar, 0.0, egui::Color32::from_black_alpha(235));
+    painter.line_segment([bar.left_top(), bar.right_top()], egui::Stroke::new(1.0, egui::Color32::from_gray(150)));
+    let dim = egui::Color32::from_gray(140);
+    let bright = egui::Color32::from_gray(235);
+    let mag_text = if mag >= 1e6 { format!("{:.2} M×", mag / 1e6) } else { format!("{:.0} k×", mag / 1e3) };
+    let fields: [(&str, String); 9] = [
+        ("HFW", nm_text(hfw)),
+        ("Mag", mag_text),
+        ("WD", nm_text(wd * NM_PER_UNIT)),
+        ("Lens", format!("{:.0} mm", 12.0 / o.focal)),
+        ("Aperture", format!("{:.1}", o.aperture)),
+        ("Tilt", format!("{:.0}°", 90.0 - o.pitch.to_degrees())),
+        ("Exposure", format!("{:.2}", s.exposure)),
+        ("Samples", format!("{}{}", s.samples, if s.ss > 1 { " ×4" } else { "" })),
+        ("Det", (["SE", "SE false colour", "colour"][s.colour.min(2) as usize]).to_string()),
+    ];
+    let mut x = bar.left() + 14.0;
+    for (label, value) in fields {
+        painter.text(egui::pos2(x, bar.top() + 6.0), egui::Align2::LEFT_TOP, label, egui::FontId::monospace(10.0), dim);
+        let r = painter.text(egui::pos2(x, bar.top() + 20.0), egui::Align2::LEFT_TOP, value, egui::FontId::monospace(14.0), bright);
+        x += r.width().max(48.0) + 22.0;
+    }
+    // ESCALA: um comprimento redondo (1, 2 ou 5 × 10ⁿ nm) perto de 1/6 do campo.
+    let want = hfw / 6.0;
+    let pow = 10f32.powf(want.max(1e-6).log10().floor());
+    let nice = [1.0, 2.0, 5.0, 10.0].into_iter().map(|k| k * pow).rfind(|&v| v <= want * 1.2).unwrap_or(pow);
+    let len = nice / hfw * screen.width();
+    let right = bar.right() - 16.0;
+    let y = bar.top() + 30.0;
+    let white = egui::Stroke::new(2.0, egui::Color32::WHITE);
+    painter.line_segment([egui::pos2(right - len, y), egui::pos2(right, y)], white);
+    painter.line_segment([egui::pos2(right - len, y - 5.0), egui::pos2(right - len, y + 5.0)], white);
+    painter.line_segment([egui::pos2(right, y - 5.0), egui::pos2(right, y + 5.0)], white);
+    painter.text(egui::pos2(right - 0.5 * len, y - 7.0), egui::Align2::CENTER_BOTTOM, nm_text(nice), egui::FontId::monospace(13.0), egui::Color32::WHITE);
+    // Marca do ponto focado.
+    if let Some(m) = marker {
+        let c = egui::pos2(m[0] / ppp, m[1] / ppp);
+        let st = egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 235, 120));
+        painter.circle_stroke(c, 9.0, st);
+        for d in [egui::vec2(1.0, 0.0), egui::vec2(-1.0, 0.0), egui::vec2(0.0, 1.0), egui::vec2(0.0, -1.0)] {
+            painter.line_segment([c + d * 13.0, c + d * 20.0], st);
+        }
+    }
+    egui::Window::new("Microscope").open(panel).anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0]).resizable(false).show(&ctx, |ui| {
+        let mut mm = 12.0 / s.orbit.focal;
+        if ui.add(egui::Slider::new(&mut mm, 14.0..=800.0).logarithmic(true).suffix(" mm").text("Lens")).changed() {
+            s.orbit.focal = 12.0 / mm;
+        }
+        ui.add(egui::Slider::new(&mut s.orbit.aperture, 0.0..=30.0).text("Aperture"));
+        let mut focus = wd * NM_PER_UNIT;
+        let far = (2.5 * eye_dist * NM_PER_UNIT).max(1.0);
+        if ui.add(egui::Slider::new(&mut focus, 0.3 * eye_dist * NM_PER_UNIT..=far).suffix(" nm").text("Focus")).changed() {
+            s.orbit.focus_shift = focus / NM_PER_UNIT - eye_dist;
+        }
+        ui.add(egui::Slider::new(&mut s.exposure, 0.05..=16.0).logarithmic(true).text("Exposure"));
+        ui.horizontal(|ui| {
+            for (k, name) in ["Grey", "False colour", "Colour"].into_iter().enumerate() {
+                if ui.selectable_label(s.colour == k as u32, name).clicked() {
+                    s.colour = k as u32;
+                    s.last_orbit = None;
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            let mut mono = s.monomers > 0.0;
+            if ui.checkbox(&mut mono, "Monomers").changed() {
+                s.monomers = if mono { 0.7 } else { 0.0 };
+                s.last_orbit = None;
+            }
+            let mut ss = s.ss > 1;
+            if ui.checkbox(&mut ss, "Supersampling").changed() {
+                asked.supersampling = true;
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui.button(if s.paused { "▶ Run" } else { "⏸ Pause" }).clicked() {
+                s.paused = !s.paused;
+                s.last_orbit = None;
+            }
+            if ui.button("Focus on centre").clicked() {
+                s.orbit.focus_shift = 0.0;
+            }
+        });
+        ui.label(egui::RichText::new("Click: focus there · drag: orbit · right drag: move\nwheel: zoom · Tab: hide this panel").small().weak());
+    });
+    asked
+}
+
 struct Running {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
@@ -930,6 +1101,14 @@ struct Running {
     cursor: [f32; 2],
     orbiting: bool,
     panning: bool,
+    egui_state: egui_winit::State,
+    egui_renderer: egui_wgpu::Renderer,
+    /// Painel de controlos à vista (Tab).
+    panel: bool,
+    /// Onde o botão esquerdo desceu (um clique sem arrastar foca ali).
+    pressed_at: Option<[f32; 2]>,
+    /// Último ponto focado e quando, para a marca.
+    focused: Option<([f32; 2], std::time::Instant)>,
 }
 
 impl Running {
@@ -958,7 +1137,9 @@ impl Running {
         };
         surface.configure(&gpu.device, &surface_cfg);
         let scope = Scope::new(&gpu, format, [surface_cfg.width, surface_cfg.height]);
-        Self { window, surface, surface_cfg, gpu, scope, cursor: [0.0; 2], orbiting: false, panning: false }
+        let egui_state = egui_winit::State::new(egui::Context::default(), egui::ViewportId::ROOT, &window, Some(window.scale_factor() as f32), None, Some(gpu.device.limits().max_texture_dimension_2d as usize));
+        let egui_renderer = egui_wgpu::Renderer::new(&gpu.device, format, egui_wgpu::RendererOptions::default());
+        Self { window, surface, surface_cfg, gpu, scope, cursor: [0.0; 2], orbiting: false, panning: false, egui_state, egui_renderer, panel: true, pressed_at: None, focused: None }
     }
 
     fn redraw(&mut self) {
@@ -974,7 +1155,7 @@ impl Running {
         if self.scope.frame % 30 == 0 {
             let s = &self.scope;
             self.window.set_title(&format!(
-                "Ribossome: microscope   {} samples{}   {}   lens {:.0} mm   aperture {:.1}   exposure {:.2}   (drag: orbit, right drag: move, wheel: zoom in/out, space: run/pause, Z/X: lens, F/G: aperture, E/R: exposure, C: colour, M: monomers, S: supersampling)",
+                "Ribossome: microscope   {} samples{}   {}   lens {:.0} mm   aperture {:.1}   exposure {:.2}   (click: focus, drag: orbit, right drag: move, wheel: zoom, space: run/pause, Tab: panel, Z/X: lens, F/G: aperture, E/R: exposure, C: colour, M: monomers, S: supersampling)",
                 s.samples,
                 if s.ss > 1 { " ×4 (supersampled)" } else { "" },
                 if s.paused || s.steps == 0 { "paused" } else { "running" },
@@ -983,11 +1164,65 @@ impl Running {
                 s.exposure
             ));
         }
+        // INTERFACE por cima da imagem.
+        let raw = self.egui_state.take_egui_input(&self.window);
+        let ctx = self.egui_state.egui_ctx().clone();
+        let marker = self.focused.filter(|(_, t)| t.elapsed().as_secs_f32() < 1.2).map(|(p, _)| p);
+        let mut asked = Asked::default();
+        let mut out = ctx.run_ui(raw, |root| asked = interface(root, &mut self.scope, &mut self.panel, marker));
+        if asked.supersampling {
+            self.scope.ss = if self.scope.ss >= 2 { 1 } else { 2 };
+            let size = self.scope.size;
+            self.scope.resize(&self.gpu.device, size);
+        }
+        self.egui_state.handle_platform_output(&self.window, out.platform_output);
+        let jobs = ctx.tessellate(out.shapes, out.pixels_per_point);
+        let sd = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.surface_cfg.width, self.surface_cfg.height], pixels_per_point: out.pixels_per_point };
+        for (id, deltas) in out.textures_delta.set.drain() {
+            for delta in deltas {
+                self.egui_renderer.update_texture(&self.gpu.device, &self.gpu.queue, id, &delta);
+            }
+        }
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        let mut cmds = self.egui_renderer.update_buffers(&self.gpu.device, &self.gpu.queue, &mut enc, &jobs, &sd);
+        {
+            let mut pass = enc
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("interface"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                })
+                .forget_lifetime();
+            self.egui_renderer.render(&mut pass, &jobs, &sd);
+        }
+        cmds.push(enc.finish());
+        self.gpu.queue.submit(cmds);
         self.window.pre_present_notify();
         self.gpu.queue.present(tex);
+        for id in out.textures_delta.free.drain() {
+            self.egui_renderer.free_texture(&id);
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
+        // A interface vê primeiro: o que for dela (rato sobre o painel,
+        // teclas num campo) não mexe na câmara.
+        let _ = self.egui_state.on_window_event(&self.window, &event);
+        let ctx = self.egui_state.egui_ctx().clone();
+        let over_ui = ctx.egui_wants_pointer_input() || ctx.is_pointer_over_egui();
+        let pressing = matches!(event, WindowEvent::MouseInput { state: ElementState::Pressed, .. }) || matches!(event, WindowEvent::MouseWheel { .. });
+        let typing = matches!(event, WindowEvent::KeyboardInput { .. }) && ctx.egui_wants_keyboard_input();
+        if (over_ui && pressing) || typing {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(s) => {
@@ -1018,7 +1253,18 @@ impl Running {
             WindowEvent::MouseInput { state, button, .. } => {
                 let down = state == ElementState::Pressed;
                 match button {
-                    MouseButton::Left => self.orbiting = down,
+                    MouseButton::Left => {
+                        self.orbiting = down;
+                        if down {
+                            self.pressed_at = Some(self.cursor);
+                        } else if let Some(p) = self.pressed_at.take() {
+                            // Clique sem arrastar: AUTOFOCO nesse ponto.
+                            let moved = (self.cursor[0] - p[0]).hypot(self.cursor[1] - p[1]);
+                            if moved < 4.0 && self.scope.focus_at(&self.gpu, self.cursor) {
+                                self.focused = Some((self.cursor, std::time::Instant::now()));
+                            }
+                        }
+                    }
                     MouseButton::Right => self.panning = down,
                     _ => {}
                 }
@@ -1036,6 +1282,7 @@ impl Running {
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => match event.logical_key.as_ref() {
                 Key::Named(NamedKey::Escape) => event_loop.exit(),
+                Key::Named(NamedKey::Tab) => self.panel = !self.panel,
                 Key::Named(NamedKey::Space) => {
                     self.scope.paused = !self.scope.paused;
                     self.scope.last_orbit = None;

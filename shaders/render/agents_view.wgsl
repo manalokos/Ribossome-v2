@@ -503,7 +503,10 @@ fn body_lift(a: Agent, k: u32) -> f32 {
 // Os ÓRGÃOS ficam desencontrados em altura (um em baixo, o seguinte mais
 // acima, o outro mais ainda), para dois órgãos seguidos não se atravessarem.
 // Só para CIMA: quando um descia, um órgão grande ficava enterrado no chão.
-const ORGAN_STAGGER: f32 = 0.4;
+// (Pouco: com mais, os órgãos grandes e achatados ficavam a voar por cima do
+// corpo, e via-se o vazio por baixo deles. Quem tapa quem já é decidido pela
+// altura real, por isso dois órgãos seguidos fundem-se em vez de se cortarem.)
+const ORGAN_STAGGER: f32 = 0.08;
 fn organ_stagger(k: u32, radius: f32) -> f32 {
     return f32(k % 3u) * ORGAN_STAGGER * radius;
 }
@@ -1309,14 +1312,9 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
                     let s = sprite(SPRITE_ROW_SPIKE, (col_f + i) % SPRITE_COLS, q, vec2<f32>(g / wb, 0.0), vec2<f32>(0.0, 2.0 * g / max(len - a0, 1e-3)));
                     if (s.y >= 0.5 && s.x > spike_l) {
                         spike_l = s.x;
-                        // (com uma espessura mínima: um espigão mais fino do
-                        // que um texel do relevo desfazia-se em farelo.)
-                        g_h = max(s.z * in.size * wb, 0.09 * in.size);
-                        // No microscópio 3D os espigões apontam para TODOS os
-                        // lados, não só no plano: cada um sobe ou desce ao
-                        // longo do seu comprimento, com a sua inclinação.
-                        let r3 = fract(sin(i * 37.719 + 2.3) * 15731.743);
-                        g_lift = (along - a0) * in.size * tan(mix(-0.06, 0.12, r3));
+                        // (No plano do corpo, como antes: inclinados para
+                        // fora do plano ficavam esfarelados no relevo.)
+                        g_h = s.z * in.size * wb;
                         g_c = in.size * hub;
                         tip = len;
                     }
