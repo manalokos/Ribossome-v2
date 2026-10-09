@@ -155,11 +155,17 @@ fn fs_ground(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         for (var i = -4; i <= 4; i++) {
             let o = vec2<f32>(f32(i), f32(j)) * 0.25;
             let w = exp(-2.2 * dot(o, o));
-            sum += w * textureSampleLevel(height_tex, samp, uv + o * u.opts.z, 0.0).rg;
+            // A presença é uma média; o cimo das pedras é uma média de
+            // potência 4 (puxa para as MAIS ALTAS da vizinhança): com a média
+            // simples um bicho ficava abaixo das pedras maiores, metido num
+            // buraco escuro entre elas.
+            let v = textureSampleLevel(height_tex, samp, uv + o * u.opts.z, 0.0).rg;
+            let v2 = v.y * v.y;
+            sum += w * vec2<f32>(v.x, v2 * v2);
             wsum += w;
         }
     }
-    return vec4<f32>(sum / wsum, 0.0, 1.0);
+    return vec4<f32>(sum.x / wsum, sqrt(sqrt(sum.y / wsum)), 0.0, 1.0);
 }
 
 // APOIO dos agentes: o cimo das pedras, desfocado (verde da textura do chão).
@@ -167,7 +173,7 @@ fn fs_ground(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 // metido entre as pedras.
 fn support_at(xy: vec2<f32>) -> f32 {
     let uv = clamp(region_uv(xy), vec2<f32>(0.0), vec2<f32>(1.0));
-    return 1.35 * textureSampleLevel(ground_tex, samp, uv, 0.0).g;
+    return 1.15 * textureSampleLevel(ground_tex, samp, uv, 0.0).g;
 }
 
 fn ground_at(xy: vec2<f32>) -> f32 {
@@ -348,7 +354,11 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         let ndv = clamp(dot(n, -dir), 0.0, 1.0);
         // MICROSCÓPIO ELETRÓNICO: as superfícies de lado para o observador
         // soltam mais eletrões (arestas claras)...
-        let edge = pow(1.0 - ndv, 2.0);
+        // (A parte de BAIXO de uma peça só se vê de raspão, e por isso ficava
+        // toda com o brilho de aresta, mais clara do que a de cima: aí quase
+        // não há brilho de aresta, e fica na sombra da própria peça.)
+        let under = n.z < 0.0;
+        let edge = pow(1.0 - ndv, 2.0) * select(1.0, 0.15, under);
         // ...e os sítios encaixados entre vizinhos mais altos soltam menos
         // (oclusão): olha-se à volta, a duas distâncias.
         var occ = 0.0;
@@ -361,7 +371,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         // Na metade de BAIXO de uma peça isto contava o cimo da própria peça
         // como coisa por cima, e ficava uma faixa preta logo abaixo do
         // equador de cada bola. Aí a oclusão é só a proximidade do chão.
-        if (n.z < 0.0) { ao = mix(0.5, 0.95, clamp((p.z - s.g) / 9.0, 0.0, 1.0)); }
+        if (under) { ao = mix(0.18, 0.45, clamp((p.z - s.g) / 12.0, 0.0, 1.0)); }
         // PRETO E BRANCO, como uma micrografia: fica só o claro-escuro das
         // peças (opts.x repõe a cor).
         let gray = vec3<f32>(dot(albedo, vec3<f32>(0.33, 0.45, 0.22)) * 1.35);
