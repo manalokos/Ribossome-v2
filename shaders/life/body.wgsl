@@ -43,8 +43,28 @@ fn body_mass(slot: u32, n: u32) -> f32 {
 fn residue_len(slot: u32, k: u32) -> f32 {
     var l = aa_props[body_get(slot, k)].seg_len;
     let o = organ_get(slot, k);
-    if (o != 0u) { l *= organ_cost(o).len_mult; }
+    if (o != 0u) {
+        l *= organ_cost(o).len_mult;
+        if (organ_type(o) == ORGAN_STORAGE) { l *= storage_len_factor(slot, k, o); }
+    }
     return max(l, 1.0);
+}
+
+// DEPÓSITO: o órgão é tão comprido quanto guarda. A área cresce com a
+// capacidade (intensidade × bónus dos depósitos seguidos, como em
+// energy_capacity), por isso o comprimento cresce com a raiz quadrada. O
+// desenho usa este mesmo comprimento: um depósito grande afasta o resto do
+// corpo em vez de o tapar. (Ciclos de tamanho fixo, sem saídas a meio: é
+// chamado a partir de agents_step.)
+fn storage_len_factor(slot: u32, k: u32, o: u32) -> f32 {
+    var run = 1.0;
+    var fwd = true;
+    var back = true;
+    for (var j = 1u; j < 8u; j++) {
+        if (fwd && k + j < MAX_BODY && organ_type(organ_get(slot, k + j)) == ORGAN_STORAGE) { run += 1.0; } else { fwd = false; }
+        if (back && j <= k && organ_type(organ_get(slot, k - j)) == ORGAN_STORAGE) { run += 1.0; } else { back = false; }
+    }
+    return sqrt(clamp(organ_gain(o), 0.5, 2.0) * (1.0 + 0.25 * (min(run, 8.0) - 1.0)));
 }
 
 // Ângulo de repouso da junta (com sinal; tabela do v3 em src/life/amino.rs).
