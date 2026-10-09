@@ -49,7 +49,10 @@ const HEIGHT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 // do número e a imagem deixava de melhorar.
 const ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 /// Altura máxima do relevo (unidades do mundo): o raio começa a marchar aqui.
-const HMAX: f32 = 95.0;
+// (Tem de ficar ACIMA de tudo: chão 24 + pedras + corpo + órgão grande passa
+// dos 150. Com 95 os raios nasciam já dentro das peças mais altas e elas
+// apareciam cortadas por um plano, com a "tampa" deslocada para o lado.)
+const HMAX: f32 = 200.0;
 /// Lado da textura de "quanto terreno há" e da do chão desfocado.
 const PRES: u32 = 512;
 const GROUND: u32 = 256;
@@ -284,10 +287,10 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         // no chão, afina por bisseção.
         let t0 = max((u.region.w - org.z) / dir.z, 0.0);
         let t1 = (0.0 - org.z) / dir.z;
-        let dt = (t1 - t0) / 240.0;
+        let dt = (t1 - t0) / 420.0;
         var t = t0 + dt * rnd.z;
         var prev_t = t0;
-        for (var i = 0; i < 240; i++) {
+        for (var i = 0; i < 420; i++) {
             let p = org + dir * t;
             // O teste barato (texel a texel) só conta se o interpolado, que é
             // o que dá a superfície final, concordar: senão ficavam pontinhos
@@ -797,11 +800,13 @@ impl Scope {
         // (Moléculas pequenas: no microscópio são partículas, não manchas.)
         self.cap.view.coc_radius.set(MOLECULE_R);
         self.height_view.coc_radius.set(MOLECULE_R);
+        self.cap.view.relief_order.set(true);
+        self.height_view.relief_order.set(true);
         self.cap.view.epoch.set(self.world.params.epoch);
-        self.cap.view.ghost_steps.set(60.0);
+        self.cap.view.ghost_steps.set(std::env::var("GHOSTS").ok().and_then(|v| v.parse().ok()).unwrap_or(60.0));
         self.cap.encode(&gpu.queue, &mut enc, &cam, 0, self.monomers);
         self.height_view.epoch.set(self.world.params.epoch);
-        self.height_view.ghost_steps.set(60.0);
+        self.height_view.ghost_steps.set(std::env::var("GHOSTS").ok().and_then(|v| v.parse().ok()).unwrap_or(60.0));
         // (Com monómeros: no passo dos volumes cada molécula é um grãozinho.)
         self.height_view.update(&gpu.queue, &cam, [TEX as f32; 2], 0, self.monomers, 0);
         // TRÊS desenhos da zona vista de cima: o volume dos agentes, o volume
@@ -834,7 +839,7 @@ impl Scope {
             layer("world colour", &world_col, Some(&world_col_resolve), &|pass| self.cap.view.draw_world_only(pass));
         }
         // Câmara: olha para o centro da zona, a meia altura do relevo.
-        let target_pt = [o.centre[0], o.centre[1], 0.3 * HMAX];
+        let target_pt = [o.centre[0], o.centre[1], 28.0];
         let (sp, cp) = o.pitch.sin_cos();
         let (sy, cy) = o.yaw.sin_cos();
         // Com uma lente mais longa a câmara recua na mesma proporção: o

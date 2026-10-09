@@ -48,6 +48,11 @@ pub struct WorldView {
     agents_pipeline: wgpu::RenderPipeline,
     shadows_pipeline: wgpu::RenderPipeline,
     ghosts_pipeline: wgpu::RenderPipeline,
+    agents_relief_pipeline: wgpu::RenderPipeline,
+    ghosts_relief_pipeline: wgpu::RenderPipeline,
+    /// Microscópio 3D: quem tapa quem é a altura real de cada peça
+    /// (fs_agent_relief) e não a ordem fixa dos agentes; sem sombras.
+    pub relief_order: std::cell::Cell<bool>,
     /// Epoch atual e duração, em passos, da animação dos restos de quem
     /// morre (0 = não se desenham).
     pub epoch: std::cell::Cell<u32>,
@@ -508,11 +513,16 @@ impl WorldView {
         let shadows_pipeline = agent_pipeline("agents view shadows", "vs_agent", "fs_agent_shadow", false, Some(wgpu::BlendState::ALPHA_BLENDING));
         // Restos de quem morreu: as peças a separarem-se (vs_ghost).
         let ghosts_pipeline = agent_pipeline("ghosts view", "vs_ghost", "fs_agent", true, None);
+        let agents_relief_pipeline = agent_pipeline("agents view relief", "vs_agent", "fs_agent_relief", true, None);
+        let ghosts_relief_pipeline = agent_pipeline("ghosts view relief", "vs_ghost", "fs_agent_relief", true, None);
         Self {
             view_buf,
             bind_group,
             pipeline,
             agents_bg,
+            agents_relief_pipeline,
+            ghosts_relief_pipeline,
+            relief_order: std::cell::Cell::new(false),
             agents_pipeline,
             shadows_pipeline,
             ghosts_pipeline,
@@ -595,10 +605,11 @@ impl WorldView {
     /// Só os agentes (e os restos dos mortos), sem o fundo nem as sombras.
     pub fn draw_agents_only(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_bind_group(0, &self.agents_bg, &[]);
-        pass.set_pipeline(&self.agents_pipeline);
+        let relief = self.relief_order.get();
+        pass.set_pipeline(if relief { &self.agents_relief_pipeline } else { &self.agents_pipeline });
         self.draw_agents(pass);
         if self.lod.get() == 0 && self.focus.get() == u32::MAX && self.ghost_steps.get() > 0.0 {
-            pass.set_pipeline(&self.ghosts_pipeline);
+            pass.set_pipeline(if self.relief_order.get() { &self.ghosts_relief_pipeline } else { &self.ghosts_pipeline });
             pass.draw(0..6, 0..GHOST_INSTANCES * crate::world::GHOST_MAX as u32);
         }
     }
@@ -611,14 +622,14 @@ impl WorldView {
         // Opacos primeiro, depois as sombras (de longe não há sombras).
         for shadows in [false, true] {
             // (Nem de longe nem no passo das alturas: uma sombra não tem altura.)
-            if shadows && (self.lod.get() != 0 || self.height_pass.get() != 0) {
+            if shadows && (self.lod.get() != 0 || self.height_pass.get() != 0 || self.relief_order.get()) {
                 break;
             }
-            pass.set_pipeline(if shadows { &self.shadows_pipeline } else { &self.agents_pipeline });
+            pass.set_pipeline(if shadows { &self.shadows_pipeline } else if self.relief_order.get() { &self.agents_relief_pipeline } else { &self.agents_pipeline });
             self.draw_agents(pass);
             // Entre os dois: os restos de quem morreu há pouco (só de perto).
             if !shadows && self.lod.get() == 0 && self.focus.get() == u32::MAX && self.ghost_steps.get() > 0.0 {
-                pass.set_pipeline(&self.ghosts_pipeline);
+                pass.set_pipeline(if self.relief_order.get() { &self.ghosts_relief_pipeline } else { &self.ghosts_pipeline });
                 pass.draw(0..6, 0..GHOST_INSTANCES * crate::world::GHOST_MAX as u32);
             }
         }

@@ -500,11 +500,12 @@ const BODY_LIFT: f32 = 9.0;
 fn body_lift(a: Agent, k: u32) -> f32 {
     return BODY_LIFT * (0.5 + 0.5 * sin(f32(k) * 0.38 + f32(a.age) * 0.03 + f32(a.id % 97u)));
 }
-// Os ÓRGÃOS ficam desencontrados em altura (um mais acima, o seguinte a
-// meio, o outro mais abaixo), para dois órgãos seguidos não se atravessarem.
-const ORGAN_STAGGER: f32 = 0.45;
+// Os ÓRGÃOS ficam desencontrados em altura (um em baixo, o seguinte mais
+// acima, o outro mais ainda), para dois órgãos seguidos não se atravessarem.
+// Só para CIMA: quando um descia, um órgão grande ficava enterrado no chão.
+const ORGAN_STAGGER: f32 = 0.4;
 fn organ_stagger(k: u32, radius: f32) -> f32 {
-    return (f32(k % 3u) - 1.0) * ORGAN_STAGGER * radius;
+    return f32(k % 3u) * ORGAN_STAGGER * radius;
 }
 
 fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
@@ -1056,6 +1057,32 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
         return vec4<f32>(mid + g_h, max(mid - g_h, 0.4), 0.0, 1.0);
     }
     return c;
+}
+
+// O mesmo para o MICROSCÓPIO 3D, mas quem tapa quem é decidido pela ALTURA
+// real da peça naquele ponto (o seu cimo) e não pela ordem fixa dos agentes:
+// onde dois órgãos se sobrepõem fica o mais alto, e a fronteira é a linha
+// onde as duas formas se cruzam, sem parede a pique. Usa-se nos dois desenhos
+// (cor e volume), para a cor de cada ponto ser a da peça que lá ficou.
+struct ReliefOut {
+    @location(0) color: vec4<f32>,
+    @builtin(frag_depth) depth: f32,
+}
+@fragment
+fn fs_agent_relief(in: AgentVsOut) -> ReliefOut {
+    g_h = agent_height(in);
+    g_c = g_h;
+    g_lift = 0.0;
+    let c = agent_frag(in);
+    if (c.a < 0.99) { discard; }
+    let mid = AGENT_Z + in.lift + g_lift;
+    var o: ReliefOut;
+    // (Um órgão ganha aos troços do corpo que lhe entram pela borda: sem esta
+    // folga viam-se lascas do tubo a furar as bolas.)
+    o.depth = clamp((mid + g_h + select(0.0, 12.0, in.mode == 1u)) / 1000.0, 0.02, 0.999);
+    o.color = c;
+    if (view.height_pass != 0u) { o.color = vec4<f32>(mid + g_h, max(mid - g_h, 0.4), 0.0, 1.0); }
+    return o;
 }
 
 // ALTURA de uma peça SEM sprite (fios, ligações, troços de longe), para o
