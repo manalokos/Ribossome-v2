@@ -895,11 +895,15 @@ fn tail_curve(p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>, out: v
     return 0.5 * ((2.0 * b) + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (3.0 * b - a - 3.0 * c + d) * t3);
 }
 
+const SHOW_RNA_TAILS: bool = false;
 fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
     var o: AgentVsOut;
     o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
     let hidden = view.focus_slot != 0xFFFFFFFFu && slot != view.focus_slot;
     if (a.alive == 0u || hidden) { return o; }
+    // As caudas de RNA não traduzido de um corpo não se desenham (faziam
+    // confusão); o RNA NU, sem corpo, continua a desenhar-se: é o agente.
+    if (!SHOW_RNA_TAILS && a.body_len > 0u) { return o; }
     let trailer = j >= RNA_PER_END;
     let m = j % RNA_PER_END;
     let start = a.coding_span & 0xFFFFu;
