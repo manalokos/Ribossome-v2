@@ -140,8 +140,8 @@ const DEFAULT_TERRAIN: &str = "assets/terreno.png";
 /// Pasta das cenas gravadas e do autosave.
 /// Duração do ecrã de entrada (segundos).
 /// Passos de simulação que duram os restos de um agente morto (as peças a
-/// separarem-se e a irem na corrente): ~40 frames a 40 passos por frame.
-const GHOST_STEPS: f32 = 1600.0;
+/// separarem-se e a irem na corrente).
+const GHOST_STEPS: f32 = 60.0;
 const SPLASH_SECS: f32 = 5.0;
 const SAVES_DIR: &str = "saves";
 
