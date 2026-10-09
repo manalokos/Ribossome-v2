@@ -55,6 +55,12 @@ struct Running {
     rec_side: u32,
     /// A gravação em curso é do microscópio (e o tamanho das imagens dela).
     rec_micro: bool,
+    /// CAPTURA DA VISTA: cópia do retângulo da vista tirada da imagem da
+    /// janela (antes ou depois da interface, conforme o modo); pede-se num
+    /// frame e lê-se no seguinte.
+    view_shot: Option<wgpu::Texture>,
+    view_shot_want: bool,
+    view_shot_ready: bool,
     rec_dims: [u32; 2],
     rec_frames: u32,
     rec_tick: u32,
@@ -264,7 +270,8 @@ impl Running {
         let format = caps.formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(caps.formats[0]);
         let size = window.inner_size();
         let surface_cfg = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            // (Com cópia, se a placa deixar: é assim que se fotografa a vista.)
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | (caps.usages & wgpu::TextureUsages::COPY_SRC),
             format,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -391,6 +398,9 @@ impl Running {
             rec_path: std::path::PathBuf::new(),
             rec_side: 0,
             rec_micro: false,
+            view_shot: None,
+            view_shot_want: false,
+            view_shot_ready: false,
             rec_dims: [0; 2],
             rec_frames: 0,
             rec_tick: 0,
@@ -947,46 +957,38 @@ impl Running {
     /// (sem PNG, sem ficheiros intermédios) para um ffmpeg que escreve logo o
     /// MP4: uma thread à parte alimenta-o, e se o codificador se atrasar a
     /// imagem perde-se em vez de travar a simulação.
-    /// Foto e vídeo do MICROSCÓPIO (quando é ele que está à vista): a imagem
-    /// do frame anterior, do tamanho da vista, lida da textura `shot`.
+    /// Foto e vídeo da VISTA (mapa, fundido ou microscópio, como está no
+    /// ecrã): a cópia do frame anterior em `view_shot`.
     fn photo_video_micro(&mut self) {
         if !self.ui.rec && self.rec_tx.take().is_some() {
             self.ui.rec_info = format!("video saved: {} ({} images)", self.rec_path.display(), self.rec_frames);
         }
-        // Uma gravação começada no mapa tem outro tamanho: acaba aqui.
+        // Uma gravação começada com a mira tem outro tamanho: acaba aqui.
         if self.rec_tx.is_some() && !self.rec_micro {
             self.rec_tx = None;
             self.ui.rec = false;
-            self.ui.rec_info = format!("view changed, video closed: {} ({} images)", self.rec_path.display(), self.rec_frames);
+            self.ui.rec_info = format!("capture mode changed, video closed: {} ({} images)", self.rec_path.display(), self.rec_frames);
         }
-        let Some(scope) = self.scope.as_mut() else { return };
-        if !self.ui.photo_now && !self.ui.rec {
-            scope.shot = None;
-            scope.shot_ready = false;
+        if !self.surface_cfg.usage.contains(wgpu::TextureUsages::COPY_SRC) {
+            self.ui.rec = false;
+            self.ui.photo_now = false;
+            self.ui.rec_info = "this graphics card cannot copy from the window: use the framing guide mode".into();
             return;
         }
-        let (sw, sh) = (self.surface_cfg.width, self.surface_cfg.height);
-        if scope.shot.as_ref().is_none_or(|t| t.width() != sw || t.height() != sh) {
-            scope.shot = Some(self.gpu.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("scope shot"),
-                size: wgpu::Extent3d { width: sw, height: sh, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: self.surface_cfg.format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            }));
-            scope.shot_ready = false;
+        if !self.ui.photo_now && !self.ui.rec {
+            self.view_shot_want = false;
+            self.view_shot_ready = false;
+            return;
         }
-        if !scope.shot_ready {
+        self.view_shot_want = true;
+        if !self.view_shot_ready {
             // Ainda sem imagem: fica para o frame seguinte.
             return;
         }
-        let vp = self.viewport;
-        let (x, y) = (vp[0] as u32, vp[1] as u32);
+        let Some(shot) = self.view_shot.clone() else { return };
+        let (x, y) = (0u32, 0u32);
         // (O x264 quer lados pares.)
-        let (w, h) = (((vp[2] as u32).min(sw.saturating_sub(x))) & !1, ((vp[3] as u32).min(sh.saturating_sub(y))) & !1);
+        let (w, h) = (shot.width() & !1, shot.height() & !1);
         if w < 16 || h < 16 {
             return;
         }
@@ -999,7 +1001,7 @@ impl Running {
         });
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         enc.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo { texture: scope.shot.as_ref().unwrap(), mip_level: 0, origin: wgpu::Origin3d { x, y, z: 0 }, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo { texture: &shot, mip_level: 0, origin: wgpu::Origin3d { x, y, z: 0 }, aspect: wgpu::TextureAspect::All },
             wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(h) } },
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         );
@@ -1021,7 +1023,7 @@ impl Running {
         if std::mem::take(&mut self.ui.photo_now) {
             let dir = std::path::Path::new(SAVES_DIR).join("capturas");
             let _ = std::fs::create_dir_all(&dir);
-            let path = dir.join(format!("microscopio_{}.png", self.world.params.epoch));
+            let path = dir.join(format!("vista_{}.png", self.world.params.epoch));
             self.ui.scene_msg = format!("photo saved to {}", path.display());
             let data = rgba.clone();
             std::thread::spawn(move || {
@@ -1043,7 +1045,7 @@ impl Running {
         if self.rec_tx.is_none() {
             let dir = std::path::Path::new(SAVES_DIR).join("videos");
             let _ = std::fs::create_dir_all(&dir);
-            self.rec_path = dir.join(format!("microscopio_{stamp}_epoch{}.mp4", self.world.params.epoch));
+            self.rec_path = dir.join(format!("vista_{stamp}_epoch{}.mp4", self.world.params.epoch));
             let child = std::process::Command::new("ffmpeg")
                 .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s"])
                 .arg(format!("{w}x{h}"))
@@ -1087,7 +1089,7 @@ impl Running {
         match self.rec_tx.as_ref().map(|tx| tx.try_send(rgba)) {
             Some(Ok(())) => {
                 self.rec_frames += 1;
-                self.ui.rec_info = format!("recording the microscope: {} images ({:.1} s of video)", self.rec_frames, self.rec_frames as f32 / 60.0);
+                self.ui.rec_info = format!("recording the view: {} images ({:.1} s of video)", self.rec_frames, self.rec_frames as f32 / 60.0);
             }
             Some(Err(std::sync::mpsc::TrySendError::Disconnected(_))) => {
                 self.rec_tx = None;
@@ -1105,19 +1107,17 @@ impl Running {
         if std::env::var("RIBO_AUTOSHOT").ok().and_then(|v| v.parse::<u32>().ok()) == Some(frame) {
             self.ui.photo_now = true;
         }
-        if self.micro_t > 0.75 && self.scope.is_some() {
+        if self.ui.capture_mode != 0 {
             self.photo_video_micro();
             return;
         }
-        if let Some(scope) = self.scope.as_mut() {
-            scope.shot = None;
-            scope.shot_ready = false;
-        }
-        // Uma gravação começada no microscópio tem outro tamanho: acaba aqui.
+        self.view_shot_want = false;
+        self.view_shot_ready = false;
+        // Uma gravação da vista tem outro tamanho: acaba aqui.
         if self.rec_tx.is_some() && self.rec_micro {
             self.rec_tx = None;
             self.ui.rec = false;
-            self.ui.rec_info = format!("view changed, video closed: {} ({} images)", self.rec_path.display(), self.rec_frames);
+            self.ui.rec_info = format!("capture mode changed, video closed: {} ({} images)", self.rec_path.display(), self.rec_frames);
         }
         let photo = std::mem::take(&mut self.ui.photo_now);
         // Paragem: fechar o canal faz a thread fechar o ffmpeg, que termina o ficheiro.
@@ -1615,7 +1615,9 @@ impl Running {
             // MICROSCÓPIO: a barra de dados e o painel por cima da vista.
             if let (true, Some(r), Some(scope)) = (self.micro_t >= 0.6, free, self.scope.as_mut()) {
                 let (recording, status) = (self.ui.rec, self.ui.rec_info.clone());
+                scope.capture_mode = self.ui.capture_mode;
                 micro_asked = ribossome::microscope::interface(root, r, scope, &mut self.scope_panel, None, recording, &status);
+                self.ui.capture_mode = scope.capture_mode;
             }
             // ECRÃ DE ENTRADA por cima de tudo, a desvanecer no fim.
             if let Some((tex, t0)) = &mut self.splash {
@@ -1893,7 +1895,8 @@ impl Running {
         };
         self.world.set_draw_rect(&self.gpu.queue, Some(([c[0] - hw, c[1] - hh], [c[0] + hw, c[1] + hh])));
         let format = self.surface_cfg.format;
-        let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, msaa, depth, scope, .. } = self;
+        let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, msaa, depth, scope, view_shot, view_shot_want, view_shot_ready, .. } = self;
+        let surface_tex = &tex.texture;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {
             let n = n_steps;
@@ -1963,6 +1966,33 @@ impl Running {
                 let (w, h) = (vp[2].min(sw as f32 - vp[0]).floor(), vp[3].min(sh as f32 - vp[1]).floor());
                 scope.encode_embedded(gpu, world, enc, &target, [vp[0], vp[1], w, h], !st.paused);
             }
+            // CAPTURA DA VISTA: o retângulo dela copiado da imagem da janela,
+            // antes da interface ("simulation only") ou depois ("whole view").
+            let (cw, ch) = ((vp[2].min(sw as f32 - vp[0]).floor() as u32) & !1, (vp[3].min(sh as f32 - vp[1]).floor() as u32) & !1);
+            let shoot = *view_shot_want && !covered && cw >= 16 && ch >= 16;
+            if shoot && view_shot.as_ref().is_none_or(|t| t.width() != cw || t.height() != ch) {
+                *view_shot = Some(gpu.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("view shot"),
+                    size: wgpu::Extent3d { width: cw, height: ch, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                }));
+            }
+            let copy = |enc: &mut wgpu::CommandEncoder, dst: &wgpu::Texture| {
+                enc.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo { texture: surface_tex, mip_level: 0, origin: wgpu::Origin3d { x: vp[0] as u32, y: vp[1] as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
+                    wgpu::TexelCopyTextureInfo { texture: dst, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                    wgpu::Extent3d { width: cw, height: ch, depth_or_array_layers: 1 },
+                );
+            };
+            if let (true, 2, Some(dst)) = (shoot, st.capture_mode, view_shot.as_ref()) {
+                copy(enc, dst);
+                *view_shot_ready = true;
+            }
             let mut pass = enc
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("interface"),
@@ -1979,6 +2009,11 @@ impl Running {
                 })
                 .forget_lifetime();
             egui_renderer.render(&mut pass, &jobs, &sd);
+            drop(pass);
+            if let (true, 1, Some(dst)) = (shoot, st.capture_mode, view_shot.as_ref()) {
+                copy(enc, dst);
+                *view_shot_ready = true;
+            }
         });
         frame.finish();
         world.ledger_after_submit();

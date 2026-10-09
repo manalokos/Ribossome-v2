@@ -5,6 +5,9 @@ pub mod inspector;
 use crate::gpu::profiler::Profiler;
 use crate::world::{Ledger, MAX_STEPS_PER_FRAME, World};
 
+/// Nomes dos modos de captura (`UiState::capture_mode`).
+pub const CAPTURE_MODES: [&str; 3] = ["framing guide (square)", "whole view (with data)", "simulation only"];
+
 pub struct UiState {
     pub paused: bool,
     pub steps_per_frame: u32,
@@ -92,6 +95,10 @@ pub struct UiState {
     pub photo_now: bool,
     /// A gravar vídeo (uma imagem de `rec_every` em `rec_every` frames).
     pub rec: bool,
+    /// O QUE se fotografa e grava: 0 = o quadrado da mira (só o mapa, ao
+    /// tamanho escolhido); 1 = a vista como está no ecrã, com a barra de
+    /// dados e o que estiver por cima; 2 = a vista sem nada por cima.
+    pub capture_mode: u32,
     pub rec_every: u32,
     /// Lado da imagem (fotografia e vídeo), em píxeis.
     pub shot_size: u32,
@@ -268,6 +275,7 @@ impl UiState {
             frame_guide: false,
             photo_now: false,
             rec: false,
+            capture_mode: 1,
             rec_every: 2,
             shot_size: 1024,
             rec_info: String::new(),
@@ -718,6 +726,11 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
         if ui.button(label).on_hover_text("records what the framing guide frames straight into an MP4 video in saves/videos/ (the images go raw to ffmpeg, with no intermediate files). Move and zoom the camera freely while recording; the size stays as it was at the start").clicked() {
             st.rec = !st.rec;
         }
+        egui::ComboBox::from_id_salt("capture_mode").selected_text(CAPTURE_MODES[st.capture_mode.min(2) as usize]).width(150.0).show_ui(ui, |ui| {
+            for (i, n) in CAPTURE_MODES.iter().enumerate() {
+                ui.selectable_value(&mut st.capture_mode, i as u32, *n);
+            }
+        }).response.on_hover_text("what photo and rec capture. Framing guide: the square in the middle of the map, at the size chosen here (map only). Whole view: the view as it is on screen, map or microscope, with the data bar. Simulation only: the same without anything drawn over it. The two view modes follow you from the map into the microscope in one recording");
         egui::ComboBox::from_id_salt("shot_size").selected_text(format!("{} px", st.shot_size)).width(70.0).show_ui(ui, |ui| {
             for v in [512u32, 1024, 2048] {
                 ui.selectable_value(&mut st.shot_size, v, format!("{v} px"));

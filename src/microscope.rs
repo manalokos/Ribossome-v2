@@ -870,6 +870,9 @@ pub struct Scope {
     /// Limite de imagens por segundo na aplicação principal, enquanto o
     /// microscópio está à vista (0 = sem limite).
     pub fps_limit: f32,
+    /// Modo de captura da aplicação principal (ver `ui::CAPTURE_MODES`),
+    /// para o escolher também daqui.
+    pub capture_mode: u32,
     /// FOTO / VÍDEO na aplicação principal: se houver esta textura (do
     /// tamanho da janela), a imagem final também é desenhada nela, no mesmo
     /// retângulo, sem fundido; `shot_ready` diz que já tem um frame.
@@ -1308,6 +1311,7 @@ impl Scope {
             approach: 1.0,
             fps: 60.0,
             fps_limit: 24.0,
+            capture_mode: 1,
             shot: None,
             shot_ready: false,
             opacity: 1.0,
@@ -2097,6 +2101,13 @@ pub fn interface(root: &mut egui::Ui, screen: egui::Rect, s: &mut Scope, panel: 
                 s.orbit.focus_shift = 0.0;
             }
         });
+        if s.embedded {
+            egui::ComboBox::from_id_salt("scope_capture_mode").selected_text(crate::ui::CAPTURE_MODES[s.capture_mode.min(2) as usize]).show_ui(ui, |ui| {
+                for (i, n) in crate::ui::CAPTURE_MODES.iter().enumerate() {
+                    ui.selectable_value(&mut s.capture_mode, i as u32, *n);
+                }
+            });
+        }
         {
         ui.horizontal(|ui| {
             if ui.button("📷 Photo").on_hover_text("saves this view to saves/capturas").clicked() {
