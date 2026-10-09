@@ -365,7 +365,9 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
     // mundo visto de cima) não há ângulo de repouso e a rocha não escorrega.
     // (Sem isto, os grãos caídos flutuavam para longe, a face ficava outra
     // vez a pique e a rocha desfazia-se sem parar em entulho.)
-    if (rng_f4(idx, params.epoch, S_SAND + phase).x < GAMMA_RELAX_P * clamp(params.sediment_settle, 0.0, 1.0)) {
+    // params.rock_crumble é a parte desse ritmo que fica mesmo sem gravidade:
+    // é por aí que correntes e bichos desfazem rocha num mundo visto de cima.
+    if (rng_f4(idx, params.epoch, S_SAND + phase).x < GAMMA_RELAX_P * max(clamp(params.sediment_settle, 0.0, 1.0), clamp(params.rock_crumble, 0.0, 1.0))) {
         gamma_move_one(idx, best_idx);
     }
 }

@@ -411,7 +411,13 @@ gpu_struct! {
         /// com 3 é rocha): um aglomerado de entulho colapsa em rocha ao fim
         /// de algum tempo. Os grãos conservam-se. 0 = desligada.
         pub sediment_compaction: f32,
-        pub _pad_s2: u32,
+        /// ROCHA A ESFARELAR: uma face de rocha a pique (3 ou mais grãos acima
+        /// da vizinha mais baixa) larga grãos. Com gravidade nos grãos isso é
+        /// o desmoronar normal (ângulo de repouso); isto é a fração desse
+        /// ritmo que acontece MESMO SEM gravidade (0 = sem gravidade a rocha
+        /// não larga nada). É por aqui que as correntes e os bichos desfazem
+        /// rocha: levam o entulho da base, a face fica a pique e larga mais.
+        pub rock_crumble: f32,
         pub _pad_s3: u32,
     }
 }
@@ -599,7 +605,7 @@ impl Default for SimParams {
             vent_cycle_amp: 0.91,
             sediment_cohesion: 0.5,
             sediment_compaction: 0.00001,
-            _pad_s2: 0,
+            rock_crumble: 0.0001,
             _pad_s3: 0,
         }
     }
