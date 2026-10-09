@@ -309,9 +309,9 @@ const MOL_SPIN: f32 = 0.7;
 const MOL_JITTER_RATE: f32 = 1.0;
 // Altura do relevo de uma molécula no microscópio 3D, em relação à forma
 // insuflada do seu sprite.
-const MOL_RELIEF: f32 = 2.5;
+const MOL_RELIEF: f32 = 1.6;
 // Até onde (em células) uma molécula solta paira acima do fundo.
-const MOL_LIFT: f32 = 0.075;
+const MOL_LIFT: f32 = 0.2;
 
 struct Ground {
     rock: f32,
@@ -597,7 +597,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         // uma molécula em cima de uma pedra deformava-a ao tremer.
         var mol = vec2<f32>(0.0);
         if (mol_h > 0.0 && view.monomer_brightness > 0.0 && view.height_pass == 1u) {
-            let mid = 1.5 + MOL_LIFT * mol_lift * cell;
+            let mid = 0.5 + MOL_LIFT * mol_lift * cell;
             // (MOL_RELIEF vezes a forma do sprite: senão os átomos mal se notam.)
             mol = vec2<f32>(mid + MOL_RELIEF * mol_h * cell, mid - MOL_RELIEF * mol_h * cell);
         }
