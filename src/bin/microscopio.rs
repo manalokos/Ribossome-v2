@@ -69,7 +69,7 @@ const REF_TAN: f32 = 0.36;
 /// larga, para a cena se apagar com a distância sem acabar num corte.
 const REGION_PER_DIST: f32 = 1.7;
 /// Raio de uma molécula de monómero, em células (o desenho normal usa mais).
-const MOLECULE_R: f32 = 0.2;
+const MOLECULE_R: f32 = 0.1;
 /// Raio do desfoque do chão, em unidades do mundo.
 const GROUND_BLUR: f32 = 55.0;
 
@@ -322,7 +322,9 @@ fn lerp_world(uv: vec2<f32>, g: f32, molecules: bool) -> vec2<f32> {
     }
     if (wsum < 0.5) { return NONE; }
     let v = sum / wsum;
-    let mid = 0.5 * (v.x + v.y);
+    // (Uma pedra vai abaixo do chão: no contorno o cimo desce até ao chão,
+    // e não até ao meio dela, que fica enterrado.)
+    let mid = max(0.5 * (v.x + v.y), 0.0);
     let shut = sqrt(clamp((wsum - 0.5) / 0.5, 0.0, 1.0));
     return g + (vec2<f32>(mid) + (v - vec2<f32>(mid)) * shut) * u.lens.w;
 }

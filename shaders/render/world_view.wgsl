@@ -308,7 +308,7 @@ const MOL_JITTER: f32 = 0.1;
 const MOL_SPIN: f32 = 0.7;
 const MOL_JITTER_RATE: f32 = 1.0;
 // Até onde (em células) uma molécula solta paira acima do fundo.
-const MOL_LIFT: f32 = 0.15;
+const MOL_LIFT: f32 = 0.075;
 
 struct Ground {
     rock: f32,
@@ -571,7 +571,9 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
             // o do sprite do bloco: numa célula de rocha isolada cortava a
             // cúpula a pique e ficava um cilindro. A altura desce com o campo
             // até ao contorno (um ombro redondo).
-            let shoulder = sqrt(clamp((rock_field - 0.45) / 0.35, 0.0, 1.0));
+            // (Chega a ZERO no contorno, que é onde o campo vale 0,48: com
+            // uma sobra, a rocha acabava num degrau a pique contra o chão.)
+            let shoulder = sqrt(clamp((rock_field - 0.48) / 0.4, 0.0, 1.0));
             vol = vec2<f32>((2.0 + 0.8 * rock_h * cell) * shoulder + 0.3, -30.0);
         } else if (rubble_m > 0.5) {
             // Um seixo é uma CÚPULA assente no chão (desce a zero no contorno),
@@ -579,7 +581,11 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
             // por ponto, e a aba de uma bola por cima da vizinha mais baixa
             // ficava uma parede fina a pique entre as duas. Com cúpulas, o
             // monte é o máximo delas e é contínuo em todo o lado.
-            vol = vec2<f32>(1.2 * pebble_h * cell, -30.0);
+            // (A forma insuflada do sprite ainda vale ~0,14 raios no contorno
+            // da máscara: tira-se essa sobra para o seixo chegar ao chão sem
+            // um degrauzinho a toda a volta.)
+            let rise = max(pebble_h - 0.14 * pebble_r, 0.0) * 1.16;
+            vol = vec2<f32>(1.2 * rise * cell + 0.3, -30.0);
         }
         // As MOLÉCULAS vão à parte (azul e alfa), com o seu próprio intervalo
         // acima de onde assentam: o microscópio pousa-as no cimo das pedras
