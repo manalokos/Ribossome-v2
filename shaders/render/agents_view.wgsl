@@ -46,14 +46,20 @@
 const SHADOW: f32 = 0.5;
 const SHADOW_MARGIN: f32 = 1.3;
 const TUBE_SHADOW: f32 = 1.5;
+// Espessura do troço por baixo de uma protease, em fração da normal.
+const PROTEASE_STALK: f32 = 0.4;
 // Auréola à volta de um disco de raio 1 (x = distância ao centro).
 fn halo(x: f32) -> f32 {
     return SHADOW * (1.0 - smoothstep(0.8, SHADOW_MARGIN, x));
 }
 const SPRITE_COLS: f32 = 9.0;
 const SPRITE_COLS_U: u32 = 9u;
-const SPRITE_ROWS: f32 = 27.0;
-const SPRITE_ROW_AMINO: f32 = 22.0;
+const SPRITE_ROWS: f32 = 32.0;
+// Aminoácidos: um troço por tipo (i na linha AMINO + i/9, coluna i%9), com
+// a cápsula no meio do mosaico e AMINO_MARGIN de folga para as deformações
+// (BODY_MARGIN no script do atlas).
+const SPRITE_ROW_AMINO: f32 = 29.0;
+const AMINO_MARGIN: f32 = 1.3;
 const SPRITE_ROW_SPIKE: f32 = 23.0;
 const SPRITE_ROW_PROTEASE: f32 = 24.0;
 // Raio da esfera nos sprites dos sensores de um lado, em fração de meio
@@ -294,6 +300,17 @@ const GHOST_MAX: u32 = 2048u;
 const GHOST_WORDS: u32 = 192u;
 const GHOST_HEAD: u32 = 16u;
 @group(0) @binding(16) var<storage, read> ghosts_view: array<u32>;
+// Velocidade da água (grelha do fluido), para os restos irem na corrente.
+@group(0) @binding(17) var<storage, read> velocity_view: array<vec2<f32>>;
+// Passo de tempo da simulação (params.dt por omissão): a água leva uma peça
+// velocidade × GHOST_DT por passo, como leva um agente.
+const GHOST_DT: f32 = 0.017;
+fn water_at(w: vec2<f32>) -> vec2<f32> {
+    let f = clamp(floor(w / SIM_SIZE * f32(FLUID_SIZE)), vec2<f32>(0.0), vec2<f32>(f32(FLUID_SIZE - 1u)));
+    let v = velocity_view[u32(f.y) * FLUID_SIZE + u32(f.x)];
+    // (Um valor estragado na grelha não pode atirar a peça para o infinito.)
+    return select(vec2<f32>(0.0), clamp(v, vec2<f32>(-400.0), vec2<f32>(400.0)), v == v);
+}
 // Instâncias por registo: 64 tubos e 64 órgãos (GHOST_INSTANCES em render/mod.rs).
 const GHOST_INSTANCES: u32 = 2u * MAX_BODY_V;
 
@@ -327,16 +344,25 @@ fn vs_ghost(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
     let lp = vec2<f32>(ghost_f(g + 56u + 2u * k), ghost_f(g + 57u + 2u * k));
     let k1 = min(k + 1u, n - 1u);
     let lp1 = vec2<f32>(ghost_f(g + 56u + 2u * k1), ghost_f(g + 57u + 2u * k1));
-    // Cada peça deriva para o seu lado (um hash do agente e do resíduo),
-    // roda um pouco, encolhe e escurece até desaparecer.
+    // Cada peça solta-se, roda um pouco e é LEVADA PELA CORRENTE; não encolhe:
+    // desaparece de repente, cada uma na sua altura (ao acaso, entre 35% e
+    // 100% da duração). Na corrente: segue a água desde o sítio onde estava (em
+    // quatro troços, com a velocidade de agora em cada ponto), mais um
+    // pequeno desvio próprio (um hash do agente e do resíduo) para as peças
+    // se separarem mesmo em água parada.
     var h = (ghosts_view[g + 5u] * 64u + k) * 747796405u + 2891336453u;
     h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
     h = (h >> 22u) ^ h;
     let ang = f32(h & 0xFFFu) * (6.2831853 / 4096.0);
     let ease = 1.0 - (1.0 - t) * (1.0 - t);
-    let off = vec2<f32>(cos(ang), sin(ang)) * (15.0 + 45.0 * f32((h >> 12u) & 0xFFu) / 255.0) * ease;
+    var off = vec2<f32>(cos(ang), sin(ang)) * (5.0 + 14.0 * f32((h >> 12u) & 0xFFu) / 255.0) * ease;
+    let p_rest = origin + vec2<f32>(cr * lp.x - sr * lp.y, sr * lp.x + cr * lp.y);
+    for (var i = 0; i < 4; i++) {
+        off += water_at(p_rest + off) * (0.25 * age * GHOST_DT);
+    }
     let spin = (f32((h >> 20u) & 0xFFu) / 255.0 - 0.5) * 3.0 * t;
-    let fade = 1.0 - t * t;
+    let fade = 1.0;
+    if (t > 0.35 + 0.65 * f32((h >> 4u) & 0xFFu) / 255.0) { return o; }
     let cs = cos(spin);
     let sn = sin(spin);
     let seg_l = lp1 - lp;
@@ -348,12 +374,12 @@ fn vs_ghost(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
     let c = corners[vi];
     let r_base = TUBE_FAT * (0.9 + 3.0 * pow(aa_props_view[aa].volume / 130.0, 1.4));
-    let tone = mix(1.0, 0.4, t);
+    let tone = mix(1.0, 0.75, t);
     let l = length(seg);
     let e = select(vec2<f32>(1.0, 0.0), seg / l, l > 1e-4);
     var w = pk;
     if (!glyph) {
-        let r_tube = select(r_base, 0.9, organ == ORGAN_LINKER) * fade * detail_fat();
+        let r_tube = select(r_base, 0.9, organ == ORGAN_LINKER) * select(1.0, PROTEASE_STALK, organ == ORGAN_PROTEASE) * fade * detail_fat();
         let nn = vec2<f32>(-e.y, e.x);
         let rq = r_tube * TUBE_SHADOW;
         w = pk + e * select(-rq, l + rq, c.x > 0.0) + nn * (c.y * rq);
@@ -362,7 +388,7 @@ fn vs_ghost(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         o.tangent = seg;
         o.core_phase = vec2<f32>(r_tube, 0.0);
         o.organ = organ;
-        o.sprite = select(0u, 0x100u | (aa % SPRITE_COLS_U), organ != ORGAN_LINKER);
+        o.sprite = select(0u, 0x100u | aa, organ != ORGAN_LINKER);
         o.color = class_color(aa) * tone;
     } else {
         var phase = 0.0;
@@ -544,7 +570,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
         // ORGAN_SCALE desceu na mesma proporção, os órgãos ficam do mesmo tamanho.)
         r_world = TUBE_FAT * (0.9 + 3.0 * pow(aa_props_view[aa].volume / 130.0, 1.4));
         col = class_color(aa);
-        sprite_col = aa % SPRITE_COLS_U;
+        sprite_col = aa;
         let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
         if (oc != 0u) {
             organ = (oc & 0x1Fu) - 1u;
@@ -657,6 +683,9 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
         // A espessura é a do resíduo k sem o aumento dos órgãos.
         var r_tube = r_world;
         if (organ != NO_ORGAN) { r_tube /= ORGAN_SCALE; }
+        // O troço por baixo de uma protease é fino (um pedúnculo): o que se
+        // vê é a bola com os espigões, não um chouriço vermelho.
+        if (organ == ORGAN_PROTEASE) { r_tube *= PROTEASE_STALK; }
         r_tube *= detail_fat();
         var b = centre;
         if (k + 1u < a.body_len) {
@@ -959,22 +988,23 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
         // TUBO: cápsula com sombreado de cilindro (centro claro, bordas escuras).
         let r_t = in.core_phase.x;
         let dd = seg_dist(in.local, vec2<f32>(0.0), in.tangent);
-        if (dd > r_t) {
-            // Fora do tubo: a sombra (só nos troços do corpo).
-            let x = (dd - r_t) / (r_t * (TUBE_SHADOW - 1.0));
-            if ((in.sprite & 0x100u) == 0u || x >= 1.0) { discard; }
-            return vec4<f32>(0.0, 0.0, 0.0, SHADOW * (1.0 - x) * (1.0 - x));
-        }
         if ((in.sprite & 0x100u) != 0u) {
-            // Troço de aminoácido: a cápsula do atlas esticada ao troço.
+            // Troço de aminoácido: o sprite do seu tipo esticado ao troço. A
+            // FORMA é a do sprite (cada tipo tem as suas deformações, que
+            // saem um pouco da cápsula); fora dela, a sombra de contacto.
             let l = length(in.tangent);
             let e = select(vec2<f32>(1.0, 0.0), in.tangent / l, l > 1e-4);
             let nn = vec2<f32>(-e.y, e.x);
-            let sc = vec2<f32>(2.0 / (l + 2.0 * r_t), 1.0 / r_t);
-            let q = vec2<f32>((dot(in.local, e) + r_t) * sc.x - 1.0, dot(in.local, nn) * sc.y);
-            let s = sprite(SPRITE_ROW_AMINO, f32(in.sprite & 0xFFu), q, vec2<f32>(dot(tdx, e), dot(tdx, nn)) * sc, vec2<f32>(dot(tdy, e), dot(tdy, nn)) * sc);
-            return vec4<f32>(sem_color(in.color, s.x), 1.0);
+            let sc = vec2<f32>(2.0 / (l + 2.0 * r_t), 1.0 / r_t) / AMINO_MARGIN;
+            let q = vec2<f32>((dot(in.local, e) - 0.5 * l) * sc.x, dot(in.local, nn) * sc.y);
+            let aa = in.sprite & 0xFFu;
+            let s = sprite(SPRITE_ROW_AMINO + f32(aa / SPRITE_COLS_U), f32(aa % SPRITE_COLS_U), q, vec2<f32>(dot(tdx, e), dot(tdx, nn)) * sc, vec2<f32>(dot(tdy, e), dot(tdy, nn)) * sc);
+            if (s.y >= 0.5) { return vec4<f32>(sem_color(in.color, s.x), 1.0); }
+            let x = max(dd - r_t, 0.0) / (r_t * (TUBE_SHADOW - 1.0));
+            if (x >= 1.0) { discard; }
+            return vec4<f32>(0.0, 0.0, 0.0, SHADOW * (1.0 - x) * (1.0 - x));
         }
+        if (dd > r_t) { discard; }
         let x = dd / r_t;
         let shade = sqrt(max(1.0 - x * x, 0.0));
         let c = in.color * (0.35 + 0.65 * shade) + vec3<f32>(0.18) * pow(shade, 8.0);

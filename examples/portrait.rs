@@ -54,7 +54,9 @@ fn main() {
         let centre = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5];
         cap.view.focus.set(slot as u32);
         cap.view.focus_offset.set([centre[0] - a.pos_x, centre[1] - a.pos_y]);
-        let rgba = cap.render(&gpu, &w, &Camera { center: centre, zoom: size as f32 / side }, 0, 0.0);
+        // BRIGHT: brilho dos monómeros (0 = sem eles, para ilustrações limpas).
+        let bright: f32 = std::env::var("BRIGHT").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let rgba = cap.render(&gpu, &w, &Camera { center: centre, zoom: size as f32 / side }, 0, bright);
         let file = format!("{out}_{i}.png");
         cap.save_png(&rgba, std::path::Path::new(&file)).unwrap();
         println!("{file}: agente {} com {} resíduos, {n} órgãos de {kinds} tipos", a.id, a.body_len);

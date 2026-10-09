@@ -5,3 +5,4 @@
 /terreno*.png
 /saves
 /dist
+__pycache__/

@@ -15,7 +15,10 @@
 @group(0) @binding(7) var sprites_tex: texture_2d<f32>;
 @group(0) @binding(8) var sprites_samp: sampler;
 const SPRITE_COLS: f32 = 9.0;
-const SPRITE_ROWS: f32 = 27.0;
+const SPRITE_ROWS: f32 = 32.0;
+// Monómeros como moléculas: linha dos ativados (com a cauda de três fosfatos)
+// e dos gastos (um fosfato); a coluna é o canal (A, U, G, C).
+const SPRITE_ROW_MONOMER: f32 = 27.0;
 const SPRITE_ROW_PEBBLE: f32 = 25.0;
 const SPRITE_ROW_ROCK: f32 = 26.0;
 // Raio (células) do sprite de um grão de entulho (vezes o seu tamanho) e de
@@ -124,7 +127,7 @@ struct Soup {
 
 // Densidade de monómeros (por célula de área) no ponto pc (em células),
 // somando os discos das células à volta. A rocha não tem monómeros.
-fn soup_at(pc: vec2<f32>, radius: f32) -> Soup {
+fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     var s: Soup;
     s.act = vec4<f32>(0.0);
     s.spent = vec4<f32>(0.0);
@@ -153,9 +156,21 @@ fn soup_at(pc: vec2<f32>, radius: f32) -> Soup {
                         var sum = 0.0;
                         for (var k = 0u; k < shown; k++) {
                             let d = pc - (origin + dot_pos(cell, ch * 2u + st, k));
-                            sum += max(exp(-dot(d, d) * inv_2s2) - floor_g, 0.0);
+                            // MOLÉCULA: o sprite do nucleótido, rodado por um
+                            // hash; pesa pela máscara e pelo relevo.
+                            if (dot(d, d) < r * r) {
+                                let h = dot_hash(cell * 131u + (ch * 2u + st) * 7919u + k * 104729u + 5u);
+                                let ang = f32(h & 0xFFFu) * (6.2831853 / 4096.0);
+                                let cs = cos(ang);
+                                let sn = sin(ang);
+                                let q = vec2<f32>(d.x * cs - d.y * sn, d.x * sn + d.y * cs) / r;
+                                let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
+                                let g = px / r;
+                                let t = textureSampleGrad(sprites_tex, sprites_samp, vec2<f32>((f32(ch) + 0.5) / SPRITE_COLS, (SPRITE_ROW_MONOMER + f32(st) + 0.5) / SPRITE_ROWS) + clamp(q, vec2<f32>(-0.98), vec2<f32>(0.98)) * sc, vec2<f32>(g, 0.0) * sc, vec2<f32>(0.0, g) * sc);
+                                sum += step(0.5, t.g) * (0.3 + 0.9 * t.r);
+                            }
                         }
-                        let dens = sum / (1.0 - floor_g) * norm * f32(count) / f32(max(shown, 1u));
+                        let dens = sum * f32(count) / f32(max(shown, 1u));
                         if (st == 0u) { s.act[ch] += dens; } else { s.spent[ch] += dens; }
                     }
                 }
@@ -299,7 +314,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     let pixel_cells = 1.0 / (view.zoom * f32(WORLD_UNITS_PER_CELL));
     let dots = (1.0 - smoothstep(DOTS_PIXEL_FULL, DOTS_PIXEL_NONE, pixel_cells)) * step(1e-4, view.coc_radius);
     if (dots > 0.0 && view.view_mode <= 5u) {
-        let soup = soup_at(world / f32(WORLD_UNITS_PER_CELL), view.coc_radius);
+        let soup = soup_at(world / f32(WORLD_UNITS_PER_CELL), view.coc_radius, pixel_cells);
         act = mix(act, soup.act, dots);
         spent = mix(spent, soup.spent, dots);
     }
