@@ -337,8 +337,8 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             let cell = floor(p.xy / 13.0);
             let hs = hash3(vec3<u32>(vec2<u32>(vec2<i32>(cell) + vec2<i32>(32768)), 17u));
             let speck = step(0.8, hs.z) * (1.0 - smoothstep(0.2, 1.0, length(p.xy / 13.0 - cell - 0.1 - 0.8 * hs.xy) * (5.0 + 6.0 * hs.x)));
-            albedo = max(albedo, vec3<f32>(0.075 + 0.035 * grain + 0.16 * speck));
-            albedo = max(albedo, vec3<f32>(0.11, 0.105, 0.1) * smoothstep(0.5, 6.0, s.g));
+            albedo = max(albedo, vec3<f32>(0.2 + 0.06 * grain + 0.2 * speck));
+            albedo = max(albedo, vec3<f32>(0.36, 0.35, 0.34) * smoothstep(0.5, 6.0, s.g));
         } else {
             // A peça é a mesma forma para cima e para baixo do seu meio: onde
             // um vizinho já não tem peça, a superfície fecha no meio.
@@ -359,7 +359,16 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             let inward = -n.xy / max(length(n.xy), 1e-4) * (2.5 * e * wall);
             let uv = region_uv(p.xy + inward);
             albedo = textureSampleLevel(color_tex, samp, uv, 0.0).rgb;
-            if (on_world) { albedo = textureSampleLevel(world_color, samp, uv, 0.0).rgb; }
+            // ALBEDO NIVELADO: na vista normal as pedras e os monómeros são
+            // muito mais escuros do que os bichos (para estes sobressaírem);
+            // numa micrografia tudo é o mesmo material, e o claro-escuro vem
+            // só da forma. Sobe-se o do mundo e baixa-se um pouco o dos agentes.
+            albedo *= 0.8;
+            if (on_world) {
+                let wc = textureSampleLevel(world_color, samp, uv, 0.0).rgb;
+                let wl = max(max(wc.r, wc.g), max(wc.b, 1e-3));
+                albedo = wc * (mix(wl, 0.5, 0.75) / wl);
+            }
         }
         let ndv = clamp(dot(n, -dir), 0.0, 1.0);
         // MICROSCÓPIO ELETRÓNICO: as superfícies de lado para o observador
@@ -409,6 +418,28 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     return mix(prev, vec4<f32>(max(col, vec3<f32>(0.0)), depth), u.screen.w);
 }
 
+// AgX (aproximação mínima de B. Wrensch): entra luz linear, sai o valor de
+// ecrã. Mistura um pouco os canais, passa a logaritmo (16,5 stops) e aplica
+// uma curva em S.
+fn agx(lin: vec3<f32>) -> vec3<f32> {
+    let m = mat3x3<f32>(
+        vec3<f32>(0.842479062253094, 0.0423282422610123, 0.0423756549057051),
+        vec3<f32>(0.0784335999999992, 0.878468636469772, 0.0784336),
+        vec3<f32>(0.0792237451477643, 0.0791661274605434, 0.879142973793104));
+    let inv = mat3x3<f32>(
+        vec3<f32>(1.19687900512017, -0.0528968517574562, -0.0529716355144438),
+        vec3<f32>(-0.0980208811401368, 1.15190312990417, -0.0980434501171241),
+        vec3<f32>(-0.0990297440797205, -0.0989611768448433, 1.15107367264116));
+    let lo = -12.47393;
+    let hi = 4.026069;
+    var v = m * lin;
+    v = (clamp(log2(max(v, vec3<f32>(1e-10))), vec3<f32>(lo), vec3<f32>(hi)) - lo) / (hi - lo);
+    let v2 = v * v;
+    let v4 = v2 * v2;
+    v = 15.5 * v4 * v2 - 40.14 * v4 * v + 31.96 * v4 - 6.868 * v2 * v + 0.4298 * v2 + 0.1191 * v - 0.00232;
+    return clamp(inv * v, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 @fragment
 fn fs_present(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     // SUPERAMOSTRAGEM: a imagem acumulada tem opts.w vezes o lado do ecrã;
@@ -421,8 +452,9 @@ fn fs_present(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         }
     }
     c = c / f32(ss * ss) * u.photo.x;
-    // Curva suave nos claros, para as arestas não queimarem.
-    return vec4<f32>(c / (1.0 + 0.25 * c), 1.0);
+    // Curva AgX: os claros comprimem-se e PERDEM COR a caminho do branco, em
+    // vez de cada canal saturar por si (que dava amarelos e cianos crus).
+    return vec4<f32>(agx(pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.2))), 1.0);
 }
 "#;
 
