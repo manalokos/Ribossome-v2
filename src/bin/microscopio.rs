@@ -71,7 +71,7 @@ const REGION_PER_DIST: f32 = 1.7;
 /// Raio de uma molécula de monómero, em células (o desenho normal usa mais).
 const MOLECULE_R: f32 = 0.1;
 /// Raio do desfoque do chão, em unidades do mundo.
-const GROUND_BLUR: f32 = 24.0;
+const GROUND_BLUR: f32 = 12.0;
 
 const MARCH_WGSL: &str = r#"
 struct U {
@@ -225,7 +225,7 @@ fn ground_at(xy: vec2<f32>) -> f32 {
 // Onde assenta um AGENTE: o chão e o cimo das pedras com o desfoque largo
 // (azul e alfa da textura do chão). Não segue o chão de cada ponto: é isso
 // que mantém as formas dos órgãos inteiras.
-const AGENT_SPREAD: f32 = 1.8;
+const AGENT_SPREAD: f32 = 3.6;
 fn agent_base(xy: vec2<f32>, g: f32) -> f32 {
     let uv = clamp(region_uv(xy), vec2<f32>(0.0), vec2<f32>(1.0));
     let t = textureSampleLevel(ground_tex, samp, uv, 0.0);
@@ -618,8 +618,12 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             // fica um degradé largo em vez de um halo de borda marcada a
             // duas distâncias fixas.
             let jit = fract(rnd2.y * 13.7 + f32(k) * 0.6180339);
-            let rr = mix(4.0, 80.0, jit * jit);
-            occ += clamp((top_at(p.xy + vec2<f32>(cos(a), sin(a)) * rr) - zref) / rr, 0.0, 1.5);
+            // (Muitas vezes MUITO perto: é o que dá a sombra de contacto às
+            // coisas pequenas e baixas, como as moléculas pousadas no chão.)
+            let rr = mix(1.2, 80.0, jit * jit * jit);
+            // (De muito perto conta menos: senão as próprias moléculas, que são
+            // pequenas e juntas, ficavam quase pretas.)
+            occ += clamp((top_at(p.xy + vec2<f32>(cos(a), sin(a)) * rr) - zref) / rr, 0.0, 1.5) * mix(0.45, 1.0, smoothstep(1.2, 8.0, rr));
         }
         var ao = 1.0 / (1.0 + 0.8 * occ);
         // Na metade de BAIXO de uma peça isto contava o cimo da própria peça
