@@ -151,6 +151,14 @@ struct AgentVsOut {
 
 // Classes (v3): alifáticos A I L M V, aromáticos F W Y, polares S T N Q,
 // C à parte, positivos K R H, negativos D E, G e P especiais.
+// TOM PELA ENERGIA (vista química): energia por resíduo. Com pouca o agente
+// escurece (ate 0,65, para continuar a ver-se); a partir de 1 por residuo vai
+// clareando ate 1,25 (com 4 por residuo).
+fn energy_tone(a: Agent) -> f32 {
+    let e = a.energy / max(f32(a.body_len), 1.0);
+    return mix(0.65, 1.0, clamp(e, 0.0, 1.0)) + 0.25 * clamp((e - 1.0) / 3.0, 0.0, 1.0);
+}
+
 fn class_color(aa: u32) -> vec3<f32> {
     switch aa {
         case 0u, 7u, 9u, 10u, 17u: { return vec3<f32>(0.72, 0.72, 0.62); } // A I L M V
@@ -352,7 +360,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
             // Pouca energia = mais escuro, e a vítima de uma protease a
             // vermelho, como no desenho de perto.
             if (view.signal_view == 0u || view.signal_view == 4u) {
-                colr *= mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
+                colr *= energy_tone(a);
             }
             // O mínimo de espessura cresce aos poucos a partir do limiar
             // (onde o desenho detalhado acaba com tubos finos) até 1 píxel
@@ -537,7 +545,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
         }
     }
     // Pouca energia = mais escuro (só na vista química).
-    let dim = mix(0.35, 1.0, clamp(a.energy / max(f32(a.body_len), 1.0), 0.0, 1.0));
+    let dim = energy_tone(a);
     o.color = select(col, col * dim, view.signal_view == 0u || view.signal_view == 4u);
     if (flash.x >= 0.0 && view.signal_view == 0u) { o.color = flash; }
     if (!glyph && !naked) {
@@ -804,7 +812,9 @@ fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
         qw = tail_curve(p0, p1, p2, p3, dw * link, 3.0 * f32(m) / cnt);
         pw = tail_curve(p0, p1, p2, p3, dw * link, 3.0 * f32(m + 1u) / cnt);
     }
-    return capsule_vertex(vi, qw, pw, max(RNA_RADIUS, 1.0 / view.zoom), base_color(genome_base(slot, base_i)) * 0.85);
+    // (As caudas de RNA mudam de tom com a energia, como o corpo.)
+    let tone = select(1.0, energy_tone(a), view.signal_view == 0u || view.signal_view == 4u);
+    return capsule_vertex(vi, qw, pw, max(RNA_RADIUS, 1.0 / view.zoom), base_color(genome_base(slot, base_i)) * 0.85 * tone);
 }
 
 // Distância de p ao segmento a–b.
