@@ -303,10 +303,10 @@ const ROCK_SIGMA: f32 = 0.5;
 const PEBBLE_SIGMA: f32 = 0.17;
 
 // Tremor das moléculas: amplitude (células, por eixo), rotação (radianos)
-// e ritmo (novos sorteios por passo da simulação: 0,15 = um a cada ~7 passos).
+// e ritmo (novos sorteios por passo da simulação: 1 = um em cada passo).
 const MOL_JITTER: f32 = 0.1;
 const MOL_SPIN: f32 = 0.7;
-const MOL_JITTER_RATE: f32 = 0.15;
+const MOL_JITTER_RATE: f32 = 1.0;
 // Até onde (em células) uma molécula solta paira acima do fundo.
 const MOL_LIFT: f32 = 0.15;
 
