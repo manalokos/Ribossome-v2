@@ -367,6 +367,123 @@ fn colored_seq(ui: &mut egui::Ui, items: impl Iterator<Item = (char, egui::Color
     });
 }
 
+/// Cor de um órgão no mapa do corpo: a mesma do desenho no mundo
+/// (`organ_lod_color` em agents_view.wgsl).
+fn organ_color(t: u8) -> egui::Color32 {
+    let c = match t {
+        0 => [235, 235, 235],
+        1 => [217, 100, 100],
+        2 | 8 => [115, 255, 115],
+        3 | 9 => [255, 242, 102],
+        4 => [255, 217, 51],
+        5 => [217, 230, 255],
+        6 => [153, 230, 255],
+        7 => [205, 190, 150],
+        10 => [89, 242, 89],
+        11 => [230, 51, 51],
+        12 => [38, 230, 204],
+        13 | 17 => [255, 140, 38],
+        14 => [230, 199, 38],
+        15 => [200, 170, 255],
+        16 => [184, 209, 255],
+        18 => [217, 153, 77],
+        19 => [242, 89, 217],
+        20 => [130, 130, 130],
+        21 => [242, 204, 230],
+        _ => [190, 190, 190],
+    };
+    egui::Color32::from_rgb(c[0], c[1], c[2])
+}
+
+/// MAPA DO CORPO: a cadeia esticada da ponta N (esquerda) à ponta C, um
+/// ponto por resíduo e um disco com o símbolo por órgão, e por baixo uma
+/// legenda curta por peça (órgãos iguais seguidos numa só linha). A descrição
+/// completa aparece ao passar o rato, no disco ou na linha da legenda.
+fn body_map(ui: &mut egui::Ui, body: &[u8], organs: &[u16], organ_table: &[crate::life::table::OrganRow]) {
+    let info = |o: u16| {
+        let t = ((o & 0x1F) - 1) as u8;
+        (t, describe(t, ((o >> 5) & 0x7) as u8, (o >> 8) as u8, organ_table))
+    };
+    // Peças: (primeiro resíduo, quantos, código do órgão ou 0).
+    let mut parts: Vec<(usize, usize, u16)> = Vec::new();
+    for (k, &o) in organs.iter().enumerate().take(body.len()) {
+        match parts.last_mut() {
+            Some(p) if o != 0 && p.2 == o && p.0 + p.1 == k => p.1 += 1,
+            _ if o != 0 => parts.push((k, 1, o)),
+            _ => {}
+        }
+    }
+    ui.strong("Body map (N end on the left)");
+    const ORGAN_W: f32 = 3.0;
+    let total: f32 = organs.iter().take(body.len()).map(|&o| if o != 0 { ORGAN_W } else { 1.0 }).sum();
+    let width = ui.available_width();
+    let unit = (width / total.max(1.0)).min(7.0);
+    let r_organ = (unit * ORGAN_W * 0.5).clamp(4.0, 10.0);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, r_organ * 2.0 + 6.0), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let y = rect.center().y;
+    let x0 = rect.left() + (width - unit * total) * 0.5;
+    painter.line_segment([egui::pos2(x0, y), egui::pos2(x0 + unit * total, y)], egui::Stroke::new(1.5, egui::Color32::from_gray(90)));
+    let pointer = resp.hover_pos();
+    let mut hovered: Option<String> = None;
+    let mut x = x0;
+    for (k, (&aa, &o)) in body.iter().zip(organs).enumerate() {
+        let w = unit * if o != 0 { ORGAN_W } else { 1.0 };
+        let c = egui::pos2(x + w * 0.5, y);
+        if o != 0 {
+            let (t, text) = info(o);
+            let over = pointer.is_some_and(|p| (p.x - c.x).abs() <= w * 0.5);
+            painter.circle_filled(c, r_organ, organ_color(t));
+            if over {
+                painter.circle_stroke(c, r_organ + 1.5, egui::Stroke::new(1.5, egui::Color32::WHITE));
+                hovered = Some(format!("position {k}: {text}"));
+            }
+            painter.text(c, egui::Align2::CENTER_CENTER, ORGAN_SYMBOLS[t as usize], egui::FontId::monospace(r_organ * 1.35), egui::Color32::BLACK);
+        } else {
+            painter.circle_filled(c, (unit * 0.45).clamp(1.0, 3.0), aa_color(aa));
+        }
+        x += w;
+    }
+    if let Some(text) = hovered {
+        resp.on_hover_ui_at_pointer(|ui| {
+            ui.set_max_width(320.0);
+            ui.label(text);
+        });
+    }
+    if parts.is_empty() {
+        ui.label("no organs");
+        return;
+    }
+    for (k, n, o) in parts {
+        let (t, text) = info(o);
+        // "nome [aspeto]: o que faz (pormenores); mais" -> nome + a primeira frase.
+        let (name, rest) = text.split_once(" [").map_or((text.as_str(), ""), |(a, b)| (a, b.split_once("]: ").map_or("", |x| x.1)));
+        let short = rest.split(['(', ';']).next().unwrap_or("").trim().trim_end_matches(',');
+        let where_ = if n > 1 { format!("×{n}, positions {k}–{}", k + n - 1) } else { format!("position {k}") };
+        ui.horizontal_top(|ui| {
+            let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            ui.painter().circle_filled(r.center(), 8.0, organ_color(t));
+            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, ORGAN_SYMBOLS[t as usize], egui::FontId::monospace(11.0), egui::Color32::BLACK);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                ui.horizontal_wrapped(|ui| {
+                    ui.strong(name);
+                    ui.weak(where_);
+                });
+                if !short.is_empty() {
+                    ui.small(short);
+                }
+            });
+        })
+        .response
+        .on_hover_ui(|ui| {
+            ui.set_max_width(320.0);
+            ui.label(&text);
+        });
+    }
+    ui.small("hover a piece for the full description; left/right = sides of the chain from N to C");
+}
+
 /// Volume médio dos 20 aminoácidos (igual a CAP_VOLUME_REF no shader).
 const CAP_VOLUME_REF: f32 = 141.26;
 
@@ -524,29 +641,7 @@ pub fn panel(
                     }
                 }),
             );
-            let list: Vec<String> = d
-                .organs
-                .iter()
-                .enumerate()
-                .filter(|(_, o)| **o != 0)
-                .map(|(k, &o)| {
-                    let t = ((o & 0x1F) - 1) as u8;
-                    format!(
-                        "{}  position {k}: {}",
-                        ORGAN_SYMBOLS[t as usize],
-                        describe(t, ((o >> 5) & 0x7) as u8, (o >> 8) as u8, organ_table)
-                    )
-                })
-                .collect();
-            if list.is_empty() {
-                ui.label("no organs");
-            } else {
-                ui.strong("Organs (symbol in the protein, position: what it does)");
-                for l in list {
-                    ui.label(l);
-                }
-                ui.small("position 0 = N end (start of the protein); left/right = sides of the chain from N to C");
-            }
+            body_map(ui, &d.body, &d.organs, organ_table);
         }
     });
     ins.open = open;
