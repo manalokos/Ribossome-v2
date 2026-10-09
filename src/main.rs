@@ -1611,7 +1611,8 @@ impl Running {
             free = ui::draw(root, &mut self.ui, &mut self.world, &mut self.profiler, &mut self.inspector);
             // MICROSCÓPIO: a barra de dados e o painel por cima da vista.
             if let (true, Some(r), Some(scope)) = (self.micro_t >= 0.6, free, self.scope.as_mut()) {
-                micro_asked = ribossome::microscope::interface(root, r, scope, &mut self.scope_panel, None, false, "");
+                let (recording, status) = (self.ui.rec, self.ui.rec_info.clone());
+                micro_asked = ribossome::microscope::interface(root, r, scope, &mut self.scope_panel, None, recording, &status);
             }
             // ECRÃ DE ENTRADA por cima de tudo, a desvanecer no fim.
             if let Some((tex, t0)) = &mut self.splash {
@@ -1808,6 +1809,11 @@ impl Running {
             let pics = ribossome::tree_view::portraits(&self.gpu, &self.world, &self.lineages);
             let html = ribossome::tree_view::page(&self.lineages, &self.world, &format!("Ribossome: lineage tree at epoch {epoch}"), Some(&pics));
             self.write_page(&format!("arvore_{epoch}.html"), html, "tree");
+        }
+        // (Os botões de foto e de vídeo do painel do microscópio são os do simulador.)
+        self.ui.photo_now |= micro_asked.photo;
+        if micro_asked.rec {
+            self.ui.rec = !self.ui.rec;
         }
         let n_steps = self.adaptive_steps();
         // ZOOM SUAVE: em cada frame aplica-se uma parte do que a roda pediu.

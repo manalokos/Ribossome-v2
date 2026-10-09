@@ -2027,16 +2027,13 @@ pub fn interface(root: &mut egui::Ui, screen: egui::Rect, s: &mut Scope, panel: 
                 s.orbit.focus_shift = 0.0;
             }
         });
-        if s.embedded {
-            ui.label(egui::RichText::new("Photo and video: the usual buttons of the simulator record this view while it is on screen.").small().weak());
-        }
-        if !s.embedded {
+        {
         ui.horizontal(|ui| {
-            if ui.button("📷 Photo").on_hover_text("saves the image with the data bar to saves/capturas (key P)").clicked() {
+            if ui.button("📷 Photo").on_hover_text("saves this view to saves/capturas").clicked() {
                 asked.photo = true;
             }
             let label = if recording { egui::RichText::new("■ Stop").color(egui::Color32::from_rgb(255, 90, 80)) } else { egui::RichText::new("● Rec") };
-            if ui.button(label).on_hover_text("records the image with the data bar to an MP4 in saves/videos (key V; needs ffmpeg on the PATH)").clicked() {
+            if ui.button(label).on_hover_text("records this view to an MP4 in saves/videos (needs ffmpeg on the PATH)").clicked() {
                 asked.rec = true;
             }
         });
