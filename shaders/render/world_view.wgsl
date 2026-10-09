@@ -581,15 +581,15 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
             // monte é o máximo delas e é contínuo em todo o lado.
             vol = vec2<f32>(1.2 * pebble_h * cell, -30.0);
         }
-        // Uma molécula em cima de uma pedra é uma bossa pousada nela; na água
-        // livre é um grãozinho a pairar.
+        // As MOLÉCULAS vão à parte (azul e alfa), com o seu próprio intervalo
+        // acima de onde assentam: o microscópio pousa-as no cimo das pedras
+        // ou no relevo suave do entulho. Na mesma camada das pedras, a
+        // fronteira entre uma pedra e uma molécula era uma parede a pique, e
+        // uma molécula em cima de uma pedra deformava-a ao tremer.
+        var mol = vec2<f32>(0.0);
         if (mol_h > 0.0 && view.monomer_brightness > 0.0 && view.height_pass == 1u) {
-            if (vol.x > 0.0) {
-                vol.x += 0.7 * mol_h * cell;
-            } else {
-                let mid = 3.0 + MOL_LIFT * mol_lift * cell;
-                vol = vec2<f32>(mid + mol_h * cell, mid - mol_h * cell);
-            }
+            let mid = 3.0 + MOL_LIFT * mol_lift * cell;
+            mol = vec2<f32>(mid + mol_h * cell, mid - mol_h * cell);
         }
         // Modo 2: quanto terreno há aqui e o cimo das pedras. O microscópio
         // desfoca os dois: o primeiro dá o relevo suave do chão, o segundo a
@@ -597,7 +597,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         if (view.height_pass == 2u) {
             return vec4<f32>(max(rock_m, 0.4 * rubble_m), max(vol.x, 0.0), 0.0, 1.0);
         }
-        return vec4<f32>(vol, 0.0, 1.0);
+        return vec4<f32>(vol, mol);
     }
     let rock = (vec3<f32>(0.30, 0.27, 0.24) + 0.08 * tone) * rock_tex;
     // A rocha soma a luz que lhe CHEGA (a da célula de cima): a

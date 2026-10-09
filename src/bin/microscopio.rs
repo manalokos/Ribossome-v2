@@ -209,6 +209,8 @@ struct Surf {
     a: vec2<f32>,
     b: vec2<f32>,
     w: vec2<f32>,
+    // As moléculas (monómeros), pousadas nas pedras ou no relevo suave.
+    m: vec2<f32>,
     g: f32,
 }
 const NONE: vec2<f32> = vec2<f32>(-1000.0, 1000.0);
@@ -219,6 +221,7 @@ fn surf(xy: vec2<f32>) -> Surf {
     s.a = NONE;
     s.b = NONE;
     s.w = NONE;
+    s.m = NONE;
     let uv = region_uv(xy);
     if (all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0))) {
         let c = vec2<i32>(uv * vec2<f32>(textureDimensions(vol_tex)));
@@ -226,12 +229,13 @@ fn surf(xy: vec2<f32>) -> Surf {
         let tb0 = textureLoad(vol_tex, c, 0).rg * u.lens.w;
         if (tb.x > 0.25 && abs(tb.x - tb0.x) + abs(tb.y - tb0.y) >= 0.02) { s.b = s.g + support_at(xy) + tb; }
         let ta = textureLoad(vol_tex, c, 0).rg * u.lens.w;
-        let tw = textureLoad(world_smooth, c, 0).rg * u.lens.w;
+        let tw = textureLoad(world_smooth, c, 0) * u.lens.w;
         if (ta.x > 0.25) { s.a = s.g + support_at(xy) + ta; }
-        // Uma MOLÉCULA SOLTA (o fundo dela está no ar) assenta no relevo
-        // suave do entulho, como os agentes: senão as que caem nos intervalos
-        // entre as pedras ficavam lá no fundo, escondidas.
-        if (tw.x > 0.25) { s.w = vec2<f32>(s.g + tw.x, s.g + tw.y) + select(0.0, support_at(xy), tw.y > 0.0); }
+        if (tw.x > 0.25) { s.w = vec2<f32>(s.g + tw.x, s.g + tw.y); }
+        // Uma MOLÉCULA assenta no cimo da pedra que tiver por baixo ou, nos
+        // intervalos entre pedras, no relevo suave do entulho (como os
+        // agentes): senão ficava lá no fundo, escondida.
+        if (tw.z > 0.25) { s.m = max(s.g + support_at(xy), s.w.x) + tw.zw; }
     }
     return s;
 }
@@ -300,7 +304,7 @@ fn lerp_low(t: texture_multisampled_2d<f32>, uv: vec2<f32>, g: f32) -> vec2<f32>
 }
 
 // O mesmo para o volume do mundo (já alisado, uma amostra por texel).
-fn lerp_world(uv: vec2<f32>, g: f32, support: f32) -> vec2<f32> {
+fn lerp_world(uv: vec2<f32>, g: f32, molecules: bool) -> vec2<f32> {
     let dim = vec2<f32>(textureDimensions(world_smooth));
     let x = uv * dim - 0.5;
     let c = vec2<i32>(floor(x));
@@ -310,10 +314,9 @@ fn lerp_world(uv: vec2<f32>, g: f32, support: f32) -> vec2<f32> {
     var wsum = 0.0;
     for (var k = 0; k < 4; k++) {
         let o = vec2<i32>(k & 1, k >> 1);
-        var v = textureLoad(world_smooth, clamp(c + o, vec2<i32>(0), hi), 0).rg;
+        let v4 = textureLoad(world_smooth, clamp(c + o, vec2<i32>(0), hi), 0);
+        let v = select(v4.xy, v4.zw, molecules);
         let w = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1) * step(0.25, v.x);
-        // (Molécula solta: sobe para o relevo suave do entulho.)
-        if (v.y > 0.0) { v += vec2<f32>(support); }
         sum += v * w;
         wsum += w;
     }
@@ -392,7 +395,8 @@ fn fs_blur_h(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 @fragment
 fn fs_blur_v(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let c = vec2<i32>(pos.xy);
-    let v0 = textureLoad(world_vol, c, 0).rg;
+    let v4 = textureLoad(world_vol, c, 0);
+    let v0 = v4.rg;
     var out = v0;
     if (stone(v0) > 0.5) {
         let b = blur_dir(c, vec2<i32>(0, 1));
@@ -401,7 +405,8 @@ fn fs_blur_v(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         // b.z / b.w: quanto da vizinhança (com peça) é degrau.
         out = mix(v0, soft, smoothstep(0.01, 0.10, b.z / max(b.w, 1e-4)) * step(0.05, b.w));
     }
-    return vec4<f32>(out, 0.0, 1.0);
+    // (As moléculas passam como vieram, no azul e no alfa.)
+    return vec4<f32>(out, v4.ba);
 }
 
 fn surf_smooth(xy: vec2<f32>) -> Surf {
@@ -410,11 +415,13 @@ fn surf_smooth(xy: vec2<f32>) -> Surf {
     s.a = NONE;
     s.b = NONE;
     s.w = NONE;
+    s.m = NONE;
     let uv = region_uv(xy);
     if (all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0))) {
         s.b = lerp_low(low_vol, uv, s.g + support_at(xy));
         s.a = lerp_volume(vol_tex, uv, s.g + support_at(xy));
-        s.w = lerp_world(uv, s.g, support_at(xy));
+        s.w = lerp_world(uv, s.g, false);
+        s.m = lerp_world(uv, max(s.g + support_at(xy), s.w.x), true);
     }
     return s;
 }
@@ -424,13 +431,13 @@ fn within(z: f32, v: vec2<f32>, eps: f32) -> bool {
 }
 
 fn solid(p: vec3<f32>, s: Surf) -> bool {
-    return p.z <= s.g || within(p.z, s.a, 0.0) || within(p.z, s.b, 0.0) || within(p.z, s.w, 0.0);
+    return p.z <= s.g || within(p.z, s.a, 0.0) || within(p.z, s.b, 0.0) || within(p.z, s.w, 0.0) || within(p.z, s.m, 0.0);
 }
 
 // A superfície mais alta no ponto: para a oclusão.
 fn top_at(xy: vec2<f32>) -> f32 {
     let s = surf_smooth(xy);
-    return max(s.g, max(max(s.a.x, s.b.x), s.w.x));
+    return max(max(s.g, s.m.x), max(max(s.a.x, s.b.x), s.w.x));
 }
 
 @fragment
@@ -496,7 +503,8 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         let on_top = da < 1e8 && da <= db;
         let on_low = !on_top && db < 1e8;
         let on_agent = on_top || on_low;
-        let on_world = !on_agent && within(p.z, s.w, 0.06);
+        let on_mol = !on_agent && within(p.z, s.m, 0.06);
+        let on_world = !on_agent && (on_mol || within(p.z, s.w, 0.06));
         let on_ground = !on_agent && !on_world;
         var n = vec3<f32>(0.0, 0.0, 1.0);
         // Altura a que se mede a oclusão (ver mais abaixo).
@@ -522,7 +530,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         } else {
             // A peça é a mesma forma para cima e para baixo do seu meio: onde
             // um vizinho já não tem peça, a superfície fecha no meio.
-            let v = select(select(s.w, s.b, on_low), s.a, on_top);
+            let v = select(select(select(s.w, s.m, on_mol), s.b, on_low), s.a, on_top);
             let mid = 0.5 * (v.x + v.y);
             let upper = p.z >= mid;
             // Por baixo do meio da peça mede-se no ponto ESPELHADO, por cima:
@@ -533,7 +541,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             var offs = array<vec2<f32>, 4>(vec2<f32>(e, 0.0), vec2<f32>(-e, 0.0), vec2<f32>(0.0, e), vec2<f32>(0.0, -e));
             for (var k = 0; k < 4; k++) {
                 let q = surf_smooth(p.xy + offs[k]);
-                let qv = select(select(q.w, q.b, on_low), q.a, on_top);
+                let qv = select(select(select(q.w, q.m, on_mol), q.b, on_low), q.a, on_top);
                 d[k] = select(mid, select(qv.y, qv.x, upper), qv.x > -500.0);
             }
             n = normalize(vec3<f32>(-(d[0] - d[1]), -(d[2] - d[3]), 2.0 * e));
