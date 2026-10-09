@@ -299,7 +299,9 @@ fn signed_color(v: f32, pos: vec3<f32>, neg: vec3<f32>) -> vec3<f32> {
 // depressa pela corrente já tinha saído do enquadramento.
 fn cam_center() -> vec2<f32> {
     var c = vec2<f32>(view.center_x, view.center_y);
-    if (view.focus_slot != 0xFFFFFFFFu) {
+    // (No microscópio 3D o agente em foco desenha-se no SEU sítio, com a
+    // câmara da zona: é a camada que diz que peças são dele.)
+    if (view.focus_slot != 0xFFFFFFFFu && view.relief == 0u) {
         let f = agents_view[view.focus_slot];
         c = vec2<f32>(f.pos_x + view.focus_dx, f.pos_y + view.focus_dy);
     }

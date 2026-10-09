@@ -249,10 +249,13 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                                 s.lum += cov * t.r;
                                 s.cover += cov;
                                 let lf = f32((h >> 12u) & 0xFFu) / 255.0;
-                                let top = cov * (t.b * r + MOL_LIFT * lf);
+                                let top = cov * (t.b * r * mix(0.45, 1.3, t.r) + MOL_LIFT * lf);
                                 if (top > s.top) {
                                     s.top = top;
-                                    s.h = cov * t.b * r;
+                                    // (A forma insuflada é um calhau liso; a
+                                    // luminância do sprite, onde se veem os
+                                    // átomos, dá-lhe as bossas.)
+                                    s.h = cov * t.b * r * mix(0.45, 1.3, t.r);
                                     s.lift = lf;
                                 }
                             }
