@@ -171,6 +171,7 @@ fn region_uv(xy: vec2<f32>) -> vec2<f32> {
 fn fs_ground(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = pos.xy / u.opts.y;
     var sum = vec2<f32>(0.0);
+    var wide = vec2<f32>(0.0);
     var wsum = 0.0;
     for (var j = -4; j <= 4; j++) {
         for (var i = -4; i <= 4; i++) {
@@ -186,12 +187,28 @@ fn fs_ground(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             wsum += w;
         }
     }
-    return vec4<f32>(sum.x / wsum, sqrt(sqrt(sum.y / wsum)), 0.0, 1.0);
+    // O mesmo com um desfoque MAIS LARGO, só para os agentes: num relevo que
+    // acompanha cada pedra, os órgãos de um bicho ficavam cada um à sua cota
+    // e as formas deformavam-se. (Mais amostras, juntas: espaçadas como as
+    // de cima saltavam pedras inteiras e o relevo saía aos altos e baixos.)
+    var wide_n = 0.0;
+    for (var j = -6; j <= 6; j++) {
+        for (var i = -6; i <= 6; i++) {
+            let o = vec2<f32>(f32(i), f32(j)) / 6.0;
+            let w = exp(-2.2 * dot(o, o));
+            let vw = textureSampleLevel(height_tex, samp, uv + o * u.opts.z * AGENT_SPREAD, 0.0).rg;
+            let vw2 = vw.y * vw.y;
+            wide += w * vec2<f32>(vw.x, vw2 * vw2);
+            wide_n += w;
+        }
+    }
+    return vec4<f32>(sum.x / wsum, sqrt(sqrt(sum.y / wsum)), sqrt(sqrt(wide.y / wide_n)), wide.x / wide_n);
 }
 
 // APOIO dos agentes: o cimo das pedras, desfocado (verde da textura do chão).
 // Um bicho em cima de entulho assenta nesse relevo suave em vez de ficar
 // metido entre as pedras.
+// (Para as moléculas; os agentes usam agent_base, mais suave.)
 fn support_at(xy: vec2<f32>) -> f32 {
     let uv = clamp(region_uv(xy), vec2<f32>(0.0), vec2<f32>(1.0));
     return 1.15 * textureSampleLevel(ground_tex, samp, uv, 0.0).g;
@@ -201,6 +218,16 @@ fn ground_at(xy: vec2<f32>) -> f32 {
     let uv = clamp(region_uv(xy), vec2<f32>(0.0), vec2<f32>(1.0));
     let g = textureSampleLevel(ground_tex, samp, uv, 0.0).r;
     return GROUND_H * g * g * (3.0 - 2.0 * g);
+}
+
+// Onde assenta um AGENTE: o chão e o cimo das pedras com o desfoque largo
+// (azul e alfa da textura do chão). Não segue o chão de cada ponto: é isso
+// que mantém as formas dos órgãos inteiras.
+const AGENT_SPREAD: f32 = 3.0;
+fn agent_base(xy: vec2<f32>, g: f32) -> f32 {
+    let uv = clamp(region_uv(xy), vec2<f32>(0.0), vec2<f32>(1.0));
+    let t = textureSampleLevel(ground_tex, samp, uv, 0.0);
+    return GROUND_H * t.a * t.a * (3.0 - 2.0 * t.a) + 1.15 * t.b;
 }
 
 // O que há no ponto xy, em alturas absolutas: o volume dos agentes e o do
@@ -227,10 +254,10 @@ fn surf(xy: vec2<f32>) -> Surf {
         let c = vec2<i32>(uv * vec2<f32>(textureDimensions(vol_tex)));
         let tb = textureLoad(low_vol, c, 0).rg * u.lens.w;
         let tb0 = textureLoad(vol_tex, c, 0).rg * u.lens.w;
-        if (tb.x > 0.25 && abs(tb.x - tb0.x) + abs(tb.y - tb0.y) >= 0.02) { s.b = s.g + support_at(xy) + tb; }
+        if (tb.x > 0.25 && abs(tb.x - tb0.x) + abs(tb.y - tb0.y) >= 0.02) { s.b = agent_base(xy, s.g) + tb; }
         let ta = textureLoad(vol_tex, c, 0).rg * u.lens.w;
         let tw = textureLoad(world_smooth, c, 0) * u.lens.w;
-        if (ta.x > 0.25) { s.a = s.g + support_at(xy) + ta; }
+        if (ta.x > 0.25) { s.a = agent_base(xy, s.g) + ta; }
         if (tw.x > 0.25) { s.w = vec2<f32>(s.g + tw.x, s.g + tw.y); }
         // Uma MOLÉCULA assenta no cimo da pedra que tiver por baixo ou, nos
         // intervalos entre pedras, no relevo suave do entulho (como os
@@ -420,8 +447,8 @@ fn surf_smooth(xy: vec2<f32>) -> Surf {
     s.m = NONE;
     let uv = region_uv(xy);
     if (all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0))) {
-        s.b = lerp_low(low_vol, uv, s.g + support_at(xy));
-        s.a = lerp_volume(vol_tex, uv, s.g + support_at(xy));
+        s.b = lerp_low(low_vol, uv, agent_base(xy, s.g));
+        s.a = lerp_volume(vol_tex, uv, agent_base(xy, s.g));
         s.w = lerp_world(uv, s.g, false);
         s.m = lerp_world(uv, max(s.g + support_at(xy), s.w.x), true);
     }
