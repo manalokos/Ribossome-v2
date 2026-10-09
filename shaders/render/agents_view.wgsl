@@ -275,7 +275,7 @@ fn organ_extent(t: u32) -> f32 {
         case ORGAN_STORAGE: { return 1.9; }
         case ORGAN_PHOTOSYSTEM: { return 1.45; }
         case ORGAN_HOLDFAST: { return 1.4; }
-        case ORGAN_PROTEASE: { return 2.1; }
+        case ORGAN_PROTEASE: { return 2.8; }
         case ORGAN_ANCHOR: { return 1.4; }
         case ORGAN_BIAS, ORGAN_AGE_BIAS: { return 1.1; }
         case NO_ORGAN: { return 1.0; }
@@ -1004,8 +1004,9 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             let gap = 2.0 * half / count;
             let ang = atan2(u, v);
             let hub = core * 0.62;
-            // Cada espigão é um sprite (ponta para fora), com a base enterrada no corpo.
-            let a0 = hub * 0.7;
+            // Cada espigão é um sprite (ponta para fora), desenhado POR CIMA do
+            // corpo: nasce a meio dele.
+            let a0 = hub * 0.45;
             let wb = core * 0.2;
             let g = max(length(uv_x), length(uv_y)) * core;
             var spike_l = -1.0;
@@ -1028,8 +1029,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
                     }
                 }
             }
-            // O corpo por cima das raízes dos espigões.
-            if (d <= hub) {
+            if (spike_l < 0.0 && d <= hub) {
                 let b = sprite(SPRITE_ROW_PROTEASE, col_f, vec2<f32>(u, v) / hub, uv_x * core / hub, uv_y * core / hub);
                 if (b.y >= 0.5) { return vec4<f32>(sem_color(in.color, b.x), 1.0); }
             }

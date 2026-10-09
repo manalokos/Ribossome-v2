@@ -1,7 +1,8 @@
 //! Retratos grandes de agentes de uma cena (para ilustrações): escolhe os N
 //! agentes com mais órgãos diferentes (corpo de 14 a 48 resíduos) e desenha
 //! cada um sozinho, em fundo preto.
-//! SCENE (por omissão o autosave), OUT (prefixo dos PNG), N (3), SIZE (1024).
+//! SCENE (por omissão o autosave), OUT (prefixo dos PNG), N (3), SIZE (1024),
+//! ORGAN (só agentes com este tipo de órgão, ex. 11 = protease).
 use ribossome::gpu::Gpu;
 use ribossome::params::WorldConfig;
 use ribossome::render::Camera;
@@ -25,6 +26,7 @@ fn main() {
     }
     let agents = w.read_agents_blocking(&gpu);
     let organs: Vec<u16> = bytemuck::cast_slice(&gpu.read_buffer_blocking(&w.organs_buf)).to_vec();
+    let need: Option<u16> = std::env::var("ORGAN").ok().and_then(|v| v.parse().ok());
     let mut best: Vec<(usize, usize, usize)> = agents
         .iter()
         .enumerate()
@@ -32,8 +34,10 @@ fn main() {
         .map(|(slot, a)| {
             let o = &organs[slot * 64..slot * 64 + a.body_len as usize];
             let kinds: std::collections::HashSet<u16> = o.iter().filter(|&&c| c != 0).map(|&c| c & 0x1F).collect();
-            (kinds.len(), o.iter().filter(|&&c| c != 0).count(), slot)
+            (kinds.len(), o.iter().filter(|&&c| c != 0).count(), slot, need.is_none_or(|n| kinds.contains(&(n + 1))))
         })
+        .filter(|b| b.3)
+        .map(|b| (b.0, b.1, b.2))
         .collect();
     best.sort_by(|a, b| b.cmp(a));
     // Um por combinação (tipos, órgãos), para não saírem três iguais.
