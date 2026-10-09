@@ -203,7 +203,7 @@ fn cam_center() -> vec2<f32> {
 // STORAGE_MAX_HALF_WIDTH (unidades do mundo); dai para cima a largura so cresce
 // com a raiz do comprimento, para uma fila comprida ficar um fuso gordo e nao
 // uma bola que tapa o corpo.
-const STORAGE_ASPECT: f32 = 1.5;
+const STORAGE_ASPECT: f32 = 1.3;
 const STORAGE_MAX_HALF_WIDTH: f32 = 14.0;
 fn is_storage(slot: u32, k: u32) -> bool {
     let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
@@ -403,7 +403,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 }
                 skip_glyph = k != ks;
                 let pa = body_pos_view[base + ks];
-                var pb = body_pos_view[base + ke] + tn * RESIDUE_UNITS * 1.8;
+                var pb = body_pos_view[base + ke] + tn * RESIDUE_UNITS * 3.0;
                 if (ke + 1u < a.body_len) { pb = body_pos_view[base + ke + 1u]; }
                 let mid = 0.5 * (pa + pb);
                 let ax = pb - pa;
