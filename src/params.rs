@@ -392,8 +392,14 @@ gpu_struct! {
         /// primeiros agentes junto à fumarola esgotam o redutor e não passa
         /// nada para os de trás.
         pub chemo_take: f32,
-        pub _pad_s1: u32,
-        pub _pad_s2: u32,
+        /// CICLO DAS FUMAROLAS: a força (calor e redutor) de cada fumarola
+        /// oscila com este período (epochs; 0 = constante)...
+        pub vent_cycle_period: f32,
+        /// ...e esta amplitude (0 = constante, 1 = vai de zero ao dobro). A
+        /// fase muda ao longo do mundo (uma onda e meia de lado a lado), por
+        /// isso as fumarolas não sobem e descem todas ao mesmo tempo e as
+        /// correntes mudam de sítio.
+        pub vent_cycle_amp: f32,
     }
 }
 
@@ -576,8 +582,8 @@ impl Default for SimParams {
             signal_crosstalk: 0.1,
             flow_mass: 1.0,
             chemo_take: 0.02,
-            _pad_s1: 0,
-            _pad_s2: 0,
+            vent_cycle_period: 40000.0,
+            vent_cycle_amp: 0.5,
         }
     }
 }

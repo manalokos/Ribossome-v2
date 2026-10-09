@@ -772,6 +772,13 @@ fn tab_world(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
             });
         }
         c.slider(
+            "vent cycle: period (epochs)",
+            slider(&mut world.params.vent_cycle_period, 0.0..=400000.0).logarithmic(true).smallest_positive(1000.0),
+        )
+        .tip("the strength of the vents (heat and reductant) rises and falls with this period. The phase changes across the world (one and a half waves from side to side), so vents in different places peak at different times and the plumes and currents move around. 0 = constant");
+        c.slider("vent cycle: amplitude", slider(&mut world.params.vent_cycle_amp, 0.0..=1.0))
+            .tip("0 = constant vents; 0.5 = between half and one and a half times the strength; 1 = from zero to double");
+        c.slider(
             "reductant oxidation (1/s)",
             slider(&mut world.params.redox_decay, 0.0..=0.5).logarithmic(true).smallest_positive(0.001),
         )
