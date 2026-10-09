@@ -268,8 +268,11 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                                 sum += cov;
                                 s.lum += cov * t.r;
                                 s.cover += cov;
-                                let lf = f32((h >> 12u) & 0xFFu) / 255.0;
-                                let top = cov * (t.b * r * mix(0.45, 1.3, t.r) + MOL_LIFT * lf);
+                                // TRÊS CAMADAS: cada molécula fica numa (ao
+                                // acaso), a primeira pousada no fundo e as
+                                // outras por cima, à distância de uma espessura.
+                                let lf = f32(((h >> 12u) & 0xFFu) % 3u);
+                                let top = cov * (MOL_RELIEF * t.b * r * mix(0.45, 1.3, t.r) + mol_thickness(r) * lf);
                                 if (top > s.top) {
                                     s.top = top;
                                     // (A forma insuflada é um calhau liso; a
@@ -309,9 +312,12 @@ const MOL_SPIN: f32 = 0.7;
 const MOL_JITTER_RATE: f32 = 1.0;
 // Altura do relevo de uma molécula no microscópio 3D, em relação à forma
 // insuflada do seu sprite.
-const MOL_RELIEF: f32 = 1.6;
-// Até onde (em células) uma molécula solta paira acima do fundo.
-const MOL_LIFT: f32 = 0.2;
+const MOL_RELIEF: f32 = 1.0;
+// Espessura (células) de uma molécula de raio r no microscópio 3D: é a
+// distância entre as três camadas em que elas se arrumam.
+fn mol_thickness(r: f32) -> f32 {
+    return 2.0 * MOL_RELIEF * 0.8 * r;
+}
 
 struct Ground {
     rock: f32,
@@ -597,7 +603,8 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         // uma molécula em cima de uma pedra deformava-a ao tremer.
         var mol = vec2<f32>(0.0);
         if (mol_h > 0.0 && view.monomer_brightness > 0.0 && view.height_pass == 1u) {
-            let mid = 0.5 + MOL_LIFT * mol_lift * cell;
+            let thick = mol_thickness(clamp(view.coc_radius, 0.05, 1.0)) * cell;
+            let mid = (0.5 + mol_lift) * thick;
             // (MOL_RELIEF vezes a forma do sprite: senão os átomos mal se notam.)
             mol = vec2<f32>(mid + MOL_RELIEF * mol_h * cell, mid - MOL_RELIEF * mol_h * cell);
         }
