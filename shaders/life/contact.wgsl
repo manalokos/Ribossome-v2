@@ -326,12 +326,16 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (a.alive == 0u) { return; }
     // Contacto + ligações (bond_disp: dx, dy, dθ, energia trocada).
     let bd = bond_disp[slot];
-    let np = clamp(vec2<f32>(a.pos_x, a.pos_y) + contact_disp[slot].xy + bd.xy, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
+    // VENTOSA AGARRADA: o corpo está preso ao terreno, por isso os empurrões
+    // dos vizinhos e os puxões das ligações quase não o movem (divididos por
+    // 1 + força com que agarra; o terreno fica com a diferença).
+    let pinned = 1.0 / (1.0 + holdfast_held(slot, a));
+    let np = clamp(vec2<f32>(a.pos_x, a.pos_y) + (contact_disp[slot].xy + bd.xy) * pinned, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
     if (gamma_count(world_to_cell(np)) < GAMMA_SOLID_THRESHOLD) {
         a.pos_x = np.x;
         a.pos_y = np.y;
     }
-    a.rot += bd.z;
+    a.rot += bd.z * pinned;
     // PARTILHA DE MATÉRIA (decidida em bond_maintain): quem recebeu fica
     // com mais um complemento; quem foi escolhido como dador fica sem o
     // último. A base é a mesma nos dois, por isso a matéria conserva-se

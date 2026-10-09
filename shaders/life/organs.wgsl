@@ -599,9 +599,10 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                     let cr = cos(a.rot);
                     let sr = sin(a.rot);
                     let rw = vec2<f32>(a.pos_x, a.pos_y) + vec2<f32>(cr * rl.x - sr * rl.y, sr * rl.x + cr * rl.y);
+                    // (Ligada ou desligada, como em holdfast_drag.)
                     var grip = 1.0;
-                    if (ov.p1 >= 0.0) { grip = 1.0 - clamp(s[u32(clamp(ov.p1, 0.0, 3.0))], 0.0, 1.0); }
-                    emit[k][u32(clamp(ov.p2, 0.0, 3.0))] += HOLDFAST_SIGNAL * organ_gain(o) * grip * clamp(grains_at(rw), 0.0, 1.0);
+                    if (ov.p1 >= 0.0 && s[u32(clamp(ov.p1, 0.0, 3.0))] > HOLDFAST_RELEASE) { grip = 0.0; }
+                    emit[k][u32(clamp(ov.p2, 0.0, 3.0))] += HOLDFAST_SIGNAL * organ_gain(o) * grip * step(HOLDFAST_TOUCH, grains_at(rw));
                 }
             }
             case ORGAN_AGE_BIAS: {

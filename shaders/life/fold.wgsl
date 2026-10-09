@@ -187,16 +187,30 @@ fn grains_at(pw: vec2<f32>) -> f32 {
 // o dos grãos, mas muito maior e só nesse resíduo: o corpo fica preso por
 // aí, pode ondular à volta e a corrente não o leva. Em água livre, longe do
 // terreno, não faz nada. Algumas variantes largam com um sinal interno.
+const HOLDFAST_RELEASE: f32 = 0.5;
+const HOLDFAST_TOUCH: f32 = 0.2;
+// Maior força com que uma ventosa do corpo está agarrada (0 = nenhuma).
+// (Ciclo sem saídas a meio: é chamado a partir de contact_apply.)
+fn holdfast_held(slot: u32, a: Agent) -> f32 {
+    var held = 0.0;
+    for (var k = 0u; k < a.body_len; k++) {
+        held = max(held, holdfast_drag(slot, k, residue_world(slot, a, k)));
+    }
+    return held;
+}
+
 fn holdfast_drag(slot: u32, k: u32, world_pos: vec2<f32>) -> f32 {
     let o = organ_get(slot, k);
     var d = 0.0;
     if (organ_type(o) == ORGAN_HOLDFAST) {
         let v = organ_var(o);
+        // LIGADA OU DESLIGADA: larga de vez quando o sinal da variante passa
+        // de HOLDFAST_RELEASE, e agarra por inteiro logo que há terreno ao
+        // alcance (grains_at interpola as 4 células à volta: > 0 a menos de
+        // uma célula de um grão; dá para se agarrar à face de uma rocha).
         var grip = 1.0;
-        if (v.p1 >= 0.0) { grip = 1.0 - clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p1, 0.0, 3.0))], 0.0, 1.0); }
-        // grains_at interpola as 4 células à volta: > 0 a menos de uma
-        // célula de um grão (dá para se agarrar à face de uma rocha).
-        d = max(v.p0, 0.0) * organ_gain(o) * grip * clamp(grains_at(world_pos), 0.0, 1.0);
+        if (v.p1 >= 0.0 && signals[slot * MAX_BODY + k][u32(clamp(v.p1, 0.0, 3.0))] > HOLDFAST_RELEASE) { grip = 0.0; }
+        d = max(v.p0, 0.0) * organ_gain(o) * grip * step(HOLDFAST_TOUCH, grains_at(world_pos));
     }
     return d;
 }
