@@ -26,6 +26,9 @@ fn fluid_vel_at_cell(cx: u32, cy: u32) -> vec2<f32> {
     let fyi = min((cy * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u);
     return sanitize_vec2(velocity_in[fgrid(fxi, fyi)]);
 }
+// Velocidade (células do fluido por segundo) com que uma fumarola de força 1
+// sopra o entulho que tem em cima da saída.
+const VENT_BLOW: f32 = 8.0;
 // Uma pilha de 2 ao lado de uma célula vazia deixa cair o quantum de cima.
 const GAMMA_SHED_P: f32 = 0.03;
 
@@ -223,6 +226,17 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
             let excess = max(speed - crit, 0.0);
             v_move = select(vec2<f32>(0.0), vs * (excess / max(speed, 1e-6)), speed > 1e-6);
             p_sed = parcel_hop_p(v_move) * GAMMA_SEDIMENT_FACTOR * max(params.sediment_transport, 0.0);
+        }
+        // JACTO DA FUMAROLA: o entulho que está mesmo na saída de uma
+        // fumarola é soprado para cima e para um lado (ao acaso), por mais
+        // agarrado que esteja; assim a saída não fica entupida e a fumarola
+        // não perde força. Cai depois à volta (grain_fall), como o monte que
+        // as fumarolas reais fazem. Só os grãos soltos: a rocha não se move.
+        let vent = heat_src[fgrid(min((x * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u), min((y * FLUID_SIZE) / GRID_SIZE, FLUID_SIZE - 1u))];
+        let blow = VENT_BLOW * max(vent.x, vent.y);
+        if (blow > 0.0) {
+            v_move = vec2<f32>(select(-0.6, 0.6, (rr.y & 1u) == 1u), 1.0) * blow;
+            p_sed = max(p_sed, parcel_hop_p(v_move));
         }
         // Preso (muitos vizinhos) e sem corrente que o arranque: fica.
         if (bonds >= 4u && p_sed <= 0.0) { return; }

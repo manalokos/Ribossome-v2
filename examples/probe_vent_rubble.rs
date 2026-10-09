@@ -1,0 +1,65 @@
+//! A FUMAROLA LIMPA A SAÍDA? Mundo vazio com um chão de rocha, uma fumarola
+//! pousada nele e um monte de entulho por cima da saída. Conta os grãos
+//! soltos dentro do disco da fumarola ao longo do tempo. BLOW=0 não se pode
+//! desligar aqui (é uma constante do shader): compara-se com um monte igual
+//! ao lado, sem fumarola.
+use ribossome::gpu::Gpu;
+use ribossome::params::WorldConfig;
+use ribossome::world::World;
+
+fn main() {
+    let steps: u32 = std::env::var("STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(3000);
+    let gpu = Gpu::new_headless().unwrap();
+    let cfg = WorldConfig { grid_size: 512, fluid_size: 256, max_agents: 4096, ..WorldConfig::DEFAULT };
+    let mut w = World::new(&gpu, cfg, 1);
+    w.use_empty_terrain();
+    w.seed_matter(&gpu, 1);
+    let n = cfg.grid_size as f32;
+    let (floor, r) = (40.0, 10.0);
+    let (vent_x, plain_x) = (n * 0.3, n * 0.7);
+    // Cada pincelada vai no seu envio (os parâmetros do pincel são um só
+    // bloco, escrito antes de os comandos correrem).
+    let paint = |w: &mut World, cx: f32, cy: f32, radius: f32, grains: u32| {
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        w.encode_paint(&gpu.queue, &mut enc, cx, cy, radius, grains);
+        gpu.queue.submit([enc.finish()]);
+        gpu.wait_idle();
+    };
+    // Chão de rocha a toda a largura (discos encostados), e dois montes de entulho.
+    let mut x = 0.0;
+    while x < n {
+        paint(&mut w, x, floor - 30.0, 30.0, 6);
+        x += 20.0;
+    }
+    for cx in [vent_x, plain_x] {
+        paint(&mut w, cx, floor + r, r, 2);
+    }
+    w.paint_source(vent_x, floor + r, r, Some(1.0), Some(1.0));
+    let count = |w: &World, cx: f32| {
+        let g = w.read_gamma_blocking(&gpu);
+        let mut c = 0u32;
+        for y in 0..cfg.grid_size {
+            for xx in 0..cfg.grid_size {
+                let (dx, dy) = (xx as f32 - cx, y as f32 - (floor + r));
+                let v = g[(y * cfg.grid_size + xx) as usize];
+                if dx * dx + dy * dy <= r * r && v > 0 && v < 3 {
+                    c += v;
+                }
+            }
+        }
+        c
+    };
+    println!("{:>7} {:>22} {:>22}", "passos", "grãos sobre a fumarola", "grãos no monte ao lado");
+    let mut done = 0;
+    println!("{done:>7} {:>22} {:>22}", count(&w, vent_x), count(&w, plain_x));
+    while done < steps {
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        w.encode_steps(&gpu.queue, &mut enc, 64);
+        gpu.queue.submit([enc.finish()]);
+        gpu.wait_idle();
+        done += 64;
+        if done % 512 < 64 {
+            println!("{done:>7} {:>22} {:>22}", count(&w, vent_x), count(&w, plain_x));
+        }
+    }
+}
