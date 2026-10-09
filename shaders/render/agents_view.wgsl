@@ -147,7 +147,7 @@ fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
         case ORGAN_RELAY: { return vec3<f32>(0.6, 0.9, 1.0); }
         case ORGAN_PHOTOSYSTEM: { return vec3<f32>(0.35, 0.95, 0.35); }
         case ORGAN_PROTEASE: { return vec3<f32>(0.9, 0.2, 0.2); }
-        case ORGAN_ANCHOR: { return select(vec3<f32>(0.25, 0.5, 1.0), vec3<f32>(1.0, 0.3, 0.25), v0 >= 0.0); }
+        case ORGAN_ANCHOR: { return select(vec3<f32>(0.25, 0.5, 1.0), vec3<f32>(0.15, 0.9, 0.8), v0 >= 0.0); }
         case ORGAN_BIAS, ORGAN_AGE_BIAS: { return select(vec3<f32>(1.0, 0.55, 0.15), vec3<f32>(0.35, 0.95, 0.35), v0 >= 0.5); }
         case ORGAN_CHEMO: { return vec3<f32>(0.9, 0.78, 0.15); }
         case ORGAN_DORMANCY: { return vec3<f32>(0.72, 0.82, 1.0); }
@@ -415,7 +415,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
             if (organ == ORGAN_ANCHOR) {
                 let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
                 let plus = organ_variants_view[ORGAN_ANCHOR * ORGAN_VARIANTS + p].p0 >= 0.0;
-                col = select(vec3<f32>(0.25, 0.5, 1.0), vec3<f32>(1.0, 0.3, 0.25), plus);
+                col = select(vec3<f32>(0.25, 0.5, 1.0), vec3<f32>(0.15, 0.9, 0.8), plus);
             }
             if (organ == ORGAN_CLOCK) {
                 let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
@@ -810,7 +810,7 @@ fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
             return vec4<f32>(mix(in.color, vec3<f32>(1.0), smoothstep(core * 0.75, core, d)), 1.0);
         }
         case ORGAN_ANCHOR: {
-            // Anel grosso (vermelho = +, azul = −) com o centro escuro.
+            // Anel grosso (turquesa = +, azul = −; nunca vermelho, que é das proteases) com o centro escuro.
             if (d > core * 1.15 || d < core * 0.5) { discard; }
             let edge = smoothstep(core * 0.95, core * 1.15, d);
             return vec4<f32>(mix(in.color, in.color * 0.4, edge), 1.0);

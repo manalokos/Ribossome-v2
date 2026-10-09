@@ -344,7 +344,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
         ),
         12 => format!(
             "anchor [{} ring]: grips another anchor, a holdfast or a relay (free ones) of another agent that touches it, or a child; {}",
-            if v("polaridade") >= 0.0 { "red" } else { "blue" },
+            if v("polaridade") >= 0.0 { "teal" } else { "blue" },
             if v("quebra") <= 0.0 {
                 "permanent (only lets go if stretched too far)".to_string()
             } else {
