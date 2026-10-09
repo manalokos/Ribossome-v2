@@ -123,9 +123,11 @@ fn defence(body: &[Residue], w: &World) -> ([f32; 4], f32) {
         if r.aa == PROLINE {
             pro += 1.0 / n;
         }
-        if r.organ.is_some_and(|o| o.0 == PROTEASE) {
+        // A imunidade vem do órgão inibidor (tipo 21), pela família do vizinho.
+        if let Some((21, p, g)) = r.organ {
+            let block = (w.organ_table.get(21).and_then(|o| o.variantes.get(p as usize)).and_then(|v| v.get("protecao")).copied().unwrap_or(0.0).max(0.0) * organ_gain(g)).clamp(0.0, 1.0);
             for (x, wt) in own.iter_mut().zip(family_weights(body, k)) {
-                *x = x.max(if wt > 0.0 { 1.0 } else { 0.0 });
+                *x = x.max(if wt > 0.0 { block } else { 0.0 });
             }
         }
     }

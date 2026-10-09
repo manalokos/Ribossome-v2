@@ -36,7 +36,7 @@
 
 use super::amino::{STOP, codon};
 
-pub const ORGAN_TYPES: usize = 21;
+pub const ORGAN_TYPES: usize = 22;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -62,6 +62,8 @@ pub enum Organ {
     Chiral = 19,
     /// Não vem do código dos órgãos: é o tradutor que o põe entre dois genes.
     Linker = 20,
+    /// Inibidor: imunidade às proteases de uma família (a do vizinho).
+    Inhibitor = 21,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -88,6 +90,7 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "ventosa (fixa-se ao terreno)",
     "quiral (inverte o lado das dobras)",
     "fio (liga dois genes)",
+    "inibidor (imunidade a proteases)",
 ];
 
 /// Os mesmos nomes em inglês, SÓ para mostrar (interface, gráficos, editor,
@@ -115,10 +118,11 @@ pub const ORGAN_NAMES_EN: [&str; ORGAN_TYPES] = [
     "holdfast (grips the terrain)",
     "chiral (flips the side of the bends)",
     "linker (joins two genes)",
+    "inhibitor (immunity to proteases)",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q', '~'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q', '~', 'ι'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -221,6 +225,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     ],
     &[],
     &[],
+    &[pd("protecao", "fraction of the damage from proteases of its family that this organ blocks (× intensity, up to 1). The family is set by the NEXT residue, like the pocket of a protease: D or E = family 1, K or R = family 2, F/L/W/Y/I/V = family 3, any other = the generalist proteases")],
 ];
 
 fn fmt_canal(v: f32) -> &'static str {
@@ -369,6 +374,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             fmt_canal(v("canal")),
             v("meia_vida")
         ),
+        21 => format!("inhibitor [pale disc]: blocks {:.0}% of the damage from proteases of the family set by the next residue (D/E = family 1, K/R = family 2, F/L/W/Y/I/V = family 3, other = generalist). A protease alone gives no immunity; a newborn carries its parent's immunity for a while", (v("protecao") * g).clamp(0.0, 1.0) * 100.0),
         _ => ORGAN_NAMES_EN.get(t).map_or_else(|| row.nome.clone(), |n| n.to_string()),
     }
 }
@@ -480,6 +486,7 @@ pub fn wgsl() -> String {
         "HOLDFAST",
         "CHIRAL",
         "LINKER",
+        "INHIBITOR",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");

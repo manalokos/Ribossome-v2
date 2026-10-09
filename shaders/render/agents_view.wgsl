@@ -151,6 +151,7 @@ fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
         case ORGAN_BIAS, ORGAN_AGE_BIAS: { return select(vec3<f32>(1.0, 0.55, 0.15), vec3<f32>(0.35, 0.95, 0.35), v0 >= 0.5); }
         case ORGAN_CHEMO: { return vec3<f32>(0.9, 0.78, 0.15); }
         case ORGAN_DORMANCY: { return vec3<f32>(0.72, 0.82, 1.0); }
+        case ORGAN_INHIBITOR: { return vec3<f32>(0.95, 0.8, 0.9); }
         case ORGAN_HOLDFAST: { return vec3<f32>(0.85, 0.6, 0.3); }
         case ORGAN_CHIRAL: { return vec3<f32>(0.95, 0.35, 0.85); }
         default: { return base * 0.8; }
@@ -400,6 +401,7 @@ fn vs_agent(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
                 r_world *= grow;
                 phase = 1.0 + 0.4 * grow;
             }
+            if (organ == ORGAN_INHIBITOR) { col = vec3<f32>(0.95, 0.8, 0.9); }
             if (organ == ORGAN_HOLDFAST) { col = vec3<f32>(0.85, 0.6, 0.3); }
             if (organ == ORGAN_CHIRAL) { col = vec3<f32>(0.95, 0.35, 0.85); }
             if (organ == ORGAN_AGE_BIAS) {

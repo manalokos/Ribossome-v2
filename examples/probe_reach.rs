@@ -24,7 +24,10 @@ fn main() {
     let hunter = |variant: &str, antenna: &str| bases(&format!("AUG UGG {variant} GAA {antenna} GGU GGU GGU GGU UAA"));
     let lys = bases(&format!("AUG {} UAA", "AAA ".repeat(10)));
     let gly = bases(&format!("AUG {} UAA", "GGU ".repeat(10)));
-    let cases: [(&str, Vec<u8>, Vec<u8>); 8] = [
+    // Presas de lisina com um INIBIDOR (N + M): vizinho E = família 1 (a do caçador), vizinho K = família 2.
+    let lys_inib1 = bases(&format!("AUG AAU AUG GAA GAA {} UAA", "AAA ".repeat(10)));
+    let lys_inib2 = bases(&format!("AUG AAU AUG GAA {} UAA", "AAA ".repeat(10)));
+    let cases: [(&str, Vec<u8>, Vec<u8>); 10] = [
         ("contacto, corta lisina / presa de lisina", hunter("CGU", "GAA"), lys.clone()),
         ("alcance 40, corta lisina / presa de lisina", hunter("GGU", "GAA"), lys.clone()),
         ("alcance 100 por δ (sem sinal) / presa de lisina", hunter("GAU", "GAA"), lys.clone()),
@@ -33,6 +36,8 @@ fn main() {
         ("contacto, corta lisina / presa de glicina", hunter("CGU", "GAA"), gly.clone()),
         ("contacto, GENERALISTA / presa de glicina", hunter("CGU", "GGU"), gly.clone()),
         ("contacto, GENERALISTA / presa de lisina", hunter("CGU", "GGU"), lys.clone()),
+        ("contacto, corta lisina / lisina + INIBIDOR da família 1", hunter("CGU", "GAA"), lys_inib1.clone()),
+        ("contacto, corta lisina / lisina + inibidor da família 2", hunter("CGU", "GAA"), lys_inib2.clone()),
     ];
     let gaps = [-10.0f32, 25.0, 75.0, 135.0];
     let reps = 16;

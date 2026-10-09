@@ -118,8 +118,13 @@ const PROTEASE_FAR_FROM: f32 = 70.0;
 // reta até REACH_EDGE da força. Quem tem alcance morde primeiro mas fraco;
 // quem aguenta a aproximação e chega perto morde forte.
 const REACH_EDGE: f32 = 0.5;
-// Passos de vida de um filho em que pai e filho nao se mordem.
-const BIRTH_TRUCE: u32 = 400u;
+// IMUNIDADE HERDADA: um recém-nascido traz os inibidores do pai durante
+// MATERNAL_STEPS passos (as famílias a que o pai era imune ficam guardadas
+// ao nascer em rna_tail[slot*4+1].x, um bit por família). Protege-o do pai
+// e de todos os que usam as mesmas proteases, sem regra de "tréguas": é
+// matéria do pai que o filho leva. Um pai armado SEM inibidor não dá nada
+// ao filho e desfá-lo.
+const MATERNAL_STEPS: u32 = 400u;
 fn reach_falloff(dist: f32, reach: f32) -> f32 {
     return 1.0 - (1.0 - REACH_EDGE) * clamp(dist / max(reach, 1.0), 0.0, 1.0);
 }
@@ -187,11 +192,19 @@ fn protease_active(slot: u32, n: u32) -> f32 {
 // quanto do alvo fica exposto (1 = tudo, 1 − PROTEASE_IMMUNITY = protegido).
 const PROTEASE_IMMUNITY: f32 = 1.0;
 fn protease_exposed(slot: u32, n: u32) -> vec4<f32> {
+    // A imunidade vem do órgão INIBIDOR, não da protease: quem ataca com uma
+    // família e quer estar a salvo dela (dos parentes, dos vizinhos) tem de
+    // pagar os dois órgãos; quem só tem o inibidor resiste sem atacar. É o
+    // que dá o ciclo das bactérias com toxinas: o armado mata o indefeso, o
+    // resistente (mais barato) cresce mais do que o armado, o indefeso (que
+    // não paga nada) cresce mais do que o resistente.
     var own = vec4<f32>(0.0);
     for (var k = 0u; k < n; k++) {
-        if (organ_type(organ_get(slot, k)) == ORGAN_PROTEASE) {
-            // Tem (1) ou não tem (0) protease de cada tipo, incluindo a generalista.
-            own = max(own, sign(family_weights(protease_family(slot, k, n))));
+        let o = organ_get(slot, k);
+        if (organ_type(o) == ORGAN_INHIBITOR) {
+            // A família é a do vizinho, como no bolso de uma protease.
+            let block = clamp(max(organ_var(o).p0, 0.0) * organ_gain(o), 0.0, 1.0);
+            own = max(own, sign(family_weights(protease_family(slot, k, n))) * block);
         }
     }
     return vec4<f32>(1.0) - PROTEASE_IMMUNITY * own;
@@ -214,7 +227,13 @@ fn protease_targets(slot: u32, n: u32) -> vec3<f32> {
 // famílias 1, 2 e 3 e fração de prolina, cada um 0..1 em 5 bits, e no bit 20
 // se tem uma protease generalista (fica imune às generalistas dos outros).
 fn pack_defence(slot: u32, n: u32) -> f32 {
-    let ex = protease_exposed(slot, n);
+    var ex = protease_exposed(slot, n);
+    if (agents[slot].age < MATERNAL_STEPS) {
+        let mask = u32(max(rna_tail[slot * 4u + 1u].x, 0.0));
+        for (var i = 0u; i < 4u; i++) {
+            if (((mask >> i) & 1u) != 0u) { ex[i] = min(ex[i], 1.0 - PROTEASE_IMMUNITY); }
+        }
+    }
     let t = protease_targets(slot, n) * ex.xyz;
     let q = vec4<u32>(round(clamp(vec4<f32>(t, proline_fraction(slot, n)), vec4<f32>(0.0), vec4<f32>(1.0)) * 31.0));
     return f32(q.x | (q.y << 5u) | (q.z << 10u) | (q.w << 15u) | (select(0u, 1u, ex.w < 1.0) << 20u));
@@ -284,15 +303,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (overlap > 0.0) { sites += arms.near; }
                     if (-overlap < arms.r_mid) { sites += arms.mid * reach_falloff(-overlap, arms.r_mid); }
                     if (-overlap < arms.r_far) { sites += arms.far * reach_falloff(-overlap, arms.r_far); }
-                    // TREGUA DO NASCIMENTO: durante os primeiros BIRTH_TRUCE passos
-                    // de vida de um filho, pai e filho nao se mordem. O filho
-                    // nasce encostado ao pai e e a OUTRA forma da linhagem (o
-                    // complemento), que pode nao ter a mesma protease nem a
-                    // sua imunidade: sem isto um predador sempre armado
-                    // desfazia os proprios filhos antes de se afastarem. Nao
-                    // compara genomas: so quem brotou de quem, e ha quanto tempo.
-                    let truce = (b.parent == a.id && b.age < BIRTH_TRUCE) || (a.parent == b.id && a.age < BIRTH_TRUCE);
-                    if (armed && !truce && sites.x + sites.y + sites.z + sites.w > 0.0 && b.energy > 0.0) {
+                    if (armed && sites.x + sites.y + sites.z + sites.w > 0.0 && b.energy > 0.0) {
                         let power = dot(sites, unpack_targets(contact_disp[e].w)) * PRED_SITE_SCALE;
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * unpack_proline(contact_disp[e].w);
                         let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist, b.energy);
