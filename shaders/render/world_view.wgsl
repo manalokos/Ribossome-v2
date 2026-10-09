@@ -318,7 +318,10 @@ const MOL_RELIEF: f32 = 1.0;
 // Espessura (células) de uma molécula de raio r no microscópio 3D: é a
 // distância entre as três camadas em que elas se arrumam.
 fn mol_thickness(r: f32) -> f32 {
-    return 2.0 * MOL_RELIEF * 0.8 * r;
+    // (0,3 raios: é a meia altura real da forma insuflada destes sprites, que
+    // são finos. Com mais, cada camada ficava a pairar acima da de baixo e a
+    // primeira acima do chão.)
+    return 2.0 * MOL_RELIEF * 0.3 * r;
 }
 
 struct Ground {
