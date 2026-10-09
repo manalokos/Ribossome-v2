@@ -157,7 +157,8 @@ fn bond_maintain(@builtin(global_invocation_id) gid: vec3<u32>) {
             } else {
                 // Mola: cada lado corrige metade do desvio.
                 if (dist > 1e-4) {
-                    let f = d / dist * (dist - BOND_LEN) * BOND_RELAX * 0.5;
+                    // (Limite POR LIGAÇÃO, igual dos dois lados: ver CONTACT_MAX_STEP.)
+                    let f = d / dist * clamp((dist - BOND_LEN) * BOND_RELAX * 0.5, -BOND_MAX_STEP, BOND_MAX_STEP);
                     dp += f;
                     let r = ra - pa;
                     drot += (r.x * f.y - r.y * f.x) / (dot(r, r) + a.radius * a.radius + 1.0);
@@ -195,8 +196,6 @@ fn bond_maintain(@builtin(global_invocation_id) gid: vec3<u32>) {
             free += 1u;
         }
     }
-    let l = length(dp);
-    if (l > BOND_MAX_STEP) { dp *= BOND_MAX_STEP / l; }
     bond_disp[slot] = vec4<f32>(dp, clamp(drot, -BOND_MAX_TURN, BOND_MAX_TURN), de);
     bonds[slot * BOND_STRIDE + MAX_BONDS] = vec4<u32>(BOND_NONE, 0u, 0u, free);
 }

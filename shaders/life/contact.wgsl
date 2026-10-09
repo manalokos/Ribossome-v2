@@ -16,7 +16,12 @@ const CONTACT_N: u32 = u32(SIM_SIZE / CONTACT_CELL) + 1u;
 const NO_ENTRY: u32 = 0xFFFFFFFFu;
 // Fração da sobreposição corrigida por passo (cada lado faz metade).
 const CONTACT_RELAX: f32 = 0.5;
-const CONTACT_MAX_STEP: f32 = 4.0;
+// Limite do empurrão POR PAR (unidades do mundo por passo). Tem de ser por par
+// e não sobre a soma de cada agente: os dois lados de um par veem a mesma
+// sobreposição e cortam igual, por isso o que um anda o outro desanda. Com o
+// corte na soma, um agente com dois vizinhos era cortado e os vizinhos não, e
+// um grupo de três agarrados por âncoras andava sozinho sem nadar.
+const CONTACT_MAX_STEP: f32 = 2.0;
 
 fn contact_cell_xy(p: vec2<f32>) -> vec2<i32> {
     return clamp(vec2<i32>(floor(p / CONTACT_CELL)), vec2<i32>(0), vec2<i32>(i32(CONTACT_N) - 1));
@@ -285,7 +290,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         // Coincidentes: direção determinista pelo par.
                         var dir = select(vec2<f32>(-1.0, 0.0), vec2<f32>(1.0, 0.0), slot < e);
                         if (dist > 1e-4) { dir = d / dist; }
-                        push += dir * overlap;
+                        push += dir * min(overlap * CONTACT_RELAX, CONTACT_MAX_STEP);
                     }
                     // Ataque: as proteases de contacto só a tocar; as de
                     // alcance também a essa distância para lá do contacto.
@@ -307,9 +312,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     }
-    var dp = push * CONTACT_RELAX;
-    let dl = length(dp);
-    if (dl > CONTACT_MAX_STEP) { dp *= CONTACT_MAX_STEP / dl; }
+    let dp = push;
     // .w (defesa) fica igual: outros atacantes ainda a podem estar a ler.
     contact_disp[slot] = vec4<f32>(dp, gained, contact_disp[slot].w);
 }
