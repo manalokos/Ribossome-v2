@@ -400,6 +400,13 @@ gpu_struct! {
         /// isso as fumarolas não sobem e descem todas ao mesmo tempo e as
         /// correntes mudam de sítio.
         pub vent_cycle_amp: f32,
+        /// COESÃO DO ENTULHO: cada vizinho de um grão soma esta fração à
+        /// velocidade crítica de arranque (um grão agarrado precisa de mais
+        /// corrente, mas não fica imune). Só resiste à corrente, não à queda.
+        pub sediment_cohesion: f32,
+        pub _pad_s1: u32,
+        pub _pad_s2: u32,
+        pub _pad_s3: u32,
     }
 }
 
@@ -584,6 +591,10 @@ impl Default for SimParams {
             chemo_take: 0.02,
             vent_cycle_period: 40000.0,
             vent_cycle_amp: 0.5,
+            sediment_cohesion: 0.5,
+            _pad_s1: 0,
+            _pad_s2: 0,
+            _pad_s3: 0,
         }
     }
 }

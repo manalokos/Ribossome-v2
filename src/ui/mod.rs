@@ -859,6 +859,8 @@ fn tab_world(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
             .tip("how much the current carries loose rubble (1 = as in v3)");
         c.slider("critical entrainment velocity", slider(&mut p.sediment_threshold, 0.0..=5.0))
             .tip("Shields criterion: below this velocity (fluid cells/s) the current does not lift grains; above it, it lifts them ∝ to the excess");
+        c.slider("rubble cohesion", slider(&mut p.sediment_cohesion, 0.0..=3.0))
+            .tip("each neighbouring grain adds this fraction to the critical entrainment velocity: 0.5 = a grain with two neighbours needs twice the current to be lifted. It only resists the current, not falling. 0 = no cohesion");
         c.slider("gravity on rubble GRAINS ×", slider(&mut p.sediment_settle, 0.0..=5.0))
             .tip("fall speed (×0.5 fluid cells/s): a loose grain moves with the current minus the fall — it rises where the upward current is stronger (suspension) and settles where it slows down. 0 = they float");
         c.slider("bioturbation (pushing rubble)", slider(&mut p.bioturbation, 0.0..=0.5));

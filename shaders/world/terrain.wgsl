@@ -17,9 +17,8 @@ const GAMMA_SEDIMENT_FACTOR: f32 = 0.5;
 // Velocidade de queda de um grão na água (Stokes), em células do fluido por
 // segundo (× params.sediment_settle): a mesma unidade das correntes.
 const GAMMA_SETTLE_SPEED: f32 = 0.5;
-// Coesão no arranque: cada vizinho soma esta fração da velocidade crítica
-// (um grão agarrado precisa de mais corrente, mas não fica imune).
-const GAMMA_BOND_SHIELDS: f32 = 0.5;
+// (A coesão no arranque é params.sediment_cohesion: cada vizinho soma essa
+// fração à velocidade crítica.)
 
 // Velocidade do fluido numa célula da grelha.
 fn fluid_vel_at_cell(cx: u32, cy: u32) -> vec2<f32> {
@@ -220,7 +219,7 @@ fn relax_gamma_pass(gid: vec3<u32>, phase: u32) {
             // NO FUNDO, ARRANQUE (Shields): só o excesso de velocidade acima
             // da crítica arrasta; a coesão sobe a crítica.
             let speed = length(vs);
-            let crit = max(params.sediment_threshold, 0.0) * (1.0 + GAMMA_BOND_SHIELDS * f32(bonds));
+            let crit = max(params.sediment_threshold, 0.0) * (1.0 + max(params.sediment_cohesion, 0.0) * f32(bonds));
             let excess = max(speed - crit, 0.0);
             v_move = select(vec2<f32>(0.0), vs * (excess / max(speed, 1e-6)), speed > 1e-6);
             p_sed = parcel_hop_p(v_move) * GAMMA_SEDIMENT_FACTOR * max(params.sediment_transport, 0.0);
