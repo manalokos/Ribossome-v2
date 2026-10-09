@@ -55,7 +55,7 @@ pub struct WorldView {
     /// Marcar na vista onde há fumarolas (ao pintá-las).
     pub show_vents: std::cell::Cell<bool>,
     /// Desenhar a altura das peças em vez da cor (para o microscópio 3D).
-    pub height_pass: std::cell::Cell<bool>,
+    pub height_pass: std::cell::Cell<u32>,
     draw_args: wgpu::Buffer,
     /// Slot a desenhar sozinho (u32::MAX = todos).
     pub focus: std::cell::Cell<u32>,
@@ -519,7 +519,7 @@ impl WorldView {
             epoch: std::cell::Cell::new(0),
             ghost_steps: std::cell::Cell::new(0.0),
             show_vents: std::cell::Cell::new(false),
-            height_pass: std::cell::Cell::new(false),
+            height_pass: std::cell::Cell::new(0),
             draw_args: world.draw_args_buf.clone(),
             focus: std::cell::Cell::new(u32::MAX),
             uv_depth: std::cell::Cell::new(11.0),
@@ -578,11 +578,18 @@ impl WorldView {
             epoch: self.epoch.get(),
             ghost_steps: self.ghost_steps.get(),
             show_vents: self.show_vents.get() as u32,
-            height_pass: self.height_pass.get() as u32,
+            height_pass: self.height_pass.get(),
             _pad_v1: 0,
             _pad_v2: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
+    }
+
+    /// Só o fundo (água, monómeros, terreno), sem agentes.
+    pub fn draw_world_only(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.draw(0..3, 0..1);
     }
 
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
@@ -593,7 +600,7 @@ impl WorldView {
         // Opacos primeiro, depois as sombras (de longe não há sombras).
         for shadows in [false, true] {
             // (Nem de longe nem no passo das alturas: uma sombra não tem altura.)
-            if shadows && (self.lod.get() != 0 || self.height_pass.get()) {
+            if shadows && (self.lod.get() != 0 || self.height_pass.get() != 0) {
                 break;
             }
             pass.set_pipeline(if shadows { &self.shadows_pipeline } else { &self.agents_pipeline });

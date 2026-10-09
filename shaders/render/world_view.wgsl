@@ -186,6 +186,8 @@ struct Soup {
     // sprites e quantos são (a média dá o sombreado, à parte da quantidade).
     lum: f32,
     cover: f32,
+    // Altura (em células) da molécula mais alta que cobre o ponto.
+    h: f32,
 }
 
 // Densidade de monómeros (por célula de área) no ponto pc (em células),
@@ -196,6 +198,7 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     s.spent = vec4<f32>(0.0);
     s.lum = 0.0;
     s.cover = 0.0;
+    s.h = 0.0;
     let r = clamp(radius, 0.05, 1.0);
     // Núcleo GAUSSIANO, σ = r / DOT_SIGMAS, cortado em r e descido para
     // acabar em zero aí (sem degrau na borda). O integral sobre o disco é
@@ -239,6 +242,7 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                                 sum += cov;
                                 s.lum += cov * t.r;
                                 s.cover += cov;
+                                s.h = max(s.h, cov * t.b * r);
                             }
                         }
                         let dens = sum * f32(count) / f32(max(shown, 1u));
@@ -274,6 +278,8 @@ struct Ground {
     // Altura (em células) do seixo de cima naquele ponto: uma cúpula.
     pebble_h: f32,
     rock_h: f32,
+    // Raio (em células) desse seixo.
+    pebble_r: f32,
     // Sombra de contacto (0..1) de um grão mais alto sobre o que ali está.
     shadow: f32,
 }
@@ -285,6 +291,7 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
     var pebble_z = -1.0;
     var pebble_h = 0.0;
     var rock_h = 0.0;
+    var pebble_r = 0.0;
     var rock_l = -1.0;
     var rock_z = -1.0;
     var halo = 0.0;
@@ -340,6 +347,7 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
                                     pebble_z = z;
                                     pebble_l = s.x;
                                     pebble_h = r * s.z;
+                                    pebble_r = r;
                                     pebble = 1.0;
                                 }
                             }
@@ -365,6 +373,7 @@ fn ground_at(pc: vec2<f32>, px: f32) -> Ground {
     out.rock_l = rock_l;
     out.pebble_h = pebble_h;
     out.rock_h = rock_h;
+    out.pebble_r = pebble_r;
     // Só escurece se vier de um grão mais alto do que o que ali se vê.
     out.shadow = select(0.0, halo, halo_z > pebble_z);
     return out;
@@ -395,11 +404,13 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     let dots = (1.0 - smoothstep(DOTS_PIXEL_FULL, DOTS_PIXEL_NONE, pixel_cells)) * step(1e-4, view.coc_radius);
     var mol_relief = 1.0;
     var mol_edge = 0.0;
+    var mol_h = 0.0;
     if (dots > 0.0 && view.view_mode <= 5u) {
         let soup = soup_at(world / f32(WORLD_UNITS_PER_CELL), view.coc_radius, pixel_cells);
         act = mix(act, soup.act, dots);
         spent = mix(spent, soup.spent, dots);
         // RELEVO das moléculas: escurece os vales e aclara as arestas.
+        mol_h = soup.h;
         if (soup.cover > 0.0) {
             let l = pow(clamp(soup.lum / soup.cover, 0.0, 1.0), 0.8);
             mol_relief = mix(1.0, 0.15 + 1.6 * l, dots);
@@ -470,6 +481,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     var rubble_tex = 1.0;
     var pebble_h = 0.3;
     var rock_h = 0.0;
+    var pebble_r = 0.3;
     var ground_shadow = 1.0;
     // De perto, o terreno em grãos (ver ground_at) em vez de células.
     let grains = 1.0 - smoothstep(GRAIN_PIXEL_FULL, GRAIN_PIXEL_NONE, pixel_cells);
@@ -483,12 +495,28 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         if (gr.pebble_l >= 0.0) { rubble_tex = mix(1.0, 0.5 + 1.3 * pow(gr.pebble_l, 0.8), grains); }
         pebble_h = gr.pebble_h;
         rock_h = gr.rock_h;
+        pebble_r = gr.pebble_r;
         ground_shadow = 1.0 - GRAIN_SHADOW * gr.shadow * grains;
     }
-    // ALTURA do terreno (para o microscópio 3D): a rocha é um planalto com o
-    // relevo dos seus blocos; cada grão de entulho é um seixo pousado.
-    if (view.height_pass != 0u) {
-        return vec4<f32>(max(rock_m * (26.0 + 0.9 * rock_h * f32(WORLD_UNITS_PER_CELL)), rubble_m * pebble_h * f32(WORLD_UNITS_PER_CELL)), 0.0, 0.0, 1.0);
+    // PARA O MICROSCÓPIO 3D. Modo 2: quanto terreno há aqui (o microscópio
+    // desfoca isto e faz dele o relevo suave do chão, onde tudo assenta).
+    if (view.height_pass == 2u) {
+        return vec4<f32>(max(rock_m, 0.4 * rubble_m), 0.0, 0.0, 1.0);
+    }
+    // Modo 1: o VOLUME de cada pedra e de cada molécula (cimo, fundo), em
+    // unidades do mundo acima do chão. Um seixo é uma bola meio enterrada;
+    // um bloco de rocha sai do chão; uma molécula é um grãozinho a pairar.
+    if (view.height_pass == 1u) {
+        let cell = f32(WORLD_UNITS_PER_CELL);
+        var vol = vec2<f32>(0.0);
+        if (rock_m > 0.5) {
+            vol = vec2<f32>(2.0 + 0.8 * rock_h * cell, -30.0);
+        } else if (rubble_m > 0.5) {
+            vol = vec2<f32>(0.45 * pebble_r + pebble_h, 0.45 * pebble_r - pebble_h) * cell;
+        } else if (mol_h > 0.0) {
+            vol = vec2<f32>(4.0 + mol_h * cell, 4.0 - mol_h * cell);
+        }
+        return vec4<f32>(vol, 0.0, 1.0);
     }
     let rock = (vec3<f32>(0.30, 0.27, 0.24) + 0.08 * tone) * rock_tex;
     // A rocha soma a luz que lhe CHEGA (a da célula de cima): a

@@ -72,6 +72,10 @@ const SPRITE_STALK_BODY: f32 = 0.3;
 // microscópio 3D: cada sítio que lê um sprite deixa-a aqui (a altura do
 // atlas vezes o tamanho da peça).
 var<private> g_h: f32 = 0.0;
+// ...e a altura do CENTRO da peça acima do chão: o volume vai de g_c - g_h
+// a g_c + g_h (a mesma forma para cima e para baixo: uma cúpula fica uma
+// bola, meio tubo um tubo).
+var<private> g_c: f32 = 0.0;
 // Devolve também (em .z) a altura da forma insuflada, em meios mosaicos.
 fn sprite(row: f32, col: f32, q: vec2<f32>, qx: vec2<f32>, qy: vec2<f32>) -> vec3<f32> {
     let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
@@ -1027,10 +1031,12 @@ fn antenna(p: vec2<f32>, tip: vec2<f32>, core: f32) -> f32 {
 @fragment
 fn fs_agent(in: AgentVsOut) -> @location(0) vec4<f32> {
     g_h = agent_height(in);
+    g_c = g_h;
     let c = agent_frag(in);
     if (c.a < 0.99) { discard; }
-    // (in.lift: a ondulação vertical do corpo, só no relevo.)
-    if (view.height_pass != 0u) { return vec4<f32>(g_h + in.lift, 0.0, 0.0, 1.0); }
+    // VOLUME (cimo, fundo) acima do chão; in.lift é a ondulação vertical do
+    // corpo. (O +0,5 garante um cimo positivo: zero quer dizer "nada aqui".)
+    if (view.height_pass != 0u) { return vec4<f32>(g_c + g_h + in.lift + 0.5, g_c - g_h + in.lift + 0.5, 0.0, 1.0); }
     return c;
 }
 
@@ -1091,6 +1097,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             let aa = in.sprite & 0xFFu;
             let s = sprite(SPRITE_ROW_AMINO + f32(aa / SPRITE_COLS_U), f32(aa % SPRITE_COLS_U), q, vec2<f32>(dot(tdx, e), dot(tdx, nn)) * sc, vec2<f32>(dot(tdy, e), dot(tdy, nn)) * sc);
             g_h = s.z * r_t * AMINO_MARGIN;
+            g_c = r_t;
             if (s.y >= 0.5) { return vec4<f32>(sem_color(in.color, s.x), 1.0); }
             // Sombra com a FORMA do sprite (hélice, fita…): a sua máscara
             // desfocada, e não uma auréola de cápsula.
@@ -1141,6 +1148,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
         }
         let sp = sprite(f32(in.organ), col_f, q, uv_x * core * SHADOW_MARGIN, uv_y * core * SHADOW_MARGIN);
         g_h = sp.z * in.size / SHADOW_MARGIN;
+        g_c = 0.8 * in.size / SHADOW_MARGIN;
         if (sp.y < 0.5) {
             let sh = halo(length(q) / body);
             if (sh < 0.004) { discard; }
@@ -1255,6 +1263,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
                     if (s.y >= 0.5 && s.x > spike_l) {
                         spike_l = s.x;
                         g_h = s.z * in.size * wb;
+                        g_c = in.size * hub;
                         tip = len;
                     }
                 }
@@ -1263,6 +1272,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
                 let b = sprite(SPRITE_ROW_PROTEASE, col_f, vec2<f32>(u, v) / hub, uv_x * core / hub, uv_y * core / hub);
                 if (b.y >= 0.5) {
                     g_h = b.z * in.size * hub;
+                    g_c = in.size * hub;
                     return vec4<f32>(sem_color(in.color, b.x), 1.0);
                 }
             }
@@ -1301,6 +1311,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             let m = vec2<f32>(1.0 / asp, 1.0);
             let sp = sprite(f32(ORGAN_STORAGE), col_f, uv_l * m, uv_x * m, uv_y * m);
             g_h = sp.z * in.size * core;
+            g_c = in.size * core;
             if (sp.y < 0.5) {
                 let sh = halo(length(uv_l * m));
                 if (sh < 0.004) { discard; }

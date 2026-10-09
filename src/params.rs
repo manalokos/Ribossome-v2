@@ -902,9 +902,10 @@ gpu_struct! {
         /// 1 = marcar na vista onde há fumarolas (calor a laranja, química a
         /// verde-amarelo): liga-se ao pintar fumarolas.
         pub show_vents: u32,
-        /// 1 = em vez da cor, desenha a ALTURA de cada peça (unidades do mundo,
-        /// no canal vermelho): o relevo que o microscópio 3D (bin/microscopio)
-        /// usa para traçar raios.
+        /// Para o microscópio 3D (bin/microscopio), em vez da cor: 1 = o
+        /// VOLUME de cada peça (vermelho = o seu cimo, verde = o seu fundo, em
+        /// unidades do mundo acima do chão); 2 = quanto terreno há ali (rocha
+        /// 1, entulho menos), de onde sai o relevo suave do chão.
         pub height_pass: u32,
         pub _pad_v1: u32,
         pub _pad_v2: u32,
