@@ -114,6 +114,9 @@ struct U {
 // bocado tapado e aparecia cortada a pique.
 @group(0) @binding(9) var low_vol: texture_multisampled_2d<f32>;
 @group(0) @binding(10) var low_color: texture_2d<f32>;
+// O agente da MIRA desenhado sozinho (cor): onde a cor de uma peça é a
+// dele, a peça é dele (para o colorir só a ele).
+@group(0) @binding(11) var subject_color: texture_2d<f32>;
 
 // Altura do chão onde há rocha maciça (unidades do mundo).
 const GROUND_H: f32 = 24.0;
@@ -387,6 +390,7 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         var n = vec3<f32>(0.0, 0.0, 1.0);
         // Altura a que se mede a oclusão (ver mais abaixo).
         var zref = p.z;
+        var is_subject = false;
         var albedo = vec3<f32>(0.0);
         if (on_ground) {
             let eg = 5.0;
@@ -435,6 +439,8 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             // muito mais escuros do que os bichos (para estes sobressaírem);
             // numa micrografia tudo é o mesmo material, e o claro-escuro vem
             // só da forma. Sobe-se o do mundo e baixa-se um pouco o dos agentes.
+            let sc = textureSampleLevel(subject_color, samp, uv, 0.0).rgb;
+            is_subject = max(sc.r, max(sc.g, sc.b)) > 0.03 && distance(sc, albedo) < 0.05;
             albedo *= 0.8;
             if (on_world) {
                 let wc = textureSampleLevel(world_color, samp, uv, 0.0).rgb;
@@ -474,7 +480,12 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         let lum = max(max(albedo.r, albedo.g), albedo.b);
         let hue = pow(albedo / max(lum, 1e-3), vec3<f32>(1.6));
         var tinted = gray;
-        if (u.opts.x > 1.5) { tinted = albedo; } else if (u.opts.x > 0.5 && on_agent) { tinted = gray * 1.25 * hue; }
+        // Com a mira ligada (photo.y) a cor falsa fica só no agente marcado.
+        if (u.opts.x > 1.5) {
+            tinted = albedo;
+        } else if (on_agent && ((u.photo.y < 0.5 && u.opts.x > 0.5) || (u.photo.y > 0.5 && is_subject))) {
+            tinted = gray * 1.25 * hue;
+        }
         let base = max(tinted, vec3<f32>(0.03, 0.031, 0.034));
         col = base * (0.95 + 1.5 * edge) * ao + vec3<f32>(0.25) * edge * edge * select(0.0, 1.0, !on_ground);
         // O campo de visão não acaba num quadrado: esbate-se com a distância
@@ -553,6 +564,10 @@ struct Scope {
     world: World,
     cap: Capture,
     height_view: WorldView,
+    /// O agente da mira desenhado sozinho, para o colorir só a ele.
+    subject_view: WorldView,
+    subject_msaa: wgpu::Texture,
+    subject_tex: wgpu::Texture,
     height_msaa: wgpu::Texture,
     height_depth: wgpu::Texture,
     height_tex: wgpu::Texture,
@@ -613,6 +628,7 @@ struct Scope {
 
 /// O agente na mira.
 struct Subject {
+    slot: u32,
     pos: [f32; 2],
     radius: f32,
     name: String,
@@ -738,6 +754,7 @@ impl Scope {
         let device = &gpu.device;
         let cap = Capture::new(gpu, &world, TEX);
         let height_view = WorldView::new(device, &gpu.queue, &world, HEIGHT_FORMAT);
+        let subject_view = WorldView::new(device, &gpu.queue, &world, wgpu::TextureFormat::Rgba8Unorm);
         let height_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("height"),
             size: wgpu::Extent3d { width: TEX, height: TEX, depth_or_array_layers: 1 },
@@ -789,6 +806,7 @@ impl Scope {
                 tex_entry(5),
                 tex_entry(8),
                 tex_entry(10),
+                tex_entry(11),
                 wgpu::BindGroupLayoutEntry {
                     binding: 9,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -851,6 +869,18 @@ impl Scope {
         Self {
             cap,
             height_view,
+            subject_view,
+            subject_msaa: msaa_texture(device, wgpu::TextureFormat::Rgba8Unorm, TEX, TEX),
+            subject_tex: device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("subject colour"),
+                size: wgpu::Extent3d { width: TEX, height: TEX, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            }),
             height_msaa: readable_msaa(device, HEIGHT_FORMAT),
             world_vol_msaa: readable_msaa(device, HEIGHT_FORMAT),
             low_vol_msaa: readable_msaa(device, HEIGHT_FORMAT),
@@ -936,6 +966,7 @@ impl Scope {
             let code = ribossome::life::table::code_to_gpu(&self.world.organ_code);
             let rs = self.world.params.require_start != 0;
             Subject {
+                slot: slot as u32,
                 pos: [a.pos_x, a.pos_y],
                 radius: a.radius,
                 name: ribossome::names::organism_name_in(&genome, rs, &code),
@@ -1058,6 +1089,15 @@ impl Scope {
         self.height_view.ghost_steps.set(std::env::var("GHOSTS").ok().and_then(|v| v.parse().ok()).unwrap_or(60.0));
         // (Com monómeros: no passo dos volumes cada molécula é um grãozinho.)
         self.height_view.update(&gpu.queue, &cam, [TEX as f32; 2], 0, self.monomers, 0);
+        // O agente da mira sozinho, com a mesma câmara e as mesmas cores.
+        let subject_slot = self.subject.as_ref().filter(|_| self.reticle).map(|s| s.slot);
+        if let Some(slot) = subject_slot {
+            self.subject_view.focus.set(slot);
+            self.subject_view.relief_order.set(true);
+            self.subject_view.coc_radius.set(MOLECULE_R);
+            self.subject_view.epoch.set(self.world.params.epoch);
+            self.subject_view.update(&gpu.queue, &cam, [TEX as f32; 2], 0, self.monomers, 0);
+        }
         // TRÊS desenhos da zona vista de cima: o volume dos agentes, o volume
         // do mundo por baixo deles (pedras, monómeros) e a cor desse mundo
         // sem agentes (a cor com agentes já está em self.cap).
@@ -1067,6 +1107,8 @@ impl Scope {
             let world_vol = self.world_vol_msaa.create_view(&Default::default());
             let world_col = self.world_col_msaa.create_view(&Default::default());
             let world_col_resolve = self.world_col_tex.create_view(&Default::default());
+            let subject_many = self.subject_msaa.create_view(&Default::default());
+            let subject_resolve = self.subject_tex.create_view(&Default::default());
             let low_vol = self.low_vol_msaa.create_view(&Default::default());
             let low_col = self.low_col_msaa.create_view(&Default::default());
             let low_col_resolve = self.low_col_tex.create_view(&Default::default());
@@ -1093,6 +1135,10 @@ impl Scope {
             layer("agent volumes", &agents_vol, None, 0.0, &|pass| self.height_view.draw_agents_only(pass));
             layer("low agent volumes", &low_vol, None, 1.0, &|pass| self.height_view.draw_agents_lowest(pass));
             layer("low agent colour", &low_col, Some(&low_col_resolve), 1.0, &|pass| self.cap.view.draw_agents_lowest(pass));
+            if let Some(slot) = subject_slot {
+                self.subject_view.focus.set(slot);
+                layer("subject colour", &subject_many, Some(&subject_resolve), 0.0, &|pass| self.subject_view.draw_agents_only(pass));
+            }
             layer("world volumes", &world_vol, None, 0.0, &|pass| self.height_view.draw_world_only(pass));
             layer("world colour", &world_col, Some(&world_col_resolve), 0.0, &|pass| self.cap.view.draw_world_only(pass));
         }
@@ -1123,7 +1169,7 @@ impl Scope {
             [(self.size[0] * self.ss) as f32, (self.size[1] * self.ss) as f32, self.frame as f32, weight],
             [(eye_dist + o.focus_shift).max(1.0), o.aperture * REF_TAN / o.focal, o.focal, 1.0],
             [self.colour as f32, GROUND as f32, GROUND_BLUR / (2.0 * r), self.ss as f32],
-            [self.exposure, 0.0, 0.0, 0.0],
+            [self.exposure, if subject_slot.is_some() { 1.0 } else { 0.0 }, 0.0, 0.0],
         ];
         gpu.queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&data));
         let (src, dst) = ((self.frame % 2) as usize, ((self.frame + 1) % 2) as usize);
@@ -1135,6 +1181,7 @@ impl Scope {
         let world_colour = self.world_col_tex.create_view(&Default::default());
         let low_volume = self.low_vol_msaa.create_view(&Default::default());
         let low_colour = self.low_col_tex.create_view(&Default::default());
+        let subject_colour = self.subject_tex.create_view(&Default::default());
         let ground = self.ground_tex.create_view(&Default::default());
         let bind = |volume: &wgpu::TextureView, prev: &wgpu::TextureView, floor: &wgpu::TextureView| {
             gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1152,6 +1199,7 @@ impl Scope {
                     wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&world_colour) },
                     wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&low_volume) },
                     wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&low_colour) },
+                    wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&subject_colour) },
                 ],
             })
         };
