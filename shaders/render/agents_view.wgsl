@@ -165,6 +165,13 @@ fn energy_tone(a: Agent) -> f32 {
     return mix(0.65, 1.0, clamp(e, 0.0, 1.0)) + 0.25 * clamp((e - 1.0) / 3.0, 0.0, 1.0);
 }
 
+// Cor de um TROÇO do corpo de perto: a da classe do aminoácido, mas puxada
+// para um tom comum (AMINO_MUTE), para as cores dos órgãos sobressaírem.
+const AMINO_MUTE: f32 = 0.6;
+fn amino_color(aa: u32) -> vec3<f32> {
+    return mix(class_color(aa), vec3<f32>(0.74, 0.72, 0.66), AMINO_MUTE);
+}
+
 fn class_color(aa: u32) -> vec3<f32> {
     switch aa {
         case 0u, 7u, 9u, 10u, 17u: { return vec3<f32>(0.72, 0.72, 0.62); } // A I L M V
@@ -391,7 +398,7 @@ fn vs_ghost(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         o.core_phase = vec2<f32>(r_tube, 0.0);
         o.organ = organ;
         o.sprite = select(0u, 0x100u | aa, organ != ORGAN_LINKER);
-        o.color = class_color(aa) * tone;
+        o.color = amino_color(aa) * tone;
     } else {
         var phase = 0.0;
         if (organ == ORGAN_PROTEASE) { phase = 8.99; }
@@ -572,6 +579,8 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
         // ORGAN_SCALE desceu na mesma proporção, os órgãos ficam do mesmo tamanho.)
         r_world = TUBE_FAT * (0.9 + 3.0 * pow(aa_props_view[aa].volume / 130.0, 1.4));
         col = class_color(aa);
+        // (O tubo, na vista química, leva a cor esbatida; o órgão troca-a mais abaixo.)
+        if (!glyph && (view.signal_view == 0u || view.signal_view == 4u)) { col = amino_color(aa); }
         sprite_col = aa;
         let oc = (organs_view[slot * 32u + k / 2u] >> ((k % 2u) * 16u)) & 0xFFFFu;
         if (oc != 0u) {

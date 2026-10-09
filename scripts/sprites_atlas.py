@@ -70,6 +70,9 @@ def tile(lum, row):
         # O corpo sem as saliências finas: uma abertura larga da máscara.
         k = max((b[3] - b[1]) // 4, 3) | 1
         body = clean.filter(ImageFilter.MinFilter(k)).filter(ImageFilter.MaxFilter(k)).getbbox() or b
+        # AMINO_BBOX=1: formas finas (hélices, fitas) não têm "corpo": usa a caixa toda.
+        if os.environ.get("AMINO_BBOX"):
+            body = b
         cx, cy = (body[0] + body[2]) / 2, (body[1] + body[3]) / 2
         hw, hh = (body[2] - body[0]) / 2 * BODY_MARGIN, (body[3] - body[1]) / 2 * BODY_MARGIN
         return fit(lum, mask, (int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)))
