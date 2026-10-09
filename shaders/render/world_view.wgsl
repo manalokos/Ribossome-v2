@@ -221,6 +221,9 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     let hi = vec2<i32>(floor(pc + vec2<f32>(r + 1.6 * MOL_JITTER)));
     // Relógio do tremor (passos da simulação: parada, as moléculas param).
     let jt = f32(view.epoch % 1048576u) * MOL_JITTER_RATE;
+    let jseg = u32(jt);
+    let jf = jt - f32(jseg);
+    let jmix = jf * jf * (3.0 - 2.0 * jf);
     for (var cy = lo.y; cy <= hi.y; cy++) {
         for (var cx = lo.x; cx <= hi.x; cx++) {
             if (cx >= 0 && cy >= 0 && cx < i32(GRID_SIZE) && cy < i32(GRID_SIZE)) {
@@ -237,13 +240,21 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                             // à volta do seu ponto, com a sua fase, menos do que
                             // o salto mínimo real (uma célula), e roda um pouco.
                             let h = dot_hash(cell * 131u + (ch * 2u + st) * 7919u + k * 104729u + 5u);
-                            let ph = f32(h >> 12u) * (6.2831853 / 1048576.0);
-                            let wob = vec2<f32>(sin(jt + ph) + 0.6 * sin(2.31 * jt + 1.7 * ph), cos(1.13 * jt + 2.1 * ph) + 0.6 * cos(2.71 * jt + ph));
+                            // (Um passeio ao acaso: de MOL_JITTER_RATE em
+                            // MOL_JITTER_RATE cada molécula sorteia um novo
+                            // desvio e uma nova rotação, e desliza do anterior
+                            // para esse. Não se repete, ao contrário de uma onda.)
+                            let j0 = dot_hash(h + jseg * 2654435761u);
+                            let j1 = dot_hash(h + (jseg + 1u) * 2654435761u);
+                            let w0 = vec3<f32>(f32(j0 & 0x3FFu), f32((j0 >> 10u) & 0x3FFu), f32((j0 >> 20u) & 0x3FFu)) / 511.5 - 1.0;
+                            let w1 = vec3<f32>(f32(j1 & 0x3FFu), f32((j1 >> 10u) & 0x3FFu), f32((j1 >> 20u) & 0x3FFu)) / 511.5 - 1.0;
+                            let wob3 = mix(w0, w1, jmix);
+                            let wob = wob3.xy;
                             let d = pc - (origin + dot_pos(cell, ch * 2u + st, k) + MOL_JITTER * wob);
                             // MOLÉCULA: o sprite do nucleótido, rodado por um
                             // hash; pesa pela máscara e pelo relevo.
                             if (dot(d, d) < r * r) {
-                                let ang = f32(h & 0xFFFu) * (6.2831853 / 4096.0) + MOL_SPIN * sin(0.83 * jt + 3.0 * ph);
+                                let ang = f32(h & 0xFFFu) * (6.2831853 / 4096.0) + MOL_SPIN * wob3.z;
                                 let cs = cos(ang);
                                 let sn = sin(ang);
                                 let q = vec2<f32>(d.x * cs - d.y * sn, d.x * sn + d.y * cs) / r;
@@ -291,13 +302,13 @@ const GRAIN_PIXEL_NONE: f32 = 1.0;
 const ROCK_SIGMA: f32 = 0.5;
 const PEBBLE_SIGMA: f32 = 0.17;
 
-// Tremor das moléculas: amplitude (células; até 1,6 vezes isto), rotação
-// (radianos) e ritmo (radianos por passo da simulação).
-const MOL_JITTER: f32 = 0.07;
-const MOL_SPIN: f32 = 0.6;
-const MOL_JITTER_RATE: f32 = 0.05;
+// Tremor das moléculas: amplitude (células, por eixo), rotação (radianos)
+// e ritmo (novos sorteios por passo da simulação: 0,15 = um a cada ~7 passos).
+const MOL_JITTER: f32 = 0.1;
+const MOL_SPIN: f32 = 0.7;
+const MOL_JITTER_RATE: f32 = 0.15;
 // Até onde (em células) uma molécula solta paira acima do fundo.
-const MOL_LIFT: f32 = 0.35;
+const MOL_LIFT: f32 = 0.15;
 
 struct Ground {
     rock: f32,
