@@ -309,8 +309,8 @@ const PEBBLE_SIGMA: f32 = 0.17;
 
 // Tremor das moléculas: amplitude (células, por eixo), rotação (radianos)
 // e ritmo (novos sorteios por passo da simulação: 1 = um em cada passo).
-const MOL_JITTER: f32 = 0.1;
-const MOL_SPIN: f32 = 0.7;
+const MOL_JITTER: f32 = 0.033;
+const MOL_SPIN: f32 = 0.23;
 const MOL_JITTER_RATE: f32 = 1.0;
 // Altura do relevo de uma molécula no microscópio 3D, em relação à forma
 // insuflada do seu sprite.
