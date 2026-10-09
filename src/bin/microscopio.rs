@@ -108,6 +108,9 @@ struct U {
 // (pedras e monómeros), com a sua cor à parte. Assim o que está debaixo de um
 // bicho continua a existir.
 @group(0) @binding(7) var world_vol: texture_multisampled_2d<f32>;
+// ...e o mesmo volume do mundo já ALISADO nos degraus (ver fs_smooth): é
+// deste que os raios leem.
+@group(0) @binding(12) var world_smooth: texture_2d<f32>;
 @group(0) @binding(8) var world_color: texture_2d<f32>;
 // SEGUNDA CAMADA DE AGENTES: onde duas peças se sobrepõem, a de cima fica em
 // vol_tex e a de baixo aqui (com a sua cor). Sem ela a peça de baixo perdia o
@@ -223,7 +226,7 @@ fn surf(xy: vec2<f32>) -> Surf {
         let tb0 = textureLoad(vol_tex, c, 0).rg * u.lens.w;
         if (tb.x > 0.25 && abs(tb.x - tb0.x) + abs(tb.y - tb0.y) >= 0.02) { s.b = s.g + support_at(xy) + tb; }
         let ta = textureLoad(vol_tex, c, 0).rg * u.lens.w;
-        let tw = textureLoad(world_vol, c, 0).rg * u.lens.w;
+        let tw = textureLoad(world_smooth, c, 0).rg * u.lens.w;
         if (ta.x > 0.25) { s.a = s.g + support_at(xy) + ta; }
         if (tw.x > 0.25) { s.w = vec2<f32>(s.g + tw.x, s.g + tw.y); }
     }
@@ -293,6 +296,109 @@ fn lerp_low(t: texture_multisampled_2d<f32>, uv: vec2<f32>, g: f32) -> vec2<f32>
     return g + (vec2<f32>(mid) + (v - vec2<f32>(mid)) * shut) * u.lens.w;
 }
 
+// O mesmo para o volume do mundo (já alisado, uma amostra por texel).
+fn lerp_world(uv: vec2<f32>, g: f32) -> vec2<f32> {
+    let dim = vec2<f32>(textureDimensions(world_smooth));
+    let x = uv * dim - 0.5;
+    let c = vec2<i32>(floor(x));
+    let f = x - floor(x);
+    let hi = vec2<i32>(dim) - 1;
+    var sum = vec2<f32>(0.0);
+    var wsum = 0.0;
+    for (var k = 0; k < 4; k++) {
+        let o = vec2<i32>(k & 1, k >> 1);
+        let v = textureLoad(world_smooth, clamp(c + o, vec2<i32>(0), hi), 0).rg;
+        let w = select(1.0 - f.x, f.x, o.x == 1) * select(1.0 - f.y, f.y, o.y == 1) * step(0.25, v.x);
+        sum += v * w;
+        wsum += w;
+    }
+    if (wsum < 0.5) { return NONE; }
+    let v = sum / wsum;
+    let mid = 0.5 * (v.x + v.y);
+    let shut = sqrt(clamp((wsum - 0.5) / 0.5, 0.0, 1.0));
+    return g + (vec2<f32>(mid) + (v - vec2<f32>(mid)) * shut) * u.lens.w;
+}
+
+// ALISAR SÓ OS DEGRAUS do relevo do mundo, em três passos:
+//  1. fs_edge: marca as DESCONTINUIDADES do mapa de alturas. Um degrau é um
+//     salto de um texel para o seguinte muito maior do que os saltos logo
+//     antes e logo depois (a encosta de uma pedra, por íngreme que seja,
+//     cresce aos poucos e não conta; o contorno contra o vazio também não);
+//  2. fs_blur_h e 3. fs_blur_v: desfoque gaussiano (raio SMOOTH_R, em
+//     unidades do mundo) das alturas E da marca. A marca desfocada diz quão
+//     perto se está de um degrau: só aí a altura é trocada pela desfocada.
+const SMOOTH_R: f32 = 6.0;
+
+// Só as PEDRAS (o fundo delas vai abaixo do chão): uma molécula solta a
+// pairar tem o fundo no ar, e misturada com as pedras ficava com um pilar
+// por baixo.
+fn stone(v: vec2<f32>) -> f32 {
+    return step(0.25, v.x) * step(v.y, -1.0);
+}
+
+fn jump_at(c: vec2<i32>, d: vec2<i32>, hi: vec2<i32>, slack: f32) -> f32 {
+    let a = textureLoad(world_vol, clamp(c - d, vec2<i32>(0), hi), 0).rg;
+    let b = textureLoad(world_vol, clamp(c, vec2<i32>(0), hi), 0).rg;
+    let e = textureLoad(world_vol, clamp(c + d, vec2<i32>(0), hi), 0).rg;
+    let f = textureLoad(world_vol, clamp(c + 2 * d, vec2<i32>(0), hi), 0).rg;
+    // Só entre texels com pedra (o contorno fecha-se à parte).
+    let ok = stone(a) * stone(b) * stone(e) * stone(f);
+    let here = abs(e.x - b.x);
+    let around = max(abs(b.x - a.x), abs(f.x - e.x));
+    return ok * step(3.0 * around + slack, here);
+}
+
+@fragment
+fn fs_edge(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let c = vec2<i32>(pos.xy);
+    let dim = vec2<i32>(textureDimensions(world_vol));
+    let hi = dim - 1;
+    let v = textureLoad(world_vol, c, 0).rg;
+    let filled = stone(v);
+    let texel = 2.0 * u.region.z / f32(dim.x);
+    let slack = 1.2 * texel;
+    // O degrau pode estar entre este texel e o seguinte, ou o anterior.
+    let m = max(max(jump_at(c, vec2<i32>(1, 0), hi, slack), jump_at(c - vec2<i32>(1, 0), vec2<i32>(1, 0), hi, slack)),
+                max(jump_at(c, vec2<i32>(0, 1), hi, slack), jump_at(c - vec2<i32>(0, 1), vec2<i32>(0, 1), hi, slack)));
+    return vec4<f32>(v.x * filled, v.y * filled, m * filled, filled);
+}
+
+// Desfoque numa direção de (cimo, fundo, marca, há peça), tudo já pesado por
+// "há peça" para o vazio não entrar na média.
+fn blur_dir(c: vec2<i32>, d: vec2<i32>) -> vec4<f32> {
+    let dim = vec2<i32>(textureDimensions(world_smooth));
+    let texel = 2.0 * u.region.z / f32(dim.x);
+    let sigma = clamp(SMOOTH_R / texel, 1.0, 16.0) * 0.5;
+    var sum = vec4<f32>(0.0);
+    var wsum = 0.0;
+    for (var i = -16; i <= 16; i++) {
+        let w = exp(-0.5 * f32(i * i) / (sigma * sigma));
+        sum += w * textureLoad(world_smooth, clamp(c + d * i, vec2<i32>(0), dim - 1), 0);
+        wsum += w;
+    }
+    return sum / wsum;
+}
+
+@fragment
+fn fs_blur_h(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    return blur_dir(vec2<i32>(pos.xy), vec2<i32>(1, 0));
+}
+
+@fragment
+fn fs_blur_v(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let c = vec2<i32>(pos.xy);
+    let v0 = textureLoad(world_vol, c, 0).rg;
+    var out = v0;
+    if (stone(v0) > 0.5) {
+        let b = blur_dir(c, vec2<i32>(0, 1));
+        // (Só o cimo: o fundo das pedras é sempre abaixo do chão.)
+        let soft = vec2<f32>(b.x / max(b.w, 1e-4), v0.y);
+        // b.z / b.w: quanto da vizinhança (com peça) é degrau.
+        out = mix(v0, soft, smoothstep(0.01, 0.10, b.z / max(b.w, 1e-4)) * step(0.05, b.w));
+    }
+    return vec4<f32>(out, 0.0, 1.0);
+}
+
 fn surf_smooth(xy: vec2<f32>) -> Surf {
     var s: Surf;
     s.g = ground_at(xy);
@@ -303,7 +409,7 @@ fn surf_smooth(xy: vec2<f32>) -> Surf {
     if (all(uv >= vec2<f32>(0.0)) && all(uv < vec2<f32>(1.0))) {
         s.b = lerp_low(low_vol, uv, s.g + support_at(xy));
         s.a = lerp_volume(vol_tex, uv, s.g + support_at(xy));
-        s.w = lerp_volume(world_vol, uv, s.g);
+        s.w = lerp_world(uv, s.g);
     }
     return s;
 }
@@ -589,6 +695,11 @@ struct Scope {
     pres_tex: wgpu::Texture,
     ground_tex: wgpu::Texture,
     ground: wgpu::RenderPipeline,
+    /// O volume do mundo com os degraus alisados (fs_smooth).
+    world_smooth_tex: wgpu::Texture,
+    smooth_a: wgpu::Texture,
+    smooth_b: wgpu::Texture,
+    smooth: [wgpu::RenderPipeline; 3],
     uniform: wgpu::Buffer,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -812,6 +923,7 @@ impl Scope {
                 tex_entry(8),
                 tex_entry(10),
                 tex_entry(11),
+                tex_entry(12),
                 wgpu::BindGroupLayoutEntry {
                     binding: 9,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -918,6 +1030,10 @@ impl Scope {
             pres_tex: float_target(device, PRES),
             ground_tex: float_target(device, GROUND),
             ground: pipeline("fs_ground", HEIGHT_FORMAT),
+            world_smooth_tex: float_target(device, TEX),
+            smooth_a: float_target(device, TEX),
+            smooth_b: float_target(device, TEX),
+            smooth: [pipeline("fs_edge", HEIGHT_FORMAT), pipeline("fs_blur_h", HEIGHT_FORMAT), pipeline("fs_blur_v", HEIGHT_FORMAT)],
             uniform,
             march: pipeline("fs_march", ACCUM_FORMAT),
             present: pipeline("fs_present", target_format),
@@ -1188,7 +1304,8 @@ impl Scope {
         let low_colour = self.low_col_tex.create_view(&Default::default());
         let subject_colour = self.subject_tex.create_view(&Default::default());
         let ground = self.ground_tex.create_view(&Default::default());
-        let bind = |volume: &wgpu::TextureView, prev: &wgpu::TextureView, floor: &wgpu::TextureView| {
+        let world_smooth = self.world_smooth_tex.create_view(&Default::default());
+        let bind = |volume: &wgpu::TextureView, prev: &wgpu::TextureView, floor: &wgpu::TextureView, smooth: &wgpu::TextureView| {
             gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("scope"),
                 layout: &self.layout,
@@ -1205,6 +1322,7 @@ impl Scope {
                     wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&low_volume) },
                     wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&low_colour) },
                     wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&subject_colour) },
+                    wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(smooth) },
                 ],
             })
         };
@@ -1230,12 +1348,18 @@ impl Scope {
         };
         // O chão desfocado (lê "quanto terreno há"), a amostra do traçado de
         // raios e a imagem final.
-        pass_to(&mut enc, &ground, &self.ground, &bind(&pres, &prev_view, &pres));
-        pass_to(&mut enc, &next_view, &self.march, &bind(&height, &prev_view, &ground));
-        pass_to(&mut enc, target, &self.present, &bind(&height, &next_view, &ground));
+        pass_to(&mut enc, &ground, &self.ground, &bind(&pres, &prev_view, &pres, &pres));
+        // (Os passos que escrevem numa textura não a podem ler: leem outra.)
+        let smooth_a = self.smooth_a.create_view(&Default::default());
+        let smooth_b = self.smooth_b.create_view(&Default::default());
+        pass_to(&mut enc, &smooth_a, &self.smooth[0], &bind(&height, &prev_view, &ground, &pres));
+        pass_to(&mut enc, &smooth_b, &self.smooth[1], &bind(&height, &prev_view, &ground, &smooth_a));
+        pass_to(&mut enc, &world_smooth, &self.smooth[2], &bind(&height, &prev_view, &ground, &smooth_b));
+        pass_to(&mut enc, &next_view, &self.march, &bind(&height, &prev_view, &ground, &world_smooth));
+        pass_to(&mut enc, target, &self.present, &bind(&height, &next_view, &ground, &world_smooth));
         // (A mesma imagem para a fotografia / o vídeo, sem a interface.)
         if let Some(copy) = copy {
-            pass_to(&mut enc, copy, &self.present, &bind(&height, &next_view, &ground));
+            pass_to(&mut enc, copy, &self.present, &bind(&height, &next_view, &ground, &world_smooth));
         }
         gpu.queue.submit([enc.finish()]);
     }
