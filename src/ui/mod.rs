@@ -27,6 +27,8 @@ pub struct UiState {
     pub monomer_brightness: f32,
     /// Círculo de confusão dos monómeros (células; 0 = quadrados).
     pub coc_radius: f32,
+    /// Vista de MICROSCÓPIO 3D em vez do mapa (ver `microscope.rs`).
+    pub microscope: bool,
     /// Cor dos agentes: 0 química, 1 sinal α, 2 sinal β, 3 α e β.
     pub signal_view: u32,
     /// Órgão a marcar no mapa: tipo + 1 (0 = nenhum).
@@ -252,6 +254,7 @@ impl UiState {
             vsync: true,
             monomer_brightness: 0.5,
             coc_radius: 0.35,
+            microscope: std::env::var("RIBO_MICROSCOPE").is_ok_and(|v| v != "0"),
             signal_view: 0,
             mark_organ: 0,
             stats: Stats::default(),
@@ -748,6 +751,9 @@ fn tab_view(ui: &mut egui::Ui, b: &Busca, st: &mut UiState) {
                     ui.selectable_value(&mut st.view_mode, i as u32, *n);
                 }
             });
+        });
+        c.row("microscope", |ui| {
+            ui.checkbox(&mut st.microscope, "Microscope (3D close-up)").on_hover_text("shows what the camera frames as an electron micrograph in 3D: zoom in first (it only makes sense close up). Pan and zoom as usual; tilt, rotation, lens and focus are in its own panel. The simulation keeps running");
         });
         c.slider("monomer brightness", slider(&mut st.monomer_brightness, 0.0..=1.0));
         c.slider("monomer circle of confusion (cells)", slider(&mut st.coc_radius, 0.0..=1.0))

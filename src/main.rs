@@ -21,6 +21,10 @@ struct Running {
     gpu: Gpu,
     world: World,
     view: WorldView,
+    /// MICROSCÓPIO 3D (só existe enquanto está ligado: ocupa mais de 1 GB
+    /// na placa) e o seu painel.
+    scope: Option<ribossome::microscope::Scope>,
+    scope_panel: bool,
     /// Alvo com várias amostras onde o mundo é desenhado (do tamanho da
     /// janela; refeito quando ela muda). Resolve para a imagem da janela.
     msaa: Option<wgpu::Texture>,
@@ -365,6 +369,8 @@ impl Running {
             ui: UiState::new(baseline),
             cursor: [0.0; 2],
             viewport: [0.0; 4],
+            scope: None,
+            scope_panel: true,
             covered: false,
             dragging: false,
             painting: false,
@@ -1396,8 +1402,13 @@ impl Running {
         let ctx = self.egui_state.egui_ctx().clone();
         let mut free = None;
         let cam_now = self.cam;
+        let mut micro_asked = ribossome::microscope::Asked::default();
         let mut out = ctx.run_ui(raw, |root| {
             free = ui::draw(root, &mut self.ui, &mut self.world, &mut self.profiler, &mut self.inspector);
+            // MICROSCÓPIO: a barra de dados e o painel por cima da vista.
+            if let (true, Some(r), Some(scope)) = (self.ui.microscope, free, self.scope.as_mut()) {
+                micro_asked = ribossome::microscope::interface(root, r, scope, &mut self.scope_panel, None, false, "");
+            }
             // ECRÃ DE ENTRADA por cima de tudo, a desvanecer no fim.
             if let Some((tex, t0)) = &mut self.splash {
                 let ctx = root.ctx().clone();
@@ -1433,8 +1444,9 @@ impl Running {
                     self.splash = None;
                 }
             }
-            // Por cima da vista: mira do agente selecionado e do enquadramento.
-            if let Some(r) = free {
+            // Por cima da vista: mira do agente selecionado e do enquadramento
+            // (são do mapa: no microscópio a perspetiva é outra).
+            if let Some(r) = free.filter(|_| !self.ui.microscope) {
                 let ppp = root.ctx().pixels_per_point();
                 let painter = root.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("mira"))).with_clip_rect(r);
                 let centre = r.center();
@@ -1586,13 +1598,43 @@ impl Running {
         }
         let n_steps = self.adaptive_steps();
         let (vp, covered) = (self.viewport, self.covered);
+        // MICROSCÓPIO 3D: a câmara do mapa continua a mandar (deslocar e
+        // aproximar como sempre); o microscópio olha para o mesmo ponto com o
+        // mesmo enquadramento em altura.
+        let micro = self.ui.microscope && !covered && vp[2] >= 32.0 && vp[3] >= 32.0;
+        if !self.ui.microscope {
+            self.scope = None;
+        }
+        if micro {
+            use ribossome::microscope::{REF_TAN, REGION_PER_DIST, Scope};
+            let dist = (0.5 * screen[1] / self.cam.zoom / REF_TAN).clamp(25.0, 5000.0);
+            let region = (dist * REGION_PER_DIST).clamp(30.0, 4000.0);
+            let scope = self.scope.get_or_insert_with(|| Scope::new(&self.gpu, &self.world, self.surface_cfg.format, [vp[2] as u32, vp[3] as u32], self.cam.center, region));
+            scope.orbit.centre = self.cam.center;
+            scope.orbit.dist = dist;
+            scope.region = region;
+            scope.monomers = if self.ui.monomer_brightness > 0.0 { 0.7 } else { 0.0 };
+            if micro_asked.supersampling {
+                scope.ss = if scope.ss >= 2 { 1 } else { 2 };
+                let size = scope.size;
+                scope.resize(&self.gpu.device, size);
+            }
+        }
         // Só se desenham os agentes à vista (aqui, mesmo antes de a lista
         // ser feita: um screenshot pelo MCP pode ter posto outro retângulo).
         let (hw, hh) = (0.5 * screen[0] / self.cam.zoom, 0.5 * screen[1] / self.cam.zoom);
         let c = self.cam.center;
+        // (No microscópio, os da zona que as camadas dele cobrem.)
+        let (c, hw, hh) = match self.scope.as_ref().filter(|_| micro) {
+            Some(scope) => {
+                let (zc, zr) = scope.zone();
+                (zc, zr, zr)
+            }
+            None => (c, hw, hh),
+        };
         self.world.set_draw_rect(&self.gpu.queue, Some(([c[0] - hw, c[1] - hh], [c[0] + hw, c[1] + hh])));
         let format = self.surface_cfg.format;
-        let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, msaa, depth, .. } = self;
+        let Running { gpu, world, view, egui_renderer, profiler, ui: st, inspector, msaa, depth, scope, .. } = self;
         let mut frame = profiler.begin(&gpu.device, &gpu.queue);
         if !st.paused {
             let n = n_steps;
@@ -1652,8 +1694,15 @@ impl Running {
                 if !covered && w >= 1.0 && h >= 1.0 {
                     pass.set_viewport(vp[0], vp[1], w, h, 0.0, 1.0);
                     pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, w as u32, h as u32);
-                    view.draw(&mut pass);
+                    if !micro {
+                        view.draw(&mut pass);
+                    }
                 }
+            }
+            // MICROSCÓPIO: a sua imagem por cima do retângulo da vista.
+            if let (true, Some(scope)) = (micro, scope.as_mut()) {
+                let (w, h) = (vp[2].min(sw as f32 - vp[0]).floor(), vp[3].min(sh as f32 - vp[1]).floor());
+                scope.encode_embedded(gpu, world, enc, &target, [vp[0], vp[1], w, h], !st.paused);
             }
             let mut pass = enc
                 .begin_render_pass(&wgpu::RenderPassDescriptor {

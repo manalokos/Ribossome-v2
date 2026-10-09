@@ -361,7 +361,7 @@ impl Running {
         let mut asked = Asked::default();
         let recording = self.rec_tx.is_some();
         let status = self.status.clone();
-        let mut out = ctx.run_ui(raw, |root| asked = interface(root, &mut self.scope, &mut self.panel, marker, recording, &status));
+        let mut out = ctx.run_ui(raw, |root| asked = interface(root, root.max_rect(), &mut self.scope, &mut self.panel, marker, recording, &status));
         self.photo_now |= asked.photo;
         if asked.rec {
             self.rec = !self.rec;

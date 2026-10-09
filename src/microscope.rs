@@ -51,7 +51,8 @@ struct U {
     // quanto da cor das peças se mantém (0 = preto e branco), lado da textura
     // do chão, raio do desfoque do chão (em fração da zona), superamostragem
     opts: vec4<f32>,
-    // exposição (multiplica a imagem final), livre × 3
+    // exposição (multiplica a imagem final), só o agente da mira a cores,
+    // canto (x, y) do retângulo da janela onde a imagem é desenhada
     photo: vec4<f32>,
     // esbatimento com a distância: centro (x, y) e raio, em unidades do mundo
     fade: vec4<f32>,
@@ -660,7 +661,7 @@ fn fs_present(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     var c = vec3<f32>(0.0);
     for (var j = 0; j < ss; j++) {
         for (var i = 0; i < ss; i++) {
-            c += textureLoad(prev_tex, vec2<i32>(pos.xy) * ss + vec2<i32>(i, j), 0).rgb;
+            c += textureLoad(prev_tex, vec2<i32>(pos.xy - u.photo.zw) * ss + vec2<i32>(i, j), 0).rgb;
         }
     }
     c = c / f32(ss * ss) * u.photo.x;
@@ -812,6 +813,9 @@ pub struct Orbit {
 pub struct Scope {
     /// Epoch do mundo no último frame (para a legenda).
     pub epoch: u32,
+    /// Dentro da aplicação principal (que dá os passos, grava e fotografa):
+    /// o painel esconde os comandos que são dela.
+    pub embedded: bool,
     pub cap: Capture,
     pub height_view: WorldView,
     /// O agente da mira desenhado sozinho, para o colorir só a ele.
@@ -1228,6 +1232,7 @@ impl Scope {
             subject: None,
             last_step: std::time::Instant::now(),
             epoch: world.params.epoch,
+            embedded: false,
         }
     }
 
@@ -1371,9 +1376,38 @@ impl Scope {
     /// Um frame: passos da simulação, a zona vista de cima (cor e altura),
     /// uma amostra do traçado de raios acumulada, e a imagem para `target`.
     pub fn frame(&mut self, gpu: &Gpu, world: &mut World, target: &wgpu::TextureView, copy: Option<&wgpu::TextureView>) {
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        self.encode(gpu, world, &mut enc, target, copy, None);
+        gpu.queue.submit([enc.finish()]);
+    }
+
+    /// DENTRO DA APLICAÇÃO PRINCIPAL: desenha para o retângulo `viewport`
+    /// (x, y, largura, altura, em píxeis) de `target`, por cima do que lá
+    /// estiver, com os comandos em `enc`. Não dá passos nem faz a lista de
+    /// desenho: isso é da aplicação, que tem de pedir a lista para a zona de
+    /// `zone()`. `moving` diz se a simulação está a correr.
+    pub fn encode_embedded(&mut self, gpu: &Gpu, world: &mut World, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, viewport: [f32; 4], moving: bool) {
+        self.embedded = true;
+        let size = [(viewport[2] as u32).max(1), (viewport[3] as u32).max(1)];
+        if size != self.size {
+            self.resize(&gpu.device, size);
+        }
+        self.encode(gpu, world, enc, target, None, Some((viewport, moving)));
+    }
+
+    /// A zona (centro e meio lado) que as camadas cobrem neste momento.
+    pub fn zone(&self) -> ([f32; 2], f32) {
+        self.footprint(self.region)
+    }
+
+    fn encode(&mut self, gpu: &Gpu, world: &mut World, enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, copy: Option<&wgpu::TextureView>, embed: Option<([f32; 4], bool)>) {
         self.epoch = world.params.epoch;
         let o = self.orbit;
-        let moving = !self.paused && self.steps > 0;
+        let alone = embed.is_none();
+        let moving = match embed {
+            Some((_, running)) => running,
+            None => !self.paused && self.steps > 0,
+        };
         if self.last_orbit != Some(o) {
             if !std::mem::take(&mut self.soft_orbit) {
                 self.samples = 0;
@@ -1386,8 +1420,8 @@ impl Scope {
         // não recomeça do zero (piscava com o grão de uma só amostra): fica a
         // valer por 3 amostras, e a imagem do passo anterior dissolve-se na
         // nova em poucos frames, o que também suaviza o salto entre passos.
-        let slow = moving && self.rate > 0.0;
-        let step_now = moving && (!slow || self.last_step.elapsed().as_secs_f32() >= 1.0 / self.rate);
+        let slow = alone && moving && self.rate > 0.0;
+        let step_now = alone && moving && (!slow || self.last_step.elapsed().as_secs_f32() >= 1.0 / self.rate);
         if slow && step_now {
             self.last_step = std::time::Instant::now();
         }
@@ -1455,25 +1489,24 @@ impl Scope {
             gpu.queue.submit([enc.finish()]);
             self.height_view.height_pass.set(1);
         }
-        let mut enc = gpu.device.create_command_encoder(&Default::default());
         // Sem movimento suave (ou parada, ou a toda a velocidade) os buffers
         // vivos têm de ter o estado verdadeiro.
         if !tweening {
-            self.tween.restore(&mut enc, world);
+            self.tween.restore(enc, world);
         }
         if step_now {
             if tweening {
                 // Estado verdadeiro de volta, guarda-se como "antes", um passo,
                 // guarda-se como "depois".
-                self.tween.restore(&mut enc, world);
-                Tween::copy(&mut enc, &world.agents_buf, &self.tween.prev_agents);
-                Tween::copy(&mut enc, &world.body_pos_buf, &self.tween.prev_body);
+                self.tween.restore(enc, world);
+                Tween::copy(enc, &world.agents_buf, &self.tween.prev_agents);
+                Tween::copy(enc, &world.body_pos_buf, &self.tween.prev_body);
             }
             // (Em câmara lenta, um passo de cada vez.)
-            world.encode_steps(&gpu.queue, &mut enc, if slow { 1 } else { self.steps.min(crate::world::MAX_STEPS_PER_FRAME) });
+            world.encode_steps(&gpu.queue, enc, if slow { 1 } else { self.steps.min(crate::world::MAX_STEPS_PER_FRAME) });
             if tweening {
-                Tween::copy(&mut enc, &world.agents_buf, &self.tween.cur_agents);
-                Tween::copy(&mut enc, &world.body_pos_buf, &self.tween.cur_body);
+                Tween::copy(enc, &world.agents_buf, &self.tween.cur_agents);
+                Tween::copy(enc, &world.body_pos_buf, &self.tween.cur_body);
                 self.tween.have = true;
             }
         }
@@ -1491,8 +1524,10 @@ impl Scope {
         self.cap.view.clock_frac.set(clock.1);
         self.height_view.clock_frac.set(clock.1);
         if !cached {
-        world.set_draw_rect(&gpu.queue, Some(([zc[0] - r, zc[1] - r], [zc[0] + r, zc[1] + r])));
-        world.encode_draw_list(&mut enc);
+        if alone {
+            world.set_draw_rect(&gpu.queue, Some(([zc[0] - r, zc[1] - r], [zc[0] + r, zc[1] + r])));
+            world.encode_draw_list(enc);
+        }
         let cam = Camera { center: zc, zoom: TEX as f32 / (2.0 * r) };
         // (Moléculas pequenas: no microscópio são partículas, não manchas.)
         self.cap.view.coc_radius.set(MOLECULE_R);
@@ -1501,7 +1536,7 @@ impl Scope {
         self.height_view.relief_order.set(true);
         self.cap.view.epoch.set(clock.0);
         self.cap.view.ghost_steps.set(std::env::var("GHOSTS").ok().and_then(|v| v.parse().ok()).unwrap_or(60.0));
-        self.cap.encode(&gpu.queue, &mut enc, &cam, 0, self.monomers);
+        self.cap.encode(&gpu.queue, enc, &cam, 0, self.monomers);
         self.height_view.epoch.set(clock.0);
         self.height_view.ghost_steps.set(std::env::var("GHOSTS").ok().and_then(|v| v.parse().ok()).unwrap_or(60.0));
         // (Com monómeros: no passo dos volumes cada molécula é um grãozinho.)
@@ -1586,7 +1621,7 @@ impl Scope {
             [(self.size[0] * self.ss) as f32, (self.size[1] * self.ss) as f32, self.frame as f32, weight],
             [(eye_dist + o.focus_shift).max(1.0), o.aperture * REF_TAN / o.focal, o.focal, 1.0],
             [self.colour as f32, GROUND as f32, GROUND_BLUR / (2.0 * r), self.ss as f32],
-            [self.exposure, if subject_slot.is_some() { 1.0 } else { 0.0 }, 0.0, 0.0],
+            [self.exposure, if subject_slot.is_some() { 1.0 } else { 0.0 }, embed.map_or(0.0, |e| e.0[0]), embed.map_or(0.0, |e| e.0[1])],
             [o.centre[0], o.centre[1], fade_r, 0.0],
         ];
         gpu.queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&data));
@@ -1646,21 +1681,44 @@ impl Scope {
         // O chão desfocado (lê "quanto terreno há"), a amostra do traçado de
         // raios e a imagem final.
         if !cached {
-        pass_to(&mut enc, &ground, &self.ground, &bind(&pres, &prev_view, &pres, &pres));
+        pass_to(enc, &ground, &self.ground, &bind(&pres, &prev_view, &pres, &pres));
         // (Os passos que escrevem numa textura não a podem ler: leem outra.)
         let smooth_a = self.smooth_a.create_view(&Default::default());
         let smooth_b = self.smooth_b.create_view(&Default::default());
-        pass_to(&mut enc, &smooth_a, &self.smooth[0], &bind(&height, &prev_view, &ground, &pres));
-        pass_to(&mut enc, &smooth_b, &self.smooth[1], &bind(&height, &prev_view, &ground, &smooth_a));
-        pass_to(&mut enc, &world_smooth, &self.smooth[2], &bind(&height, &prev_view, &ground, &smooth_b));
+        pass_to(enc, &smooth_a, &self.smooth[0], &bind(&height, &prev_view, &ground, &pres));
+        pass_to(enc, &smooth_b, &self.smooth[1], &bind(&height, &prev_view, &ground, &smooth_a));
+        pass_to(enc, &world_smooth, &self.smooth[2], &bind(&height, &prev_view, &ground, &smooth_b));
         }
-        pass_to(&mut enc, &next_view, &self.march, &bind(&height, &prev_view, &ground, &world_smooth));
-        pass_to(&mut enc, target, &self.present, &bind(&height, &next_view, &ground, &world_smooth));
+        pass_to(enc, &next_view, &self.march, &bind(&height, &prev_view, &ground, &world_smooth));
+        match embed {
+            None => pass_to(enc, target, &self.present, &bind(&height, &next_view, &ground, &world_smooth)),
+            Some((vp, _)) => {
+                // Só o retângulo da vista, por cima do que a aplicação já desenhou.
+                let bg = bind(&height, &next_view, &ground, &world_smooth);
+                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("scope view"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_viewport(vp[0], vp[1], vp[2], vp[3], 0.0, 1.0);
+                pass.set_scissor_rect(vp[0] as u32, vp[1] as u32, vp[2] as u32, vp[3] as u32);
+                pass.set_pipeline(&self.present);
+                pass.set_bind_group(0, &bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
         // (A mesma imagem para a fotografia / o vídeo, sem a interface.)
         if let Some(copy) = copy {
-            pass_to(&mut enc, copy, &self.present, &bind(&height, &next_view, &ground, &world_smooth));
+            pass_to(enc, copy, &self.present, &bind(&height, &next_view, &ground, &world_smooth));
         }
-        gpu.queue.submit([enc.finish()]);
     }
 }
 
@@ -1804,13 +1862,21 @@ pub fn overlay(ctx: &egui::Context, screen: egui::Rect, s: &Scope, marker: Optio
 
 /// O painel de controlos por cima da sobreposição (só no ecrã: as fotos e os
 /// vídeos levam a barra de dados e o título, mas não o painel).
-pub fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: Option<[f32; 2]>, recording: bool, status: &str) -> Asked {
+pub fn interface(root: &mut egui::Ui, screen: egui::Rect, s: &mut Scope, panel: &mut bool, marker: Option<[f32; 2]>, recording: bool, status: &str) -> Asked {
     let mut asked = Asked::default();
     let ctx = root.ctx().clone();
-    overlay(&ctx, root.max_rect(), s, marker, recording);
+    overlay(&ctx, screen, s, marker, recording);
     let eye_dist = s.orbit.dist * REF_TAN / s.orbit.focal;
     let wd = (eye_dist + s.orbit.focus_shift).max(1.0);
-    egui::Window::new("Microscope").open(panel).anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0]).resizable(false).show(&ctx, |ui| {
+    egui::Window::new("Microscope").open(panel).pivot(egui::Align2::RIGHT_TOP).default_pos(screen.right_top() + egui::vec2(-10.0, 10.0)).resizable(false).show(&ctx, |ui| {
+        let mut tilt = 90.0 - s.orbit.pitch.to_degrees();
+        if ui.add(egui::Slider::new(&mut tilt, 1.0..=83.0).suffix("°").text("Tilt")).on_hover_text("0° looks straight down").changed() {
+            s.orbit.pitch = (90.0 - tilt).to_radians();
+        }
+        let mut turn = s.orbit.yaw.to_degrees().rem_euclid(360.0);
+        if ui.add(egui::Slider::new(&mut turn, 0.0..=360.0).suffix("°").text("Rotation")).changed() {
+            s.orbit.yaw = turn.to_radians();
+        }
         let mut mm = 12.0 / s.orbit.focal;
         if ui.add(egui::Slider::new(&mut mm, 14.0..=800.0).logarithmic(true).suffix(" mm").text("Lens")).changed() {
             s.orbit.focal = 12.0 / mm;
@@ -1824,6 +1890,7 @@ pub fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: O
         ui.add(egui::Slider::new(&mut s.exposure, 0.05..=16.0).logarithmic(true).text("Exposure"));
         ui.add(egui::Slider::new(&mut s.shutter, 1.0 / 60.0..=8.0).logarithmic(true).suffix(" s").text("Shutter")).on_hover_text("exposure time while the simulation runs: longer = cleaner image, more motion blur");
         let mut full = s.rate <= 0.0;
+        if !s.embedded {
         ui.horizontal(|ui| {
             // (O slider prende o valor ao seu intervalo: a toda a velocidade
             // (0) mexe numa cópia, senão punha-o a 0,5.)
@@ -1835,6 +1902,7 @@ pub fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: O
                 s.rate = if full { 0.0 } else { 2.0 };
             }
         });
+        }
         ui.horizontal(|ui| {
             for (k, name) in ["Grey", "False colour", "Colour"].into_iter().enumerate() {
                 if ui.selectable_label(s.colour == k as u32, name).clicked() {
@@ -1852,7 +1920,9 @@ pub fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: O
             if ui.checkbox(&mut s.follow, "Follow").on_hover_text("the camera follows the agent nearest the centre (key F); moving the view by hand lets go").changed() && s.follow {
                 s.subject = None;
             }
-            ui.checkbox(&mut s.smooth_motion, "Smooth").on_hover_text("in slow motion, draws the agents between two simulation steps instead of jumping from one to the next");
+            if !s.embedded {
+                ui.checkbox(&mut s.smooth_motion, "Smooth").on_hover_text("in slow motion, draws the agents between two simulation steps instead of jumping from one to the next");
+            }
             if ui.checkbox(&mut s.reticle, "Reticle").on_hover_text("marks the agent nearest the centre and names it (key T)").changed() {
                 s.subject = None;
             }
@@ -1862,7 +1932,7 @@ pub fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: O
             }
         });
         ui.horizontal(|ui| {
-            if ui.button(if s.paused { "▶ Run" } else { "⏸ Pause" }).clicked() {
+            if !s.embedded && ui.button(if s.paused { "▶ Run" } else { "⏸ Pause" }).clicked() {
                 s.paused = !s.paused;
                 s.last_orbit = None;
             }
@@ -1870,6 +1940,7 @@ pub fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: O
                 s.orbit.focus_shift = 0.0;
             }
         });
+        if !s.embedded {
         ui.horizontal(|ui| {
             if ui.button("📷 Photo").on_hover_text("saves the image with the data bar to saves/capturas (key P)").clicked() {
                 asked.photo = true;
@@ -1879,10 +1950,13 @@ pub fn interface(root: &mut egui::Ui, s: &mut Scope, panel: &mut bool, marker: O
                 asked.rec = true;
             }
         });
+        }
         if !status.is_empty() {
             ui.label(egui::RichText::new(status).small());
         }
-        ui.label(egui::RichText::new("Click: focus there · drag: orbit · right drag: move\nwheel: zoom · Tab: hide this panel").small().weak());
+        if !s.embedded {
+            ui.label(egui::RichText::new("Click: focus there · drag: orbit · right drag: move\nwheel: zoom · Tab: hide this panel").small().weak());
+        }
     });
     asked
 }
