@@ -41,7 +41,10 @@ use winit::window::{Window, WindowId};
 /// Lado das texturas de cor e de altura da zona (píxeis).
 const TEX: u32 = 2048;
 const HEIGHT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+// A média acumulada guarda-se com 32 bits por canal: com 16, ao fim de umas
+// centenas de amostras cada amostra nova já pesava menos do que a precisão
+// do número e a imagem deixava de melhorar.
+const ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 /// Altura máxima do relevo (unidades do mundo): o raio começa a marchar aqui.
 const HMAX: f32 = 95.0;
 /// Lado da textura de "quanto terreno há" e da do chão desfocado.
@@ -544,7 +547,17 @@ impl Scope {
                 },
                 tex_entry(1),
                 tex_entry(2),
-                tex_entry(3),
+                // (A acumulada é de 32 bits, que não se filtra: lê-se texel a texel.)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
                 tex_entry(5),
                 tex_entry(8),
                 wgpu::BindGroupLayoutEntry {
