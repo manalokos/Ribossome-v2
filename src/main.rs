@@ -1759,7 +1759,12 @@ impl Running {
         // Restos de quem morre: duram tempo da SIMULAÇÃO (passos), como tudo
         // o resto; com menos passos por frame a animação vê-se mais devagar.
         self.view.epoch.set(self.world.params.epoch);
-        self.view.ghost_steps.set(GHOST_STEPS);
+        // (Com muitos passos por frame a animação inteira cabia num ou dois
+        // frames e via-se só como clarões: aí não se desenha. Precisa de pelo
+        // menos GHOST_MIN_FRAMES frames para se ler; em pausa vê-se sempre.)
+        const GHOST_MIN_FRAMES: f32 = 6.0;
+        let ghosts_readable = self.ui.paused || GHOST_STEPS / self.ui.steps_per_frame.max(1) as f32 >= GHOST_MIN_FRAMES;
+        self.view.ghost_steps.set(if ghosts_readable { GHOST_STEPS } else { 0.0 });
         // Ao pintar fumarolas (ou a apagá-las), vê-se onde as há.
         self.view.show_vents.set(self.ui.paint_on && (4..=6).contains(&self.ui.paint_material));
         self.view.daylight.set(self.world.params.daylight(self.world.params.epoch));
