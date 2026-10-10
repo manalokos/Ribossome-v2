@@ -283,6 +283,28 @@ fn ghost_record(slot: u32, a: Agent) {
 // tudo numa célula só). O genoma volta GASTO; os complementos já capturados
 // para a cópia em curso voltam ATIVADOS: foram tirados ativados e ainda só
 // estavam emparelhados, não ligados (a ativação não foi gasta).
+// O QUE UM PRODUTOR LARGA (fotossistema e quimiossíntese, no modo que recicla
+// ou com o agente cheio): reativa um monómero gasto numa célula ao acaso até
+// EXUDE_R células dali, e não na do próprio órgão. Uma molécula pequena
+// difunde-se depressa: o que um produtor larga espalha-se à volta antes de
+// ele o voltar a apanhar. Na própria célula, quem o apanhava quase sempre
+// era ele mesmo (para a cópia), e não sobrava nada para quem come ao lado.
+// Se ali não houver gastos (ou for rocha), fica na célula do órgão.
+const EXUDE_R: f32 = 4.0;
+fn exude_one(cell: u32, q: vec4<f32>) {
+    let ang = 6.2831853 * q.z;
+    let rad = 1.0 + (EXUDE_R - 1.0) * q.w;
+    let x = clamp(i32(cell % GRID_SIZE) + i32(round(cos(ang) * rad)), 0, i32(GRID_SIZE) - 1);
+    let y = clamp(i32(cell / GRID_SIZE) + i32(round(sin(ang) * rad)), 0, i32(GRID_SIZE) - 1);
+    let there = u32(y) * GRID_SIZE + u32(x);
+    let ch0 = min(u32(q.y * 4.0), 3u);
+    var done = false;
+    for (var t = 0u; t < 8u; t++) {
+        let c = select(there, cell, t >= 4u);
+        if (!done && chem_activate_one(c * 4u + (ch0 + t) % 4u)) { done = true; }
+    }
+}
+
 // O que um corpo deixa quando morre: a energia que ainda tinha fica nos
 // restos, como monómeros ATIVADOS (lysis_yield dela; o resto é calor). Um
 // morto de fome não deixa nada; um que morre de velho, de UV ou de calor com
@@ -660,10 +682,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                         if (recharge_copy(slot, cell, a.pair_count, a.gene_len)) {
                             a.pair_count += 1u;
                         } else {
-                            let ch0 = min(u32(q.y * 4.0), 3u);
-                            for (var t = 0u; t < 4u; t++) {
-                                if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
-                            }
+                            exude_one(cell, q);
                         }
                     }
                 }
@@ -710,10 +729,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (recharge_copy(slot, cell, a.pair_count, a.gene_len)) {
                         a.pair_count += 1u;
                     } else {
-                        let ch0 = min(u32(q.y * 4.0), 3u);
-                        for (var t = 0u; t < 4u; t++) {
-                            if (chem_activate_one(cell * 4u + (ch0 + t) % 4u)) { break; }
-                        }
+                        exude_one(cell, q);
                     }
                 }
             }
