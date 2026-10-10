@@ -718,7 +718,7 @@ pub fn panel(
                 if o != 0 && (o & 0x1F) - 1 == 7 {
                     let v = organ_table.get(7).and_then(|r| r.variantes.get(((o >> 5) & 0x7) as usize)).and_then(|v| v.get("capacidade")).copied().unwrap_or(0.0);
                     run += 1.0;
-                    run_cap += v.max(0.0) * crate::life::organs::organ_gain((o >> 8) as u8).clamp(0.5, 2.0);
+                    run_cap += v.max(0.0);
                 } else {
                     store += merge(run, run_cap);
                     (run, run_cap) = (0.0, 0.0);

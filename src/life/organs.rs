@@ -190,7 +190,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("carga", "capacitor: how much it charges per step and per unit of signal (it loses one tenth of this per step); differentiator: how fast the average follows the input (0..1 per step)"),
         pd("descarga", "capacitor: how much it empties per step while firing (threshold ÷ discharge = pulse duration in steps)"),
     ],
-    &[pd("capacidade", "energy this organ adds to the body's capacity (× the intensity, limited between ×0.5 and ×2); the body alone stores 0.5 per residue of average volume")],
+    &[pd("capacidade", "energy this organ adds to the body's capacity (the intensity does not count); the body alone stores 0.5 per residue of average volume")],
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
     &[pd("reciclar", "0..1: fraction of the light used to reactivate spent monomers (the rest gives energy)"), pd("eficiencia", "multiplies the yield")],
@@ -285,7 +285,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
         2 => format!("{} · senses {}", sensor("TOTAL food sensor", "crown of green antennae"), alvo()),
         3 => format!("{} · senses {}", sensor("TOTAL physical sensor", "crown of yellow antennae"), alvo_fisico()),
         4 => sensor("internal energy sensor (with proline next: PAIN, the energy that proteases take from it, emitted on γ/δ)", "disc with a golden ring"),
-        7 => format!("storage [disc with rings]: adds {:.1} to the body's energy capacity (the intensity only counts between ×0.5 and ×2); several in a row along the chain merge into a larger store, +25% for each extra one", v("capacidade") * g.clamp(0.5, 2.0)),
+        7 => format!("storage [disc with rings]: adds {:.1} to the body's energy capacity; several in a row along the chain merge into a larger store, +25% for each extra one", v("capacidade")),
         8 | 9 => {
             // Um lado só: par = esquerda, ímpar = direita (troca depois de um quiral).
             let lado = if gain_idx & 1 == 0 { "LEFT" } else { "RIGHT" };

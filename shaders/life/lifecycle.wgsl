@@ -408,9 +408,10 @@ fn energy_capacity(slot: u32, a: Agent) -> f32 {
         vol += aa_props[body_get(slot, k)].volume;
         let o = organ_get(slot, k);
         if (organ_type(o) == ORGAN_STORAGE) {
-            // A intensidade só afina a capacidade entre ×0,5 e ×2.
+            // (Um só tamanho de depósito: a intensidade não conta. Reservas
+            // grandes fazem-se com vários, cada um com o seu peso e o seu custo.)
             run += 1.0;
-            run_cap += max(organ_var(o).p0, 0.0) * clamp(organ_gain(o), 0.5, 2.0);
+            run_cap += max(organ_var(o).p0, 0.0);
         } else {
             store += run_cap * (1.0 + STORE_MERGE * (min(run, STORE_MERGE_MAX) - 1.0)) * step(0.5, run);
             run = 0.0;
