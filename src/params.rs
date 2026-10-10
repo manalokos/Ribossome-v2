@@ -920,6 +920,11 @@ gpu_struct! {
         /// Fração de passo a somar à epoch no relógio do tremor das moléculas
         /// (para ele continuar entre dois passos, em câmara lenta).
         pub clock_frac: f32,
+        /// Monómeros escondidos na vista: bit 0 = os ativados, bit 1 = os gastos.
+        pub hide_monomers: u32,
+        pub _pad_v3: u32,
+        pub _pad_v4: u32,
+        pub _pad_v5: u32,
     }
 }
 

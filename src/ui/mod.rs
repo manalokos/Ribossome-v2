@@ -30,6 +30,9 @@ pub struct UiState {
     pub monomer_brightness: f32,
     /// Círculo de confusão dos monómeros (células; 0 = quadrados).
     pub coc_radius: f32,
+    /// Mostrar os monómeros ativados / os gastos na vista.
+    pub show_activated: bool,
+    pub show_spent: bool,
     /// Vista de MICROSCÓPIO 3D em vez do mapa (ver `microscope.rs`).
     pub microscope: bool,
     /// Cor dos agentes: 0 química, 1 sinal α, 2 sinal β, 3 α e β.
@@ -266,6 +269,8 @@ impl UiState {
             vsync: true,
             monomer_brightness: 0.5,
             coc_radius: 0.35,
+            show_activated: true,
+            show_spent: true,
             microscope: std::env::var("RIBO_MICROSCOPE").map_or(true, |v| v != "0"),
             signal_view: 0,
             mark_organ: 0,
@@ -799,6 +804,11 @@ fn tab_view(ui: &mut egui::Ui, b: &Busca, st: &mut UiState) {
             ui.checkbox(&mut st.microscope, "Microscope when zoomed in").on_hover_text("zooming in close fades the map into a 3D electron-micrograph view of the same spot, tilting as you approach; zooming out comes back to the map. Left drag moves, right drag turns and tilts, a click focuses and selects. Lens, focus, colour and the rest are in its own panel. Off = always the flat map");
         });
         c.slider("monomer brightness", slider(&mut st.monomer_brightness, 0.0..=1.0));
+        c.row("show activated spent monomers", |ui| {
+            ui.label("show monomers:");
+            ui.checkbox(&mut st.show_activated, "activated").on_hover_text("the activated monomers (coloured): the ones that can be eaten or paired into a copy");
+            ui.checkbox(&mut st.show_spent, "spent").on_hover_text("the spent monomers (grey): matter with no energy, waiting to be reactivated");
+        });
         c.slider("monomer circle of confusion (cells)", slider(&mut st.coc_radius, 0.0..=1.0))
             .tip("up close, each monomer is drawn as a soft disc of this radius, at its own position inside the cell (drawing only: the simulation counts monomers per cell). Small = loose molecules; large = continuous haze; 0 = squares, one color per cell");
         const SIGNAL_VIEWS: [&str; 6] = [

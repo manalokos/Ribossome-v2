@@ -1770,6 +1770,7 @@ impl Running {
         self.view.daylight.set(self.world.params.daylight(self.world.params.epoch));
         self.view.mark_organ.set(self.ui.mark_organ);
         self.view.coc_radius.set(self.ui.coc_radius);
+        self.view.hide_monomers.set((!self.ui.show_activated) as u32 | ((!self.ui.show_spent) as u32) << 1);
         self.view.origin.set([self.viewport[0], self.viewport[1]]);
         self.view.update(
             &self.gpu.queue,

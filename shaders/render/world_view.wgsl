@@ -255,33 +255,44 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                             // MOLÉCULA: o sprite do nucleótido, rodado por um
                             // hash; pesa pela máscara e pelo relevo.
                             if (dot(d, d) < r * r) {
-                                let ang = f32(h & 0xFFFu) * (6.2831853 / 4096.0) + MOL_SPIN * wob3.z;
-                                let cs = cos(ang);
-                                let sn = sin(ang);
-                                let q = vec2<f32>(d.x * cs - d.y * sn, d.x * sn + d.y * cs) / r;
-                                let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
-                                let g = px / r;
-                                let t = textureSampleGrad(sprites_tex, sprites_samp, vec2<f32>((f32(ch) + 0.5) / SPRITE_COLS, (SPRITE_ROW_MONOMER + f32(st) + 0.5) / SPRITE_ROWS) + clamp(q, vec2<f32>(-0.98), vec2<f32>(0.98)) * sc, vec2<f32>(g, 0.0) * sc, vec2<f32>(0.0, g) * sc);
-                                // A quantidade conta a máscara inteira; o relevo
-                                // (t.r) vai à parte, para não se perder quando a
-                                // cor satura.
-                                let cov = step(0.5, t.g);
-                                sum += cov;
-                                s.lum += cov * t.r;
-                                s.cover += cov;
-                                // TRÊS CAMADAS: cada molécula fica numa (ao
-                                // acaso), a primeira pousada no fundo e as
-                                // outras por cima, à distância de uma espessura.
-                                let lf = f32(((h >> 12u) & 0xFFu) % 3u);
-                                let tb = (t.b * 65280.0 + t.a * 255.0) / 65535.0;
-                                let top = cov * (MOL_RELIEF * tb * r * mix(0.45, 1.3, t.r) + mol_thickness(r) * lf);
-                                if (top > s.top) {
-                                    s.top = top;
-                                    // (A forma insuflada é um calhau liso; a
-                                    // luminância do sprite, onde se veem os
-                                    // átomos, dá-lhe as bossas.)
-                                    s.h = cov * tb * r * mix(0.45, 1.3, t.r);
-                                    s.lift = lf;
+                                // NA VISTA NORMAL cada monómero é uma mancha
+                                // GAUSSIANA (σ = r / DOT_SIGMAS, a acabar em zero
+                                // em r): lê-se a qualquer zoom. Os sprites das
+                                // moléculas ficavam escuros e instáveis nos zooms
+                                // intermédios, e nunca se chegava perto o
+                                // bastante para lhes ver a forma; ficam só para
+                                // o microscópio 3D, que precisa do relevo delas.
+                                if (view.relief == 0u) {
+                                    sum += max(exp(-dot(d, d) * inv_2s2) - floor_g, 0.0) * norm;
+                                } else {
+                                    let ang = f32(h & 0xFFFu) * (6.2831853 / 4096.0) + MOL_SPIN * wob3.z;
+                                    let cs = cos(ang);
+                                    let sn = sin(ang);
+                                    let q = vec2<f32>(d.x * cs - d.y * sn, d.x * sn + d.y * cs) / r;
+                                    let sc = vec2<f32>(0.5 / SPRITE_COLS, -0.5 / SPRITE_ROWS);
+                                    let g = px / r;
+                                    let t = textureSampleGrad(sprites_tex, sprites_samp, vec2<f32>((f32(ch) + 0.5) / SPRITE_COLS, (SPRITE_ROW_MONOMER + f32(st) + 0.5) / SPRITE_ROWS) + clamp(q, vec2<f32>(-0.98), vec2<f32>(0.98)) * sc, vec2<f32>(g, 0.0) * sc, vec2<f32>(0.0, g) * sc);
+                                    // A quantidade conta a máscara inteira; o relevo
+                                    // (t.r) vai à parte, para não se perder quando a
+                                    // cor satura.
+                                    let cov = step(0.5, t.g);
+                                    sum += cov;
+                                    s.lum += cov * t.r;
+                                    s.cover += cov;
+                                    // TRÊS CAMADAS: cada molécula fica numa (ao
+                                    // acaso), a primeira pousada no fundo e as
+                                    // outras por cima, à distância de uma espessura.
+                                    let lf = f32(((h >> 12u) & 0xFFu) % 3u);
+                                    let tb = (t.b * 65280.0 + t.a * 255.0) / 65535.0;
+                                    let top = cov * (MOL_RELIEF * tb * r * mix(0.45, 1.3, t.r) + mol_thickness(r) * lf);
+                                    if (top > s.top) {
+                                        s.top = top;
+                                        // (A forma insuflada é um calhau liso; a
+                                        // luminância do sprite, onde se veem os
+                                        // átomos, dá-lhe as bossas.)
+                                        s.h = cov * tb * r * mix(0.45, 1.3, t.r);
+                                        s.lift = lf;
+                                    }
                                 }
                             }
                         }
@@ -491,6 +502,9 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
             mol_edge = dots * pow(l, 4.0) * 0.5;
         }
     }
+    // Esconder os ativados e/ou os gastos (caixas da vista).
+    if ((view.hide_monomers & 1u) != 0u) { act = vec4<f32>(0.0); }
+    if ((view.hide_monomers & 2u) != 0u) { spent = vec4<f32>(0.0); }
     // LUZ como SOMA DOURADA: onde chega luz soma-se um brilho dourado; a
     // sombra (do terreno e dos agentes) é a falta dele. Não multiplica nada,
     // por isso os monómeros guardam a cor. √luz para se ver mais fundo do que

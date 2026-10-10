@@ -64,6 +64,8 @@ pub struct WorldView {
     pub height_pass: std::cell::Cell<u32>,
     /// Fração de passo no relógio do tremor das moléculas (0..1).
     pub clock_frac: std::cell::Cell<f32>,
+    /// Monómeros escondidos: bit 0 = ativados, bit 1 = gastos.
+    pub hide_monomers: std::cell::Cell<u32>,
     draw_args: wgpu::Buffer,
     /// Slot a desenhar sozinho (u32::MAX = todos).
     pub focus: std::cell::Cell<u32>,
@@ -552,6 +554,7 @@ impl WorldView {
             show_vents: std::cell::Cell::new(false),
             height_pass: std::cell::Cell::new(0),
             clock_frac: std::cell::Cell::new(0.0),
+            hide_monomers: std::cell::Cell::new(0),
             draw_args: world.draw_args_buf.clone(),
             focus: std::cell::Cell::new(u32::MAX),
             uv_depth: std::cell::Cell::new(11.0),
@@ -613,6 +616,10 @@ impl WorldView {
             height_pass: self.height_pass.get(),
             relief: self.relief_order.get() as u32,
             clock_frac: self.clock_frac.get(),
+            hide_monomers: self.hide_monomers.get(),
+            _pad_v3: 0,
+            _pad_v4: 0,
+            _pad_v5: 0,
         };
         queue.write_buffer(&self.view_buf, 0, bytemuck::bytes_of(&p));
     }
