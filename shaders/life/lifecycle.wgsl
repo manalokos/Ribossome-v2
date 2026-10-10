@@ -593,11 +593,11 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
         if (st == 0u) {
-            // (Cheio = não cabe uma refeição inteira. Um corpo com capacidade
-            // abaixo de uma refeição não come: é o que impede a corrida para
-            // o replicador mínimo. Com "cheio = no limite" o mundo encheu-se
-            // de corpos de 5 resíduos em poucas horas.)
-            let full = params.hunger_regulation != 0u && a.energy + params.food_power > cap;
+            // (Cheio = no limite: um corpo pequeno, com capacidade abaixo de
+            // uma refeição, come e desperdiça o excesso. O que trava a
+            // corrida para o replicador mínimo é ser presa fácil: ver o
+            // tamanho na mordida das proteases, em contact.wgsl.)
+            let full = params.hunger_regulation != 0u && a.energy >= cap;
             if (r.x < pe && !full) {
                 joint_state[si] = 1u;
                 let rc = rw - p;
