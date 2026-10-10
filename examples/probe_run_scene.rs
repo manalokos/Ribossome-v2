@@ -32,7 +32,7 @@ fn main() {
         let alive: Vec<_> = a.iter().filter(|a| a.alive != 0).collect();
         let c = w.life_counters_blocking(&gpu);
         let e = alive.iter().map(|a| a.energy).sum::<f32>() / alive.len().max(1) as f32;
-        println!("+{done:5}: vivos {:6}  energia média {e:6.1}  nascimentos {}  mortes {} (fome {})", alive.len(), c.births, c.deaths, c.starved);
+        println!("+{done:5}: vivos {:6}  energia média {e:6.1}  nascimentos {}  mortes {} (fome {}, protease {})", alive.len(), c.births, c.deaths, c.starved, c.bites);
     };
     report(&w, 0);
     let mut done = 0;
