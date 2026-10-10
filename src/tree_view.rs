@@ -18,6 +18,82 @@ const PORTRAIT: u32 = 192;
 /// desenho simplificado feito no browser).
 const MAX_PORTRAITS: usize = 2000;
 
+/// ESTÚDIO: um mundo pequeno e vazio onde se faz nascer um genoma só para o
+/// fotografar com o corpo dobrado como seria no mundo real (as mesmas regras
+/// de ângulos e sinais, mas sem nada que o mate, mexa ou ilumine). Serve ao
+/// inspetor para mostrar a OUTRA fita do agente selecionado. Fica montado
+/// entre fotografias; cada uma usa um sítio novo da grelha.
+pub struct Studio {
+    world: World,
+    cap: crate::render::capture::Capture,
+    next: usize,
+}
+
+impl Studio {
+    const STEP: f32 = 700.0;
+    const COLS: usize = 20;
+    const ROOM: usize = 400;
+
+    pub fn new(gpu: &crate::gpu::Gpu, like: &World) -> Self {
+        // (A mesma grelha do mundo real: os shaders levam o tamanho como
+        // constante, e com outro tamanho a placa compilava-os todos de novo,
+        // quase meio minuto. Só os agentes são poucos.)
+        let cfg = crate::params::WorldConfig { max_agents: std::env::var("STUDIO_AGENTS").ok().and_then(|v| v.parse().ok()).unwrap_or(4096), ..like.cfg };
+        let mut world = World::new(gpu, cfg, 1);
+        world.custom_terrain = Some((vec![0; cfg.cells() as usize], vec![0.0; cfg.cells() as usize]));
+        world.fumaroles.clear();
+        world.seed_matter(gpu, 1);
+        world.settings.fluid_enabled = false;
+        let cap = crate::render::capture::Capture::new(gpu, &world, PORTRAIT);
+        Self { world, cap, next: 0 }
+    }
+
+    /// Cheio: é preciso montar outro (os modelos não morrem).
+    pub fn full(&self) -> bool {
+        self.next >= Self::ROOM
+    }
+
+    /// Retrato (RGBA, lado `PORTRAIT`) do corpo que nasce de `genome`, com as
+    /// regras de `w`. None se não nasceu (sem matéria livre ali, por exemplo).
+    pub fn portrait(&mut self, gpu: &crate::gpu::Gpu, w: &World, genome: &[u8]) -> Option<(Vec<u8>, u32)> {
+        use crate::params::SpawnRequest;
+        let t = &mut self.world;
+        let epoch = t.params.epoch;
+        t.params = w.params;
+        t.params.epoch = epoch;
+        t.params.max_agents = t.cfg.max_agents;
+        t.params.death_probability = 0.0;
+        t.params.pairing_rate = 0.0;
+        t.params.uptake_rate = 0.0;
+        t.params.brownian_rot = 0.0;
+        t.params.uv_strength = 0.0;
+        t.params.sedimentation = 0.0;
+        t.params.spawn_energy = 8.0;
+        let k = self.next;
+        self.next += 1;
+        let at = [1500.0 + Self::STEP * (k % Self::COLS) as f32, 1500.0 + Self::STEP * (k / Self::COLS) as f32];
+        t.request_seeds(&[SpawnRequest::with_genome(at[0], at[1], genome)]);
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        t.encode_steps(&gpu.queue, &mut enc, 3);
+        gpu.queue.submit([enc.finish()]);
+        gpu.wait_idle();
+        let agents = t.read_agents_blocking(gpu);
+        let (slot, a) = agents.iter().enumerate().filter(|(_, a)| a.alive != 0).min_by(|x, y| {
+            let d = |a: &crate::params::Agent| (a.pos_x - at[0]).powi(2) + (a.pos_y - at[1]).powi(2);
+            d(x.1).total_cmp(&d(y.1))
+        })?;
+        if (a.pos_x - at[0]).abs() > 0.5 * Self::STEP || (a.pos_y - at[1]).abs() > 0.5 * Self::STEP {
+            return None;
+        }
+        let png = crate::report::portrait(gpu, t, &self.cap, slot as u32, a, 0.0);
+        let mut reader = png::Decoder::new(&png[..]).read_info().ok()?;
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).ok()?;
+        buf.truncate(info.buffer_size());
+        Some((buf, info.width))
+    }
+}
+
 /// RETRATOS COM O ASPETO DA SIMULAÇÃO. Muitos ramos já se extinguiram, por
 /// isso não há agente vivo para fotografar: monta-se um mundo à parte, sem
 /// terreno nem corrente, semeia-se lá um agente com o genoma de cada ramo e

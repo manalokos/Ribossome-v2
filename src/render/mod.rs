@@ -99,6 +99,14 @@ pub const MSAA: u32 = 4;
 /// Atlas de sprites dos órgãos (`assets/sprites.png`, feito por
 /// `scripts/sprites_atlas.py`), com mipmaps feitos aqui por médias de 2×2.
 fn sprites_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
+    // UMA SÓ por placa: o atlas tem 80 MB em disco e 400 MB na placa, e cada
+    // vista (a principal, as capturas, o inspetor, o microscópio, o estúdio)
+    // descodificava-o e carregava-o de novo, segundos e centenas de MB de cada vez.
+    static SHARED: std::sync::Mutex<Vec<(wgpu::Device, wgpu::Texture)>> = std::sync::Mutex::new(Vec::new());
+    let mut shared = SHARED.lock().unwrap();
+    if let Some((_, t)) = shared.iter().find(|(d, _)| d == device) {
+        return t.clone();
+    }
     let mut reader = png::Decoder::new(&include_bytes!("../../assets/sprites.png")[..]).read_info().expect("assets/sprites.png");
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).expect("assets/sprites.png");
@@ -139,6 +147,7 @@ fn sprites_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture 
         }
         (buf, w, h) = (next, nw, nh);
     }
+    shared.push((device.clone(), texture.clone()));
     texture
 }
 

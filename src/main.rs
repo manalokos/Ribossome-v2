@@ -1613,6 +1613,8 @@ impl Running {
         let target = tex.texture.create_view(&Default::default());
 
         // UI primeiro (pode mudar params e vista neste frame).
+        // (O retrato da outra fita do agente selecionado, se for outro genoma.)
+        self.inspector.refresh_other_strand(&self.gpu, &self.world);
         let raw = self.egui_state.take_egui_input(&self.window);
         let ctx = self.egui_state.egui_ctx().clone();
         let mut free = None;

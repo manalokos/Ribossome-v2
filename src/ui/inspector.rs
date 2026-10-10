@@ -106,6 +106,13 @@ pub struct Inspector {
     pub open: bool,
     preview: Capture,
     pub preview_tex: Option<egui::TextureId>,
+    /// A OUTRA FITA do agente selecionado, fotografada num estúdio (ver
+    /// tree_view::Studio): o genoma para que foi feita, a imagem acabada de
+    /// chegar (RGBA, lado) e a textura que o painel mostra.
+    studio: Option<crate::tree_view::Studio>,
+    anti_for: Option<Vec<u8>>,
+    anti_new: Option<(Vec<u8>, u32)>,
+    anti_tex: Option<egui::TextureHandle>,
 }
 
 impl Inspector {
@@ -139,6 +146,10 @@ impl Inspector {
             state: Readback::Idle,
             data: None,
             dead: false,
+            studio: None,
+            anti_for: None,
+            anti_new: None,
+            anti_tex: None,
             follow: false,
             open: false,
             preview: Capture::new(gpu, world, PREVIEW_SIZE),
@@ -195,6 +206,22 @@ impl Inspector {
         self.data = None;
         self.dead = false;
         self.open = self.selected.is_some() || self.open;
+    }
+
+    /// Fotografa a outra fita do agente selecionado, uma vez por genoma (o
+    /// corpo que sai do complemento invertido: o filho é dessa forma).
+    pub fn refresh_other_strand(&mut self, gpu: &Gpu, world: &World) {
+        let Some(d) = &self.data else { return };
+        if self.anti_for.as_ref() == Some(&d.genome) {
+            return;
+        }
+        self.anti_for = Some(d.genome.clone());
+        self.anti_tex = None;
+        if self.studio.as_ref().is_none_or(|s| s.full()) {
+            self.studio = Some(crate::tree_view::Studio::new(gpu, world));
+        }
+        let other = crate::species::reverse_complement(&d.genome);
+        self.anti_new = self.studio.as_mut().and_then(|s| s.portrait(gpu, world, &other));
     }
 
     pub fn deselect(&mut self) {
@@ -640,24 +667,24 @@ pub fn panel(
             return;
         };
         let a = &d.agent;
+        if let Some((rgba, side)) = ins.anti_new.take() {
+            let img = egui::ColorImage::from_rgba_unmultiplied([side as usize, (rgba.len() / 4 / side.max(1) as usize).max(1)], &rgba);
+            ins.anti_tex = Some(ui.ctx().load_texture("outra fita", img, egui::TextureOptions::LINEAR));
+        }
         if let Some(t) = ins.preview_tex {
-            ui.image((t, egui::vec2(256.0, 256.0)));
+            let r = ui.image((t, egui::vec2(256.0, 256.0))).rect;
+            // A OUTRA FITA, em pequeno, no canto do retrato: o corpo que sai
+            // do complemento invertido deste genoma, dobrado como seria no
+            // mundo (o filho é dessa forma, e o neto volta a ser desta).
+            if let Some(anti) = &ins.anti_tex {
+                let small = egui::Rect::from_min_size(r.right_bottom() - egui::vec2(88.0, 88.0), egui::vec2(84.0, 84.0));
+                let painter = ui.painter();
+                painter.rect_filled(small.expand(1.0), 3.0, egui::Color32::from_gray(70));
+                painter.image(anti.id(), small, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                painter.text(small.left_top() + egui::vec2(3.0, 2.0), egui::Align2::LEFT_TOP, "other strand", egui::FontId::proportional(9.0), egui::Color32::from_gray(200));
+            }
         }
         ui.checkbox(&mut ins.follow, "camera follows this organism");
-        // A OUTRA FITA, em pequeno: o corpo que sai do complemento invertido
-        // deste genoma (o filho é dessa forma, e o neto volta a ser desta).
-        {
-            let other = crate::life::organs::translate_organs(&crate::species::reverse_complement(&d.genome), require_start, &crate::life::table::code_to_gpu(organ_code));
-            if other.is_empty() {
-                ui.weak("other strand (the offspring): no body, it does not translate");
-            } else {
-                let body: Vec<u8> = other.iter().map(|r| r.aa).collect();
-                let organs: Vec<u16> = other.iter().map(crate::life::organs::organ_code).collect();
-                let symbols: String = organs.iter().filter(|&&o| o != 0).map(|&o| ORGAN_SYMBOLS[((o & 0x1F) - 1) as usize]).collect();
-                ui.push_id("outra fita", |ui| body_map(ui, &format!("Other strand (the offspring): {} residues  {symbols}", body.len()), false, &body, &organs, organ_table));
-            }
-            ui.separator();
-        }
         signal_bars(ui, d);
         egui::Grid::new("ins").striped(true).show(ui, |ui| {
             ui.label("name");
