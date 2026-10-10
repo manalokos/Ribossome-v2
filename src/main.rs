@@ -1500,6 +1500,17 @@ impl Running {
     }
 
     fn redraw(&mut self) {
+        // LIMITE DE FPS do microscópio: espera-se o que faltar para o intervalo
+        // ANTES de desenhar (esperar depois atrasava a imagem já feita, e a
+        // câmara parecia andar atrás do rato). Enquanto se arrasta, roda ou
+        // faz zoom não há limite: a vista responde a toda a velocidade.
+        let interacting = self.dragging || self.orbiting || self.zoom_pending.abs() > 1e-4;
+        if let Some(limit) = self.scope.as_ref().filter(|_| self.micro_t > 0.5 && !interacting).map(|s| s.fps_limit).filter(|&l| l > 0.0) {
+            let wait = std::time::Duration::from_secs_f32(1.0 / limit).saturating_sub(self.last_present.elapsed());
+            if !wait.is_zero() {
+                std::thread::sleep(wait);
+            }
+        }
         self.runlog.before_frame(&mut self.profiler);
         if let Some(ed) = &self.editor {
             for u in ed.poll() {
@@ -2047,13 +2058,6 @@ impl Running {
         }
 
         self.runlog.after_frame(&self.world, &self.ui, &mut self.profiler);
-        // LIMITE DE FPS do microscópio: espera-se o que faltar para o intervalo.
-        if let Some(limit) = self.scope.as_ref().filter(|_| self.micro_t > 0.5).map(|s| s.fps_limit).filter(|&l| l > 0.0) {
-            let wait = std::time::Duration::from_secs_f32(1.0 / limit).saturating_sub(self.last_present.elapsed());
-            if !wait.is_zero() {
-                std::thread::sleep(wait);
-            }
-        }
         self.last_present = std::time::Instant::now();
         self.window.pre_present_notify();
         self.gpu.queue.present(tex);
