@@ -209,6 +209,13 @@ fn protease_exposed(slot: u32, n: u32) -> vec4<f32> {
             own = max(own, sign(family_weights(protease_family(slot, k, n))) * block);
         }
     }
+    // ORÇAMENTO DE DEFESA: a proteção de um corpo soma no máximo 1, repartida
+    // pelas famílias que tenta cobrir. Imune a uma família = 100% nessa; a
+    // duas = 50% em cada; a tudo = 25%. Quem quer estar a salvo dos seus
+    // (que atacam com uma família) consegue; quem quer ser imune a toda a
+    // gente não, e fica sempre uma família que o apanha: pedra, papel, tesoura.
+    let total = own.x + own.y + own.z + own.w;
+    if (total > 1.0) { own /= total; }
     return vec4<f32>(1.0) - PROTEASE_IMMUNITY * own;
 }
 
