@@ -75,6 +75,8 @@ const BITE_SCALE: f32 = 10000.0;
 // Limites do efeito do tamanho na mordida (atacante / vítima, em resíduos).
 const PRED_SIZE_MIN: f32 = 0.2;
 const PRED_SIZE_MAX: f32 = 5.0;
+// Passos entre dois disparos das proteases de um agente.
+const PROTEASE_RELOAD: u32 = 60u;
 const S_DIGEST: u32 = 13u;
 const S_SPILL: u32 = 15u;
 
@@ -283,6 +285,12 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     // As células de contacto têm 120 unidades: com proteases de alcance é
     // preciso olhar duas células em vez de uma (raios 60 + 60 + alcance).
     let span = select(1, 2, arms.r_mid > 0.0 || arms.r_far > 0.0);
+    // DISPARO E RECARGA: a protease não corrói aos poucos; dispara de uma vez
+    // (o dano de PROTEASE_RELOAD passos num só) e fica a recarregar esse
+    // tempo. Cada agente tem o seu instante (pelo id), por isso um encontro
+    // curto pode calhar com a arma descarregada. Em média tira o mesmo que
+    // antes; a diferença é que um golpe pode matar de uma vez.
+    let loaded = (params.epoch + a.id) % PROTEASE_RELOAD == 0u;
     // Energia que este agente tira a outros neste passo.
     var gained = 0.0;
     for (var dy = -span; dy <= span; dy++) {
@@ -312,7 +320,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (overlap > 0.0) { sites += arms.near; }
                     if (-overlap < arms.r_mid) { sites += arms.mid * reach_falloff(-overlap, arms.r_mid); }
                     if (-overlap < arms.r_far) { sites += arms.far * reach_falloff(-overlap, arms.r_far); }
-                    if (armed && sites.x + sites.y + sites.z + sites.w > 0.0 && b.energy > 0.0) {
+                    if (armed && loaded && sites.x + sites.y + sites.z + sites.w > 0.0 && b.energy > 0.0) {
                         let power = dot(sites, unpack_targets(contact_disp[e].w)) * PRED_SITE_SCALE;
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * unpack_proline(contact_disp[e].w);
                         // TAMANHO: a mesma dose de protease desfaz uma fração
@@ -321,7 +329,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         // vítima (resíduos): um grande devora os pequenos, e um
                         // pequeno mal belisca um grande.
                         let size = clamp(f32(max(a.body_len, 1u)) / f32(max(b.body_len, 1u)), PRED_SIZE_MIN, PRED_SIZE_MAX);
-                        let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist * size, b.energy);
+                        let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist * size * f32(PROTEASE_RELOAD), b.energy);
                         if (bite > 0.0) {
                             atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
                             gained += bite;
