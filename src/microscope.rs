@@ -1588,7 +1588,12 @@ impl Scope {
         let tweening = slow && self.smooth_motion;
         let tween_t = if tweening { (self.last_step.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0) } else { 1.0 };
         let a = self.approach.clamp(0.0, 1.0);
-        let molecule_r = if self.embedded { self.map_molecule_r + (self.molecule_r - self.map_molecule_r) * a * a * (3.0 - 2.0 * a) } else { self.molecule_r };
+        // (Sempre o tamanho do microscópio. Com o tamanho do mapa na primeira
+        // metade da transição, as moléculas eram bolhas mais altas do que
+        // os bichos e engoliam-nos; no mapa, que ainda se vê por baixo nessa
+        // fase, os monómeros já têm o tamanho de lá.)
+        let _ = a;
+        let molecule_r = self.molecule_r;
         let hide = (!self.show_activated) as u32 | ((!self.show_spent) as u32) << 1;
         let key = (zc, r, self.monomers + molecule_r + 10.0 * hide as f32, world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
         if self.layer_key != Some(key) {

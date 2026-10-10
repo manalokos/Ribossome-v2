@@ -1862,8 +1862,12 @@ impl Running {
         // de MICRO_Z0 é só o mapa; daí até MICRO_Z1 o microscópio entra em
         // fundido, visto de cima como o mapa, e depois inclina-se e ganha a
         // profundidade de campo até à câmara escolhida no painel.
-        const MICRO_Z0: f32 = 0.3;
-        const MICRO_Z1: f32 = 1.8;
+        // (Não mais cedo: abaixo de ~1,2 píxeis por unidade a zona que o
+        // microscópio tem de cobrir é tão grande que cada resíduo fica com
+        // menos de 4 texels do relevo, e os agentes desfaziam-se numa papa
+        // de pedras, monómeros e bocados de cor.)
+        const MICRO_Z0: f32 = 1.2;
+        const MICRO_Z1: f32 = 3.0;
         let smooth = |a: f32, b: f32, x: f32| {
             let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
