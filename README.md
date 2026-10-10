@@ -57,6 +57,56 @@ folds according to the angles of each amino acid.
 *Close-up: agents among monomers (coloured dots are activated, grey are
 spent) next to a rock.*
 
+## The microscope
+
+![An agent with a protease, seen in the microscope](docs/img/microscope_protease.jpg)
+
+*A creature with a protease (the spiked organ) among loose monomers.*
+
+Zoom in far enough and the flat map fades into a view that looks like a
+scanning electron micrograph: the same creatures, stones and molecules, in
+3D, in real time, with the simulation still running.
+
+It is not a second model of the world. Nothing is built out of meshes:
+
+- Every piece already has a sprite, and each sprite stores a **height**
+  next to its picture (the shape "inflated": at each point, the largest
+  sphere that fits inside the outline). A disc becomes a dome, a ring a
+  torus, a stroke a tube.
+- Each frame the zone under the camera is drawn from straight above into
+  textures that hold, per point, an **interval of heights** (top and
+  bottom) instead of a colour: one layer for the creatures, a second for a
+  creature underneath another, one for stones and one for molecules, all
+  resting on a blurred relief of the terrain.
+- One ray per pixel is marched through that stack until it enters an
+  interval, then refined. The surface normal comes from the neighbouring
+  heights.
+- There is **no light**. As in an electron microscope, brightness is what
+  the surface gives back: grazing surfaces are brighter (edges glow) and
+  points sunk between taller neighbours are darker.
+- The image is noisy on purpose and **accumulates** over frames, with a
+  real lens: focal length, aperture and depth of field, focus where you
+  click, shutter time when things move.
+
+![Close-up with depth of field](docs/img/microscope_closeup.jpg)
+
+*The same organ from close up, with a shallow depth of field.*
+
+Left drag moves, right drag turns and tilts the camera, a click focuses
+and selects, `F` follows the creature nearest the centre. The *Microscope*
+tab has the lens, the exposure and a reticle that names the species in
+view; with it on, false colour is applied to that creature alone, the way
+micrographs are tinted by hand.
+
+![False colour on the creature in the reticle](docs/img/microscope_false_colour.jpg)
+
+The scale bar is in nanometres by a convention, not by the simulation: one
+residue of a body is taken as 0.5 nm (about one turn of a helix), which
+puts an organ at 2 to 3 nm, the size of a protein domain.
+
+`microscopio.bat` opens the microscope on its own, on the autosave or on a
+scene, to take photographs.
+
 ## The world
 
 A 2048 × 2048 grid with a terrain of grains (rock and rubble), a fluid,
@@ -102,7 +152,9 @@ starts from scratch.
 
 ## Interface
 
-- **Mouse:** drag to move, wheel to zoom, click to select an agent.
+- **Mouse:** drag to move, wheel to zoom (far enough in, the map becomes
+  the microscope), click to select an agent.
+- **Bottom of the left panel:** photo and video of what is on screen.
 - **Left panel:** tabs by question (World, Soup, Energy, Life cycle, Body),
   with a search box that finds any control by name.
 - **Right panel:** the inspector of the selected agent.
