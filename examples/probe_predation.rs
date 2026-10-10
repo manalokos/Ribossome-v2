@@ -14,7 +14,13 @@ fn main() {
     let envf = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
     let path = std::env::var("SCENE").unwrap_or_else(|_| "saves/autosave.ribo".into());
     let gpu = Gpu::new_headless().unwrap();
-    let cfg = WorldConfig::DEFAULT;
+    // (O tamanho do mundo é o da cena.)
+    let cfg = {
+        let sc = Scene::read(std::path::Path::new(&path)).unwrap();
+        let c = &sc.header["cfg"];
+        let g = |k: &str, d: u32| c[k].as_u64().map(|v| v as u32).unwrap_or(d);
+        WorldConfig { grid_size: g("grid_size", 2048), fluid_size: g("fluid_size", 1024), world_units_per_cell: g("world_units_per_cell", 30), max_agents: g("max_agents", 400_000) }
+    };
     let mut w = World::new(&gpu, cfg, 1);
     w.load_scene(&gpu, &Scene::read(std::path::Path::new(&path)).unwrap()).unwrap();
     if let Ok(list) = std::env::var("PARAMS") {
