@@ -149,6 +149,19 @@ fn ceiling_at(xy: vec2<f32>) -> f32 {
     return textureLoad(top_tex, vec2<i32>(uv * TOPS), 0).r;
 }
 
+// A cota mais alta de toda a zona (o máximo do teto), num só texel: lê-se de
+// volta para a zona desenhada não ter de contar com 200 unidades de altura.
+@fragment
+fn fs_topmax(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    var m = 0.0;
+    for (var j = 0; j < i32(TOPS); j++) {
+        for (var i = 0; i < i32(TOPS); i++) {
+            m = max(m, textureLoad(top_tex, vec2<i32>(i, j), 0).r);
+        }
+    }
+    return vec4<f32>(m + pos.x * 0.0, 0.0, 0.0, 1.0);
+}
+
 @fragment
 fn fs_top(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let dim = vec2<i32>(textureDimensions(vol_tex));
@@ -915,6 +928,13 @@ pub struct Scope {
     /// Teto grosseiro da zona, para os raios saltarem o ar vazio (fs_top).
     pub top_tex: wgpu::Texture,
     pub top: wgpu::RenderPipeline,
+    /// A cota mais alta da zona: o passo que a calcula, o texel onde fica,
+    /// a leitura pendente e o último valor lido.
+    pub topmax: wgpu::RenderPipeline,
+    pub topmax_tex: wgpu::Texture,
+    pub topmax_pending: Option<wgpu::Buffer>,
+    pub content_h: f32,
+    pub layer_builds: u32,
     pub smooth_a: wgpu::Texture,
     pub smooth_b: wgpu::Texture,
     pub smooth: [wgpu::RenderPipeline; 3],
@@ -1277,6 +1297,20 @@ impl Scope {
             world_smooth_tex: float_target(device, TEX),
             top_tex: float_target(device, 256),
             top: pipeline("fs_top", HEIGHT_FORMAT),
+            topmax: pipeline("fs_topmax", wgpu::TextureFormat::R32Float),
+            topmax_tex: device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("top max"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            }),
+            topmax_pending: None,
+            content_h: HMAX,
+            layer_builds: 0,
             smooth_a: float_target(device, TEX),
             smooth_b: float_target(device, TEX),
             smooth: [pipeline("fs_edge", HEIGHT_FORMAT), pipeline("fs_blur_h", HEIGHT_FORMAT), pipeline("fs_blur_v", HEIGHT_FORMAT)],
@@ -1378,7 +1412,10 @@ impl Scope {
         let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
         for (sx, syy) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
             let dir: [f32; 3] = std::array::from_fn(|k| fwd[k] + right[k] * sx * o.focal * aspect + up[k] * syy * o.focal);
-            for plane in [0.0f32, HMAX] {
+            // (Até à cota mais alta do que lá está, e não às 200 unidades
+            // possíveis: com a câmara inclinada, cada unidade de altura estica
+            // a zona para o lado da câmara.)
+            for plane in [0.0f32, self.content_h.min(HMAX)] {
                 // Onde o raio do canto cruza esta cota (acima do horizonte: longe).
                 let t = if dir[2] < -1e-4 { ((plane - eye[2]) / dir[2]).max(0.0) } else { 1e6 };
                 let mut p = [eye[0] + dir[0] * t - o.centre[0], eye[1] + dir[1] * t - o.centre[1]];
@@ -1393,7 +1430,8 @@ impl Scope {
             }
         }
         let half = 0.5 * (hi[0] - lo[0]).max(hi[1] - lo[1]);
-        let r = (half * 1.08 + 100.0).min(fade_r).max(30.0);
+        // (Margem proporcional à vista, para a oclusão e os desfoques.)
+        let r = (half * 1.08 + (0.5 * half + 12.0).min(100.0)).min(fade_r).max(30.0);
         ([o.centre[0] + 0.5 * (lo[0] + hi[0]), o.centre[1] + 0.5 * (lo[1] + hi[1])], r)
     }
 
@@ -1574,6 +1612,19 @@ impl Scope {
         let tweening = slow && self.smooth_motion;
         let tween_t = if tweening { (self.last_step.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0) } else { 1.0 };
         let key = (zc, r, self.monomers, world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
+        // A cota mais alta pedida num frame anterior: lê-se agora (arredondada
+        // para cima, para a zona não tremer).
+        if let Some(buf) = self.topmax_pending.take() {
+            buf.map_async(wgpu::MapMode::Read, .., |_| {});
+            gpu.wait_idle();
+            if let Ok(data) = buf.get_mapped_range(..) {
+                let h = bytemuck::pod_read_unaligned::<f32>(&data[..4]);
+                if h.is_finite() && h > 0.0 {
+                    self.content_h = ((h + 8.0) / 15.0).ceil() * 15.0;
+                }
+            }
+            buf.unmap();
+        }
         if self.layer_key != Some(key) {
             self.layer_key = Some(key);
             self.layer_age = 0;
@@ -1820,6 +1871,19 @@ impl Scope {
         pass_to(enc, &smooth_b, &self.smooth[1], &bind(&height, &prev_view, &ground, &smooth_a, &pres));
         pass_to(enc, &world_smooth, &self.smooth[2], &bind(&height, &prev_view, &ground, &smooth_b, &pres));
         pass_to(enc, &top_view, &self.top, &bind(&height, &prev_view, &ground, &world_smooth, &pres));
+        // De vez em quando (e logo de início) mede-se a cota mais alta.
+        self.layer_builds += 1;
+        if self.layer_builds % 12 == 2 {
+            let one = self.topmax_tex.create_view(&Default::default());
+            pass_to(enc, &one, &self.topmax, &bind(&height, &prev_view, &ground, &world_smooth, &top_view));
+            let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("top max"), size: 4, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            enc.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo { texture: &self.topmax_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None } },
+                wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            );
+            self.topmax_pending = Some(buf);
+        }
         }
         pass_to(enc, &next_view, &self.march, &bind(&height, &prev_view, &ground, &world_smooth, &top_view));
         match embed {

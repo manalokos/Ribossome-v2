@@ -1203,6 +1203,10 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
         }
         let sp = sprite(f32(in.organ), col_f, q, uv_x * core * SHADOW_MARGIN, uv_y * core * SHADOW_MARGIN);
         g_h = sp.z * in.size / SHADOW_MARGIN;
+        // (Âncora, quimiossíntese, revisão e quiral: os desenhos são rendilhados,
+        // e a forma insuflada de um rendilhado é fina. Sem isto ficavam uma
+        // bolacha ao lado dos outros órgãos, que são bolas.)
+        if (in.organ == 12u || in.organ == 14u || in.organ == 15u || in.organ == 19u) { g_h *= 2.4; }
         // (Os sensores são achatados, como discos, e não bolas.)
         if (in.organ == ORGAN_FOOD_SENSOR || in.organ == ORGAN_LIGHT_SENSOR || in.organ == ORGAN_FOOD_SENSOR_DIR || in.organ == ORGAN_LIGHT_SENSOR_DIR || in.organ == ORGAN_ENERGY_SENSOR) { g_h *= SENSOR_FLAT; }
         g_c = 0.8 * in.size / SHADOW_MARGIN;
