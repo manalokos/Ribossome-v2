@@ -705,6 +705,18 @@ pub fn panel(
                 }),
             );
             body_map(ui, &d.body, &d.organs, organ_table);
+            // A OUTRA FITA: o corpo que sai do complemento invertido deste
+            // genoma (o filho é dessa forma, e o neto volta a ser desta).
+            let other = crate::life::organs::translate_organs(&crate::species::reverse_complement(&d.genome), require_start, &crate::life::table::code_to_gpu(organ_code));
+            ui.separator();
+            if other.is_empty() {
+                ui.weak("the other strand: no body (it does not translate)");
+            } else {
+                let body: Vec<u8> = other.iter().map(|r| r.aa).collect();
+                let organs: Vec<u16> = other.iter().map(crate::life::organs::organ_code).collect();
+                ui.label(egui::RichText::new(format!("the other strand (its offspring): {} residues", body.len())).strong());
+                ui.push_id("outra fita", |ui| body_map(ui, &body, &organs, organ_table));
+            }
         }
     });
     ins.open = open;
