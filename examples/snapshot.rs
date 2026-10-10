@@ -46,6 +46,8 @@ fn main() {
     std::fs::create_dir_all(&out).unwrap();
     let size = 1024;
     let cap = Capture::new(&gpu, &world, size);
+    // COC: círculo de confusão dos monómeros (células), como o slider da vista.
+    cap.view.coc_radius.set(env("COC", 0.35f32));
     let s = cfg.sim_size();
     let zoom: f32 = env("ZOOM", 1.0);
     let cam = Camera { center: [env("CX", 0.5f32) * s, env("CY", 0.5f32) * s], zoom: size as f32 / s * zoom };

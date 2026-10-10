@@ -206,8 +206,6 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     s.h = 0.0;
     s.lift = 0.0;
     s.top = 0.0;
-    // (Até 3 células de raio: acima de 1 cada ponto lê mais células à volta
-    // e o desenho fica mais pesado.)
     let r = clamp(radius, 0.05, 3.0);
     // Núcleo GAUSSIANO, σ = r / DOT_SIGMAS, cortado em r e descido para
     // acabar em zero aí (sem degrau na borda). O integral sobre o disco é
@@ -218,6 +216,31 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     let norm = min(1.1613 / (r * r), DOT_PEAK);
     let inv_2s2 = 0.5 * DOT_SIGMAS * DOT_SIGMAS / (r * r);
     let floor_g = exp(-0.5 * DOT_SIGMAS * DOT_SIGMAS);
+    // RAIO GRANDE (mais de uma célula): a posição de cada monómero dentro da
+    // sua célula já não se distingue, e a mancha é o próprio MAPA de células
+    // desfocado. Lê-se só a contagem de cada célula à volta, com o mesmo
+    // núcleo, em vez de percorrer os monómeros um a um: muito mais barato.
+    if (r > 1.0 && view.relief == 0u) {
+        let clo = vec2<i32>(floor(pc - vec2<f32>(r)));
+        let chi = vec2<i32>(floor(pc + vec2<f32>(r)));
+        for (var cy = clo.y; cy <= chi.y; cy++) {
+            for (var cx = clo.x; cx <= chi.x; cx++) {
+                if (cx >= 0 && cy >= 0 && cx < i32(GRID_SIZE) && cy < i32(GRID_SIZE)) {
+                    let dc = pc - (vec2<f32>(f32(cx), f32(cy)) + 0.5);
+                    let w = max(exp(-dot(dc, dc) * inv_2s2) - floor_g, 0.0) * norm;
+                    if (w > 0.0) {
+                        let cell = u32(cy) * GRID_SIZE + u32(cx);
+                        for (var ch = 0u; ch < 4u; ch++) {
+                            let v = chem_view[cell * 4u + ch];
+                            s.act[ch] += w * f32(v & 0xFFFFu);
+                            s.spent[ch] += w * f32(v >> 16u);
+                        }
+                    }
+                }
+            }
+        }
+        return s;
+    }
     // (Mais a folga do tremor: uma molécula pode entrar no raio vinda da
     // célula ao lado.)
     let lo = vec2<i32>(floor(pc - vec2<f32>(r + 1.6 * MOL_JITTER)));
