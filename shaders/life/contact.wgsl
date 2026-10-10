@@ -158,11 +158,13 @@ fn protease_arms(slot: u32, n: u32) -> ProteaseArms {
     arms.far = vec4<f32>(0.0);
     arms.r_mid = 0.0;
     arms.r_far = 0.0;
+    // (A caça entra no orçamento de captação do corpo: ver harvest_share.)
+    let harvest = harvest_share(slot, n);
     for (var k = 0u; k < n; k++) {
         let o = organ_get(slot, k);
         if (organ_type(o) == ORGAN_PROTEASE) {
             let v = organ_var(o);
-            let f = family_weights(protease_family(slot, k, n)) * max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v);
+            let f = family_weights(protease_family(slot, k, n)) * max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v) * harvest;
             if (v.p0 >= PROTEASE_FAR_FROM) {
                 arms.far += f;
                 arms.r_far = max(arms.r_far, v.p0);

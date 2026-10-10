@@ -545,6 +545,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let cr_e = cos(a.rot);
     let sr_e = sin(a.rot);
     var in_water = 0u;
+    // Quanto rende cada maneira de captar energia (ver harvest_share).
+    let harvest = harvest_share(slot, a.body_len);
     // Maior força com que uma ventosa do corpo está agarrada ao terreno.
     var held = 0.0;
     for (var k = 0u; k < a.body_len; k++) {
@@ -586,7 +588,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // catalisa sempre que há substrato e a energia a mais perde-se como
         // calor. (A regulação pela fome do v3 fica como opção.)
         let hunger = select(1.0, clamp(1.0 - a.energy / cap, 0.0, 1.0), params.hunger_regulation != 0u);
-        let cmult = organ_catalysis_mult(slot, k);
+        // (Só as bocas entram no orçamento de captação; a pele não.)
+        let cmult = organ_catalysis_mult(slot, k) * select(1.0, harvest, organ_type(om) == ORGAN_MOUTH);
         let pe = clamp(params.uptake_rate * metab * prk.catalytic * cmult * eff * hunger, 0.0, 1.0);
         // Sítios em paralelo (só as bocas; nunca menos de 1, mesmo fechada,
         // para acabar o ciclo que já ia a meio).
@@ -641,7 +644,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             // (rec) trabalha sempre.
             let rec0 = clamp(cv.p0, 0.0, 1.0);
             let room = select(1.0, clamp(1.0 - a.energy / max(cap, 1e-3), 0.0, 1.0), params.hunger_regulation != 0u);
-            let take = min(max(params.chemo_take, 0.0) * metab, 1.0) * redox_in[fi] * organ_gain(oc) * max(cv.p1, 0.0) * mix(room, 1.0, rec0);
+            let take = min(max(params.chemo_take, 0.0) * metab, 1.0) * redox_in[fi] * organ_gain(oc) * max(cv.p1, 0.0) * mix(room, 1.0, rec0) * harvest;
             if (take > 0.0) {
                 atomicAdd(&redox_eaten[fi], u32(take * REDOX_FP));
                 let rec = clamp(cv.p0, 0.0, 1.0);
@@ -687,7 +690,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let share = (1.0 - exp(-AGENT_UV_ABSORB * s_abs)) / s_abs;
             let og = organ_gain(ok);
             let pv = organ_var(ok);
-            let power = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0);
+            let power = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0) * harvest;
             // Variante: p0 = fração da luz para reciclar, p1 = eficiência.
             let recycle = clamp(pv.p0, 0.0, 1.0);
             // TRANSBORDO (como o fitoplâncton que exsuda o carbono que fixa a

@@ -107,6 +107,24 @@ fn organ_upkeep(slot: u32, n: u32) -> f32 {
 // nem deixa fugir energia. Os resíduos sem boca absorvem devagar pela
 // "pele" (params.skin_uptake × a sua catálise): um corpo sem boca é uma
 // alga lenta e barata.
+// ORÇAMENTO DE CAPTAÇÃO: um corpo tem maquinaria limitada para ir buscar
+// energia, e reparte-a por igual pelas MANEIRAS diferentes de o fazer que
+// tiver: comer (boca), luz (fotossistema), redutor (quimiossíntese) e caçar
+// (protease). Uma só maneira rende 100%; duas, 50% cada; as quatro, 25%.
+// Conta a categoria, não o número de órgãos: duas bocas não se penalizam uma
+// à outra. É o que faz um especialista render mais do que um omnívoro.
+fn harvest_share(slot: u32, n: u32) -> f32 {
+    var kinds = vec4<f32>(0.0);
+    for (var k = 0u; k < n; k++) {
+        let t = organ_type(organ_get(slot, k));
+        if (t == ORGAN_MOUTH) { kinds.x = 1.0; }
+        if (t == ORGAN_PHOTOSYSTEM) { kinds.y = 1.0; }
+        if (t == ORGAN_CHEMO) { kinds.z = 1.0; }
+        if (t == ORGAN_PROTEASE) { kinds.w = 1.0; }
+    }
+    return 1.0 / max(kinds.x + kinds.y + kinds.z + kinds.w, 1.0);
+}
+
 fn organ_catalysis_mult(slot: u32, k: u32) -> f32 {
     let o = organ_get(slot, k);
     var m = max(params.skin_uptake, 0.0);
