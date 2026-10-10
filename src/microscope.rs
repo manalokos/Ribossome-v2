@@ -2012,12 +2012,20 @@ pub fn overlay(ctx: &egui::Context, screen: egui::Rect, s: &Scope, marker: Optio
 /// O painel de controlos por cima da sobreposição (só no ecrã: as fotos e os
 /// vídeos levam a barra de dados e o título, mas não o painel).
 pub fn interface(root: &mut egui::Ui, screen: egui::Rect, s: &mut Scope, panel: &mut bool, marker: Option<[f32; 2]>, recording: bool, status: &str) -> Asked {
-    let mut asked = Asked::default();
     let ctx = root.ctx().clone();
     overlay(&ctx, screen, s, marker, recording);
+    let mut asked = Asked::default();
+    egui::Window::new("Microscope").open(panel).pivot(egui::Align2::RIGHT_TOP).default_pos(screen.right_top() + egui::vec2(-10.0, 10.0)).resizable(false).show(&ctx, |ui| asked = controls(ui, s, recording, status));
+    asked
+}
+
+/// Os CONTROLOS do microscópio (para a janela do programa à parte e para o
+/// separador "Microscope" do painel da aplicação principal).
+pub fn controls(ui: &mut egui::Ui, s: &mut Scope, recording: bool, status: &str) -> Asked {
+    let mut asked = Asked::default();
     let eye_dist = s.orbit.dist * REF_TAN / s.orbit.focal;
     let wd = (eye_dist + s.orbit.focus_shift).max(1.0);
-    egui::Window::new("Microscope").open(panel).pivot(egui::Align2::RIGHT_TOP).default_pos(screen.right_top() + egui::vec2(-10.0, 10.0)).resizable(false).show(&ctx, |ui| {
+    {
         let mut tilt = 90.0 - s.orbit.pitch.to_degrees();
         if ui.add(egui::Slider::new(&mut tilt, 1.0..=83.0).suffix("°").text("Tilt")).on_hover_text("0° looks straight down").changed() {
             s.orbit.pitch = (90.0 - tilt).to_radians();
@@ -2125,7 +2133,7 @@ pub fn interface(root: &mut egui::Ui, screen: egui::Rect, s: &mut Scope, panel: 
         if !s.embedded {
             ui.label(egui::RichText::new("Click: focus there · drag: orbit · right drag: move\nwheel: zoom · Tab: hide this panel").small().weak());
         }
-    });
+    }
     asked
 }
 

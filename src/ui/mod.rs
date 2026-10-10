@@ -99,6 +99,8 @@ pub struct UiState {
     /// tamanho escolhido); 1 = a vista como está no ecrã, com a barra de
     /// dados e o que estiver por cima; 2 = a vista sem nada por cima.
     pub capture_mode: u32,
+    /// O que o separador do microscópio pediu neste frame (foto, rec…).
+    pub micro_asked: crate::microscope::Asked,
     pub rec_every: u32,
     /// Lado da imagem (fotografia e vídeo), em píxeis.
     pub shot_size: u32,
@@ -141,6 +143,7 @@ const MARK_BONDED: u32 = 255;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Vista,
+    Microscopio,
     Mundo,
     Sopa,
     Energia,
@@ -153,8 +156,9 @@ pub enum Tab {
 
 // (A cena e o diagnóstico vivem no separador da vista: Tab::Cena e Tab::Info
 // ficam só para cenas antigas que os tenham guardado, e mostram o mesmo.)
-const TABS: [(Tab, &str); 7] = [
+const TABS: [(Tab, &str); 8] = [
     (Tab::Vista, "View & scene"),
+    (Tab::Microscopio, "Microscope"),
     (Tab::Mundo, "World"),
     (Tab::Sopa, "Soup"),
     (Tab::Energia, "Energy"),
@@ -276,6 +280,7 @@ impl UiState {
             photo_now: false,
             rec: false,
             capture_mode: 1,
+            micro_asked: Default::default(),
             rec_every: 2,
             shot_size: 1024,
             rec_info: String::new(),
@@ -445,9 +450,9 @@ fn section(ui: &mut egui::Ui, b: &Busca, tab: &str, title: &str, body: impl FnOn
 /// direita (quando há um organismo escolhido) e, no separador "Gráficos", os
 /// gráficos no meio. Devolve o retângulo livre para a simulação (em pontos
 /// do egui), ou None quando os gráficos o tapam.
-pub fn draw(root: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut Profiler, ins: &mut inspector::Inspector) -> Option<egui::Rect> {
+pub fn draw(root: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut Profiler, ins: &mut inspector::Inspector, scope: Option<&mut crate::microscope::Scope>) -> Option<egui::Rect> {
     egui::Panel::left("controlos").default_size(400.0).size_range(300.0..=800.0).resizable(true).show(root, |ui| {
-        main_panel(ui, st, world, prof);
+        main_panel(ui, st, world, prof, scope);
     });
     // Sempre presente: a simulação não muda de tamanho ao escolher um organismo.
     egui::Panel::right("inspetor").default_size(300.0).size_range(280.0..=600.0).resizable(true).show(root, |ui| {
@@ -461,7 +466,7 @@ pub fn draw(root: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
     Some(free)
 }
 
-fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut Profiler) {
+fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut Profiler, mut scope: Option<&mut crate::microscope::Scope>) {
     // ---- Topo, sempre visível ----
     ui.horizontal(|ui| {
         if ui.button(if st.paused { "▶ resume" } else { "⏸ pause" }).clicked() {
@@ -551,6 +556,20 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
                 ui.separator();
                 egui::CollapsingHeader::new("Diagnostics (conservation of matter, profiler)").show(ui, |ui| tab_info(ui, st, prof));
             }
+            Tab::Microscopio => match scope.as_deref_mut() {
+                Some(s) => {
+                    ui.checkbox(&mut st.microscope, "Microscope when zoomed in");
+                    ui.weak("Zoom in on the map to enter it. Left drag moves, right drag turns and tilts, a click focuses and selects.");
+                    ui.separator();
+                    s.embedded = true;
+                    s.capture_mode = st.capture_mode;
+                    st.micro_asked = crate::microscope::controls(ui, s, st.rec, &st.rec_info);
+                    st.capture_mode = s.capture_mode;
+                }
+                None => {
+                    ui.weak("the microscope is not loaded");
+                }
+            },
             Tab::Mundo => tab_world(ui, &b, st, world),
             Tab::Sopa => tab_soup(ui, &b, st, world),
             Tab::Energia => tab_energy(ui, &b, world),

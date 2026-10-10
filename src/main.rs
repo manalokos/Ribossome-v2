@@ -22,9 +22,8 @@ struct Running {
     world: World,
     view: WorldView,
     /// MICROSCÓPIO 3D (só existe enquanto está ligado: ocupa mais de 1 GB
-    /// na placa) e o seu painel.
+    /// na placa).
     scope: Option<ribossome::microscope::Scope>,
-    scope_panel: bool,
     /// Quanto da transição mapa → microscópio já se fez (0 = só o mapa, 1 =
     /// só o microscópio), pelo zoom; e se o botão direito está a rodar a câmara.
     micro_t: f32,
@@ -412,7 +411,6 @@ impl Running {
             cursor: [0.0; 2],
             viewport: [0.0; 4],
             scope,
-            scope_panel: true,
             micro_t: 0.0,
             last_present: std::time::Instant::now(),
             zoom_pending: 0.0,
@@ -1621,13 +1619,13 @@ impl Running {
         let cam_now = self.cam;
         let mut micro_asked = ribossome::microscope::Asked::default();
         let mut out = ctx.run_ui(raw, |root| {
-            free = ui::draw(root, &mut self.ui, &mut self.world, &mut self.profiler, &mut self.inspector);
+            free = ui::draw(root, &mut self.ui, &mut self.world, &mut self.profiler, &mut self.inspector, self.scope.as_mut());
+            micro_asked = std::mem::take(&mut self.ui.micro_asked);
             // MICROSCÓPIO: a barra de dados e o painel por cima da vista.
             if let (true, Some(r), Some(scope)) = (self.micro_t >= 0.6, free, self.scope.as_mut()) {
-                let (recording, status) = (self.ui.rec, self.ui.rec_info.clone());
-                scope.capture_mode = self.ui.capture_mode;
-                micro_asked = ribossome::microscope::interface(root, r, scope, &mut self.scope_panel, None, recording, &status);
-                self.ui.capture_mode = scope.capture_mode;
+                // (Só a barra de dados e o título: os controlos estão no
+                // separador "Microscope" do painel.)
+                ribossome::microscope::overlay(root.ctx(), r, scope, None, self.ui.rec);
             }
             // ECRÃ DE ENTRADA por cima de tudo, a desvanecer no fim.
             if let Some((tex, t0)) = &mut self.splash {
