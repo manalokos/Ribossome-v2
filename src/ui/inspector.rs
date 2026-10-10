@@ -462,7 +462,7 @@ fn organ_color(t: u8) -> egui::Color32 {
 /// ponto por resíduo e um disco com o símbolo por órgão, e por baixo uma
 /// legenda curta por peça (órgãos iguais seguidos numa só linha). A descrição
 /// completa aparece ao passar o rato, no disco ou na linha da legenda.
-fn body_map(ui: &mut egui::Ui, body: &[u8], organs: &[u16], organ_table: &[crate::life::table::OrganRow]) {
+fn body_map(ui: &mut egui::Ui, title: &str, legend: bool, body: &[u8], organs: &[u16], organ_table: &[crate::life::table::OrganRow]) {
     let info = |o: u16| {
         let t = ((o & 0x1F) - 1) as u8;
         (t, describe(t, ((o >> 5) & 0x7) as u8, (o >> 8) as u8, organ_table))
@@ -476,7 +476,7 @@ fn body_map(ui: &mut egui::Ui, body: &[u8], organs: &[u16], organ_table: &[crate
             _ => {}
         }
     }
-    ui.strong("Body map (N end on the left)");
+    ui.strong(title);
     const ORGAN_W: f32 = 3.0;
     let total: f32 = organs.iter().take(body.len()).map(|&o| if o != 0 { ORGAN_W } else { 1.0 }).sum();
     let width = ui.available_width();
@@ -512,6 +512,10 @@ fn body_map(ui: &mut egui::Ui, body: &[u8], organs: &[u16], organ_table: &[crate
             ui.set_max_width(320.0);
             ui.label(text);
         });
+    }
+    // (Só a tira das peças, sem a legenda: para o corpo da outra fita.)
+    if !legend {
+        return;
     }
     if parts.is_empty() {
         ui.label("no organs");
@@ -640,6 +644,20 @@ pub fn panel(
             ui.image((t, egui::vec2(256.0, 256.0)));
         }
         ui.checkbox(&mut ins.follow, "camera follows this organism");
+        // A OUTRA FITA, em pequeno: o corpo que sai do complemento invertido
+        // deste genoma (o filho é dessa forma, e o neto volta a ser desta).
+        {
+            let other = crate::life::organs::translate_organs(&crate::species::reverse_complement(&d.genome), require_start, &crate::life::table::code_to_gpu(organ_code));
+            if other.is_empty() {
+                ui.weak("other strand (the offspring): no body, it does not translate");
+            } else {
+                let body: Vec<u8> = other.iter().map(|r| r.aa).collect();
+                let organs: Vec<u16> = other.iter().map(crate::life::organs::organ_code).collect();
+                let symbols: String = organs.iter().filter(|&&o| o != 0).map(|&o| ORGAN_SYMBOLS[((o & 0x1F) - 1) as usize]).collect();
+                ui.push_id("outra fita", |ui| body_map(ui, &format!("Other strand (the offspring): {} residues  {symbols}", body.len()), false, &body, &organs, organ_table));
+            }
+            ui.separator();
+        }
         signal_bars(ui, d);
         egui::Grid::new("ins").striped(true).show(ui, |ui| {
             ui.label("name");
@@ -704,19 +722,7 @@ pub fn panel(
                     }
                 }),
             );
-            body_map(ui, &d.body, &d.organs, organ_table);
-            // A OUTRA FITA: o corpo que sai do complemento invertido deste
-            // genoma (o filho é dessa forma, e o neto volta a ser desta).
-            let other = crate::life::organs::translate_organs(&crate::species::reverse_complement(&d.genome), require_start, &crate::life::table::code_to_gpu(organ_code));
-            ui.separator();
-            if other.is_empty() {
-                ui.weak("the other strand: no body (it does not translate)");
-            } else {
-                let body: Vec<u8> = other.iter().map(|r| r.aa).collect();
-                let organs: Vec<u16> = other.iter().map(crate::life::organs::organ_code).collect();
-                ui.label(egui::RichText::new(format!("the other strand (its offspring): {} residues", body.len())).strong());
-                ui.push_id("outra fita", |ui| body_map(ui, &body, &organs, organ_table));
-            }
+            body_map(ui, "Body map (N end on the left)", true, &d.body, &d.organs, organ_table);
         }
     });
     ins.open = open;
