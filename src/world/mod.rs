@@ -253,6 +253,8 @@ pub struct World {
     pub ghosts_buf: wgpu::Buffer,
     /// Tom da espécie por agente (só para o desenho).
     pub tint_buf: wgpu::Buffer,
+    /// Epoch + 1 do último disparo das proteases de cada agente.
+    pub fired_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
     spawn_buf: wgpu::Buffer,
     /// Pedidos de sementes à espera do próximo `encode_steps`.
@@ -867,6 +869,7 @@ impl World {
             life_counters_buf,
             ghosts_buf,
             tint_buf,
+            fired_buf,
             free_buf,
             spawn_buf,
             pending_spawns: Vec::new(),

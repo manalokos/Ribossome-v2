@@ -112,7 +112,17 @@ fn family_weights(f: u32) -> vec4<f32> {
 // zimogenio: a enzima so e ativada a partir de um certo estimulo.) O desenho
 // usa o mesmo limiar (agents_view.wgsl).
 const PROTEASE_MIN_DRIVE: f32 = 0.25;
+// A recarregar depois de um disparo (ver PROTEASE_RELOAD)?
+fn protease_loaded(slot: u32) -> bool {
+    let last = protease_fired[slot];
+    return last == 0u || params.epoch + 1u - last >= PROTEASE_RELOAD || params.epoch + 1u < last;
+}
+
 fn protease_drive(slot: u32, k: u32, v: OrganVariant) -> f32 {
+    // A RECARREGAR, a protease está FECHADA: não morde, não paga o custo de
+    // estar aberta, não faz arrasto e os outros não a cheiram. Volta a abrir
+    // sozinha quando fica pronta (se o sinal dela a deixar).
+    if (!protease_loaded(slot)) { return 0.0; }
     var drive = 1.0;
     if (v.p2 >= 0.0) { drive = clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p2, 0.0, 3.0))], 0.0, 1.0); }
     return select(0.0, drive, drive >= PROTEASE_MIN_DRIVE);
@@ -289,8 +299,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     // carregada e aberta, dispara no PRIMEIRO passo em que tem uma vítima ao
     // alcance (o dano de PROTEASE_RELOAD passos de uma vez, em todas as que lá
     // estiverem) e fica esse tempo a recarregar. Um golpe pode matar à primeira.
-    let last = protease_fired[slot];
-    let loaded = last == 0u || params.epoch + 1u - last >= PROTEASE_RELOAD || params.epoch + 1u < last;
+    let loaded = protease_loaded(slot);
     // Energia que este agente tira a outros neste passo.
     var gained = 0.0;
     for (var dy = -span; dy <= span; dy++) {
