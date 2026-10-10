@@ -253,6 +253,12 @@ pub struct World {
     pub ghosts_buf: wgpu::Buffer,
     /// Tom da espécie por agente (só para o desenho).
     pub tint_buf: wgpu::Buffer,
+    /// TESTE (reversível): condução dos sinais ao acaso. O pedido da
+    /// interface (Some(semente) = baralhar, None = repor) e a semente em uso.
+    /// Só muda o que está na placa: as tabelas (`amino`, `organ_table`) e as
+    /// cenas gravadas ficam como estavam.
+    pub conduction_request: Option<Option<u32>>,
+    pub conduction_scrambled: Option<u32>,
     /// Epoch + 1 do último disparo das proteases de cada agente.
     pub fired_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
@@ -869,6 +875,8 @@ impl World {
             life_counters_buf,
             ghosts_buf,
             tint_buf,
+            conduction_request: None,
+            conduction_scrambled: None,
             fired_buf,
             free_buf,
             spawn_buf,
@@ -1076,6 +1084,41 @@ impl World {
     pub fn set_amino(&mut self, queue: &wgpu::Queue, rows: Vec<crate::life::table::AminoRow>) {
         queue.write_buffer(&self.aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&rows)));
         self.amino = rows;
+    }
+
+    /// Aplica o pedido de baralhar / repor a condução dos sinais (ver
+    /// `conduction_request`): a condução de cada aminoácido e de cada órgão,
+    /// nos 4 canais e para os dois lados, fica com valores ao acaso entre
+    /// −2 e 2, ou volta aos da tabela.
+    pub fn apply_conduction_request(&mut self, queue: &wgpu::Queue) {
+        let Some(req) = self.conduction_request.take() else { return };
+        let (mut amino, mut organs) = (self.amino.clone(), self.organ_table.clone());
+        if let Some(seed) = req {
+            let mut state = seed.wrapping_mul(747796405).wrapping_add(2891336453) | 1;
+            let mut rnd = || {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                (state as f32 / u32::MAX as f32) * 4.0 - 2.0
+            };
+            for a in amino.iter_mut() {
+                a.cond_alfa_n = rnd();
+                a.cond_alfa_c = rnd();
+                a.cond_beta_n = rnd();
+                a.cond_beta_c = rnd();
+                a.cond_gama_n = rnd();
+                a.cond_gama_c = rnd();
+                a.cond_delta_n = rnd();
+                a.cond_delta_c = rnd();
+            }
+            for o in organs.iter_mut() {
+                o.conducao = Some([rnd(), rnd(), rnd(), rnd()]);
+                o.conducao_gd = Some([rnd(), rnd(), rnd(), rnd()]);
+            }
+        }
+        queue.write_buffer(&self.aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&amino)));
+        queue.write_buffer(&self.organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&organs)));
+        self.conduction_scrambled = req;
     }
 
     /// Troca a tabela dos órgãos (efeito no passo seguinte).

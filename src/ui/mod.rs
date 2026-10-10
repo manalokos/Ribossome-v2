@@ -1234,6 +1234,32 @@ fn tab_cycle(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
 /// CORPO: sinais internos, natação, corpo na corrente, articulações, ligações.
 fn tab_body(ui: &mut egui::Ui, b: &Busca, world: &mut World) {
     const T: &str = "Body";
+    {
+        let (scrambled, mode) = (world.conduction_scrambled, world.params.signal_mode);
+        let mut request = None;
+        section(ui, b, T, "Test: random signal conduction", |c| {
+            c.row("random signal conduction scramble test", |ui| {
+                if ui.button("scramble conduction").on_hover_text("TEST, reversible: gives every amino acid and every organ a random conduction between −2 and 2 on the 4 signal channels and to both sides. Only the running simulation changes: the tables on disk and saved scenes keep the real values. Press again for another draw").clicked() {
+                    request = Some(Some(scrambled.map_or(1, |s| s.wrapping_add(1))));
+                }
+                if ui.add_enabled(scrambled.is_some(), egui::Button::new("restore")).on_hover_text("back to the conduction of the tables").clicked() {
+                    request = Some(None);
+                }
+                match scrambled {
+                    Some(s) => ui.colored_label(egui::Color32::from_rgb(255, 170, 60), format!("scrambled (draw {s})")),
+                    None => ui.weak("table values"),
+                };
+            });
+            if !(mode < 0.5 || mode >= 3.5) {
+                c.row("random signal conduction scramble test", |ui| {
+                    ui.small("with signal mode 1, 2 or 3 the transport does not use the table, so this has no effect: use mode 0 or 4");
+                });
+            }
+        });
+        if request.is_some() {
+            world.conduction_request = request;
+        }
+    }
     let p = &mut world.params;
     section(ui, b, T, "Internal signals", |c| {
         c.slider("signal mode", slider(&mut p.signal_mode, 0.0..=4.0).step_by(1.0))

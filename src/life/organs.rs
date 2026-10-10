@@ -278,7 +278,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             }
         ),
         1 => format!(
-            "muscle [striped ellipse]: bend ×{:.2} with {}",
+            "muscle [striped ellipse]: bend ×{:.2} with {}, and the joint bends up to 2.5 times further than the amino acid alone",
             v("amplificacao") * g,
             ["α", "β", "α and β"][(v("canal").round().clamp(0.0, 2.0)) as usize]
         ),

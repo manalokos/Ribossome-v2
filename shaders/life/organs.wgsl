@@ -151,6 +151,7 @@ fn body_absorption(slot: u32, n: u32) -> f32 {
 // Desvio da junta k pelos sinais (rad). TODAS as juntas respondem, cada
 // aminoácido com a sua sensibilidade a α e a β; o órgão "músculo" amplifica
 // a resposta local ×(2 + parâmetro/2).
+const MUSCLE_REACH: f32 = 2.5;
 fn signal_deflection(slot: u32, k: u32) -> f32 {
     let aa = body_get(slot, k);
     let s = signals[slot * MAX_BODY + k];
@@ -175,6 +176,10 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
         if (op.max_bend < 1e8) { lim = max(op.max_bend, 1e-3); }
         if (op.sens_alpha < 1e8) { sens = vec4<f32>(op.sens_alpha, op.sens_beta, op.sens_gamma, op.sens_delta); }
     }
+    // O MÚSCULO dobra a junta para lá do que o aminoácido sozinho consegue
+    // (MUSCLE_REACH vezes a dobra máxima). É o que ele tem que mais nenhuma
+    // junta tem: amplificar o sinal, qualquer aminoácido sensível faz de graça.
+    if (organ_type(o) == ORGAN_MUSCLE) { lim *= MUSCLE_REACH; }
     // Modos 1 e 2: resposta igual em todas as juntas (α para um lado, β para
     // o outro; γ e δ são mensageiros internos, não dobram: só agem depois de
     // um relé os passar para α ou β). Modo 3: a de cada aminoácido.

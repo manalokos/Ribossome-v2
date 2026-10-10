@@ -1847,6 +1847,7 @@ impl Running {
         if micro_asked.rec {
             self.ui.rec = !self.ui.rec;
         }
+        self.world.apply_conduction_request(&self.gpu.queue);
         let n_steps = self.adaptive_steps();
         // ZOOM SUAVE: em cada frame aplica-se uma parte do que a roda pediu.
         if self.zoom_pending.abs() > 1e-4 {
