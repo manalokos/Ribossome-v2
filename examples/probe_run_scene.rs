@@ -33,6 +33,8 @@ fn main() {
         }
         w.invalidate_light();
     }
+    // (As sementes da física ao acaso podem ter vindo em PARAMS.)
+    w.sync_scramble(&gpu.queue);
     let (steps, every) = (envf("STEPS", 6000.0) as u32, envf("EVERY", 1000.0) as u32);
     let report = |w: &World, done: u32| {
         let a = w.read_agents_blocking(&gpu);

@@ -526,6 +526,9 @@ impl World {
         self.params.max_agents = self.cfg.max_agents;
         q.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&self.params));
         gpu.wait_idle();
+        // (A física ao acaso da cena, se tiver sementes: as tabelas da placa
+        // passam a ser as baralhadas por elas.)
+        self.sync_scramble(&gpu.queue);
         Ok((h["interface"].clone(), notes))
     }
 }

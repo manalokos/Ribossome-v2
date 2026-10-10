@@ -1847,7 +1847,9 @@ impl Running {
         if micro_asked.rec {
             self.ui.rec = !self.ui.rec;
         }
-        self.world.apply_conduction_request(&self.gpu.queue);
+        // (A física ao acaso segue as sementes dos parâmetros: ao mexer nelas
+        // ou ao abrir uma cena que as traga.)
+        self.world.sync_scramble(&self.gpu.queue);
         let n_steps = self.adaptive_steps();
         // ZOOM SUAVE: em cada frame aplica-se uma parte do que a roda pediu.
         if self.zoom_pending.abs() > 1e-4 {

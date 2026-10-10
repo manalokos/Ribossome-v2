@@ -423,6 +423,18 @@ gpu_struct! {
         /// gasto, como em qualquer morte. Não é paga por energia nenhuma: é
         /// uma fonte de ativação à custa das presas (0 = não há).
         pub lysis_matter: f32,
+        /// FÍSICA AO ACASO (0 = os valores das tabelas). Cada semente baralha
+        /// um grupo de constantes de todos os aminoácidos e órgãos, sempre da
+        /// mesma maneira para a mesma semente; fica gravada com a cena. As
+        /// tabelas em disco não mudam. Ver `World::sync_scramble`.
+        ///   condução dos sinais (4 canais, dois lados): entre −2 e 2;
+        pub scramble_conduction: u32,
+        ///   ângulos de repouso das juntas: até ao maior da tabela, para os dois lados;
+        pub scramble_angles: u32,
+        ///   resposta das juntas aos sinais (sensibilidade aos 4 canais):
+        ///   até à maior da tabela, com os dois sinais.
+        pub scramble_response: u32,
+        pub _pad_s4: u32,
     }
 }
 
@@ -613,6 +625,10 @@ impl Default for SimParams {
             sediment_compaction: 0.00001,
             rock_crumble: 0.0001,
             lysis_matter: 0.5,
+            scramble_conduction: 0,
+            scramble_angles: 0,
+            scramble_response: 0,
+            _pad_s4: 0,
         }
     }
 }

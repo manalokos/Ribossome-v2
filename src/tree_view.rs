@@ -69,6 +69,8 @@ impl Studio {
         t.params.uv_strength = 0.0;
         t.params.sedimentation = 0.0;
         t.params.spawn_energy = 8.0;
+        // (O retrato dobra-se com a mesma física ao acaso do mundo.)
+        t.sync_scramble(&gpu.queue);
         let k = self.next;
         self.next += 1;
         let at = [1500.0 + Self::STEP * (k % Self::COLS) as f32, 1500.0 + Self::STEP * (k / Self::COLS) as f32];

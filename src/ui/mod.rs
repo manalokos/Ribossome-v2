@@ -1235,30 +1235,37 @@ fn tab_cycle(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
 fn tab_body(ui: &mut egui::Ui, b: &Busca, world: &mut World) {
     const T: &str = "Body";
     {
-        let (scrambled, mode) = (world.conduction_scrambled, world.params.signal_mode);
-        let mut request = None;
-        section(ui, b, T, "Test: random signal conduction", |c| {
-            c.row("random signal conduction scramble test", |ui| {
-                if ui.button("scramble conduction").on_hover_text("TEST, reversible: gives every amino acid and every organ a random conduction between −2 and 2 on the 4 signal channels and to both sides. Only the running simulation changes: the tables on disk and saved scenes keep the real values. Press again for another draw").clicked() {
-                    request = Some(Some(scrambled.map_or(1, |s| s.wrapping_add(1))));
-                }
-                if ui.add_enabled(scrambled.is_some(), egui::Button::new("restore")).on_hover_text("back to the conduction of the tables").clicked() {
-                    request = Some(None);
-                }
-                match scrambled {
-                    Some(s) => ui.colored_label(egui::Color32::from_rgb(255, 170, 60), format!("scrambled (draw {s})")),
-                    None => ui.weak("table values"),
-                };
+        let mode = world.params.signal_mode;
+        let p = &mut world.params;
+        section(ui, b, T, "Random physics (saved with the scene)", |c| {
+            c.row("random physics seed scramble", |ui| {
+                ui.small("Each seed redraws one group of constants of every amino acid and organ, always the same way for the same seed. 0 = the values of the tables, which stay untouched on disk. The seeds are saved with the scene.");
             });
+            let seed_row = |c: &mut Ctl, label: &str, tip: &str, seed: &mut u32| {
+                c.row(&format!("random physics seed scramble {label}"), |ui| {
+                    ui.add(egui::DragValue::new(seed).range(0..=999_999)).on_hover_text(tip);
+                    if ui.button("new draw").on_hover_text("another random draw for this group").clicked() {
+                        *seed = seed.wrapping_add(1).max(1);
+                    }
+                    if ui.add_enabled(*seed != 0, egui::Button::new("table")).on_hover_text("back to the values of the tables").clicked() {
+                        *seed = 0;
+                    }
+                    if *seed != 0 {
+                        ui.colored_label(egui::Color32::from_rgb(255, 170, 60), label);
+                    } else {
+                        ui.label(label);
+                    }
+                });
+            };
+            seed_row(c, "signal conduction", "conduction of the 4 signal channels to both sides of the chain, between −2 and 2 (the tables go from 0 to 1): signals can grow or flip sign as they travel", &mut p.scramble_conduction);
+            seed_row(c, "rest angles", "rest angle of every joint, up to the largest of the tables, to either side: the shape of every body changes", &mut p.scramble_angles);
+            seed_row(c, "response to signals", "how much and which way each joint bends with each of the 4 signals, up to the largest sensitivity of the tables, with either sign", &mut p.scramble_response);
             if !(mode < 0.5 || mode >= 3.5) {
-                c.row("random signal conduction scramble test", |ui| {
-                    ui.small("with signal mode 1, 2 or 3 the transport does not use the table, so this has no effect: use mode 0 or 4");
+                c.row("random physics seed scramble", |ui| {
+                    ui.small("with signal mode 1, 2 or 3 the transport and the response do not use the tables: conduction has no effect (use mode 0 or 4), and the response only counts in modes 0 and 3");
                 });
             }
         });
-        if request.is_some() {
-            world.conduction_request = request;
-        }
     }
     let p = &mut world.params;
     section(ui, b, T, "Internal signals", |c| {

@@ -253,12 +253,9 @@ pub struct World {
     pub ghosts_buf: wgpu::Buffer,
     /// Tom da espécie por agente (só para o desenho).
     pub tint_buf: wgpu::Buffer,
-    /// TESTE (reversível): condução dos sinais ao acaso. O pedido da
-    /// interface (Some(semente) = baralhar, None = repor) e a semente em uso.
-    /// Só muda o que está na placa: as tabelas (`amino`, `organ_table`) e as
-    /// cenas gravadas ficam como estavam.
-    pub conduction_request: Option<Option<u32>>,
-    pub conduction_scrambled: Option<u32>,
+    /// Sementes da física ao acaso já aplicadas às tabelas da placa
+    /// (condução, ângulos, resposta): ver `sync_scramble`.
+    pub applied_scramble: [u32; 3],
     /// Epoch + 1 do último disparo das proteases de cada agente.
     pub fired_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
@@ -875,8 +872,7 @@ impl World {
             life_counters_buf,
             ghosts_buf,
             tint_buf,
-            conduction_request: None,
-            conduction_scrambled: None,
+            applied_scramble: [0; 3],
             fired_buf,
             free_buf,
             spawn_buf,
@@ -1084,41 +1080,78 @@ impl World {
     pub fn set_amino(&mut self, queue: &wgpu::Queue, rows: Vec<crate::life::table::AminoRow>) {
         queue.write_buffer(&self.aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&rows)));
         self.amino = rows;
+        self.applied_scramble = [0; 3];
+        self.sync_scramble(queue);
     }
 
-    /// Aplica o pedido de baralhar / repor a condução dos sinais (ver
-    /// `conduction_request`): a condução de cada aminoácido e de cada órgão,
-    /// nos 4 canais e para os dois lados, fica com valores ao acaso entre
-    /// −2 e 2, ou volta aos da tabela.
-    pub fn apply_conduction_request(&mut self, queue: &wgpu::Queue) {
-        let Some(req) = self.conduction_request.take() else { return };
+    /// FÍSICA AO ACASO: põe na placa as tabelas baralhadas pelas sementes dos
+    /// parâmetros (`scramble_*`; 0 = valores da tabela). Só escreve quando as
+    /// sementes mudam (ao mexer nelas, ao abrir uma cena). `amino` e
+    /// `organ_table` ficam sempre com os valores verdadeiros.
+    pub fn sync_scramble(&mut self, queue: &wgpu::Queue) {
+        let seeds = [self.params.scramble_conduction, self.params.scramble_angles, self.params.scramble_response];
+        if seeds == self.applied_scramble {
+            return;
+        }
+        let (amino, organs) = self.scrambled_tables(seeds);
+        queue.write_buffer(&self.aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&amino)));
+        queue.write_buffer(&self.organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&organs)));
+        self.applied_scramble = seeds;
+    }
+
+    /// As tabelas com cada grupo baralhado pela sua semente. As amplitudes
+    /// são as do próprio grupo na tabela (o maior valor absoluto), para a
+    /// física ao acaso ficar na mesma ordem de grandeza da desenhada.
+    pub fn scrambled_tables(&self, seeds: [u32; 3]) -> (Vec<crate::life::table::AminoRow>, Vec<crate::life::table::OrganRow>) {
         let (mut amino, mut organs) = (self.amino.clone(), self.organ_table.clone());
-        if let Some(seed) = req {
-            let mut state = seed.wrapping_mul(747796405).wrapping_add(2891336453) | 1;
-            let mut rnd = || {
+        // Um gerador por grupo: mexer numa semente não muda os outros grupos.
+        let stream = |seed: u32, group: u32| {
+            let mut state = (seed ^ group.wrapping_mul(0x9E37_79B9)).wrapping_mul(747796405).wrapping_add(2891336453) | 1;
+            move |amp: f32| {
                 state ^= state << 13;
                 state ^= state >> 17;
                 state ^= state << 5;
-                (state as f32 / u32::MAX as f32) * 4.0 - 2.0
-            };
+                ((state as f32 / u32::MAX as f32) * 2.0 - 1.0) * amp
+            }
+        };
+        if seeds[0] != 0 {
+            let mut r = stream(seeds[0], 1);
             for a in amino.iter_mut() {
-                a.cond_alfa_n = rnd();
-                a.cond_alfa_c = rnd();
-                a.cond_beta_n = rnd();
-                a.cond_beta_c = rnd();
-                a.cond_gama_n = rnd();
-                a.cond_gama_c = rnd();
-                a.cond_delta_n = rnd();
-                a.cond_delta_c = rnd();
+                for v in [&mut a.cond_alfa_n, &mut a.cond_alfa_c, &mut a.cond_beta_n, &mut a.cond_beta_c, &mut a.cond_gama_n, &mut a.cond_gama_c, &mut a.cond_delta_n, &mut a.cond_delta_c] {
+                    *v = r(2.0);
+                }
             }
             for o in organs.iter_mut() {
-                o.conducao = Some([rnd(), rnd(), rnd(), rnd()]);
-                o.conducao_gd = Some([rnd(), rnd(), rnd(), rnd()]);
+                o.conducao = Some([r(2.0), r(2.0), r(2.0), r(2.0)]);
+                o.conducao_gd = Some([r(2.0), r(2.0), r(2.0), r(2.0)]);
             }
         }
-        queue.write_buffer(&self.aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&amino)));
-        queue.write_buffer(&self.organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&organs)));
-        self.conduction_scrambled = req;
+        if seeds[1] != 0 {
+            let mut r = stream(seeds[1], 2);
+            let amp_aa = self.amino.iter().map(|a| a.angulo_repouso.abs()).fold(0.0, f32::max).max(1e-3);
+            for a in amino.iter_mut() {
+                a.angulo_repouso = r(amp_aa);
+            }
+            let amp_org = self.organ_table.iter().filter_map(|o| o.angulo).map(f32::abs).fold(0.0, f32::max).max(1e-3);
+            for o in organs.iter_mut().filter(|o| o.angulo.is_some()) {
+                o.angulo = Some(r(amp_org));
+            }
+        }
+        if seeds[2] != 0 {
+            let mut r = stream(seeds[2], 3);
+            let amp_aa = self.amino.iter().flat_map(|a| [a.sens_alfa, a.sens_beta, a.sens_gama, a.sens_delta]).map(f32::abs).fold(0.0, f32::max).max(1e-3);
+            for a in amino.iter_mut() {
+                a.sens_alfa = r(amp_aa);
+                a.sens_beta = r(amp_aa);
+                a.sens_gama = r(amp_aa);
+                a.sens_delta = r(amp_aa);
+            }
+            let amp_org = self.organ_table.iter().filter_map(|o| o.sensibilidade).flatten().map(f32::abs).fold(0.0, f32::max).max(1e-3);
+            for o in organs.iter_mut().filter(|o| o.sensibilidade.is_some()) {
+                o.sensibilidade = Some([r(amp_org), r(amp_org), r(amp_org), r(amp_org)]);
+            }
+        }
+        (amino, organs)
     }
 
     /// Troca a tabela dos órgãos (efeito no passo seguinte).
@@ -1126,6 +1159,8 @@ impl World {
         queue.write_buffer(&self.organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&rows)));
         queue.write_buffer(&self.variant_buf, 0, bytemuck::cast_slice(&crate::life::table::variants_to_gpu(&rows)));
         self.organ_table = rows;
+        self.applied_scramble = [0; 3];
+        self.sync_scramble(queue);
     }
 
     /// Troca o código dos órgãos (vale para as traduções seguintes:
