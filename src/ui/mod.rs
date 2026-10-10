@@ -534,6 +534,12 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
         }
     });
     ui.separator();
+    // CÂMARA (foto, vídeo e o que se captura): sempre à vista, em baixo,
+    // seja qual for o separador.
+    egui::Panel::bottom("camara").show(ui, |ui| {
+        ui.add_space(4.0);
+        capture_bar(ui, st);
+    });
     egui::ScrollArea::vertical().show(ui, |ui| {
         if !b.q.is_empty() {
             // Pesquisa: todos os separadores de parâmetros de seguida, filtrados.
@@ -578,6 +584,34 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
             Tab::Graficos => crate::stats::controls(ui, &mut st.history),
         }
     });
+}
+
+/// Foto, vídeo e modo de captura.
+fn capture_bar(ui: &mut egui::Ui, st: &mut UiState) {
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut st.frame_guide, "framing guide").on_hover_text("shows in the view the framing (a square in the center) that the photo and the video capture, with the rule of thirds");
+        if ui.button("photo").on_hover_text("saves what the framing guide frames to saves/capturas/ (without the interface), with the chosen view and brightness").clicked() {
+            st.photo_now = true;
+        }
+        let label = if st.rec { egui::RichText::new("■ stop").color(egui::Color32::from_rgb(255, 90, 80)) } else { egui::RichText::new("● rec") };
+        if ui.button(label).on_hover_text("records what the framing guide frames straight into an MP4 video in saves/videos/ (the images go raw to ffmpeg, with no intermediate files). Move and zoom the camera freely while recording; the size stays as it was at the start").clicked() {
+            st.rec = !st.rec;
+        }
+        egui::ComboBox::from_id_salt("capture_mode").selected_text(CAPTURE_MODES[st.capture_mode.min(2) as usize]).width(150.0).show_ui(ui, |ui| {
+            for (i, n) in CAPTURE_MODES.iter().enumerate() {
+                ui.selectable_value(&mut st.capture_mode, i as u32, *n);
+            }
+        }).response.on_hover_text("what photo and rec capture. Framing guide: the square in the middle of the map, at the size chosen here (map only). Whole view: the view as it is on screen, map or microscope, with the data bar. Simulation only: the same without anything drawn over it. The two view modes follow you from the map into the microscope in one recording");
+        egui::ComboBox::from_id_salt("shot_size").selected_text(format!("{} px", st.shot_size)).width(70.0).show_ui(ui, |ui| {
+            for v in [512u32, 1024, 2048] {
+                ui.selectable_value(&mut st.shot_size, v, format!("{v} px"));
+            }
+        });
+    });
+    if st.rec || !st.rec_info.is_empty() {
+        ui.add(slider(&mut st.rec_every, 1..=30).text("1 image every N frames")).on_hover_text("the video runs at 30 images per second: with 2, one second of video is 60 frames of the simulation");
+        ui.small(&st.rec_info);
+    }
 }
 
 /// Parâmetros diferentes dos valores do código, com botões para os repor
@@ -736,30 +770,6 @@ fn tab_scene(ui: &mut egui::Ui, st: &mut UiState, world: &mut World) {
             }
         }
     });
-    ui.horizontal(|ui| {
-        ui.checkbox(&mut st.frame_guide, "framing guide").on_hover_text("shows in the view the framing (a square in the center) that the photo and the video capture, with the rule of thirds");
-        if ui.button("photo").on_hover_text("saves what the framing guide frames to saves/capturas/ (without the interface), with the chosen view and brightness").clicked() {
-            st.photo_now = true;
-        }
-        let label = if st.rec { egui::RichText::new("■ stop").color(egui::Color32::from_rgb(255, 90, 80)) } else { egui::RichText::new("● rec") };
-        if ui.button(label).on_hover_text("records what the framing guide frames straight into an MP4 video in saves/videos/ (the images go raw to ffmpeg, with no intermediate files). Move and zoom the camera freely while recording; the size stays as it was at the start").clicked() {
-            st.rec = !st.rec;
-        }
-        egui::ComboBox::from_id_salt("capture_mode").selected_text(CAPTURE_MODES[st.capture_mode.min(2) as usize]).width(150.0).show_ui(ui, |ui| {
-            for (i, n) in CAPTURE_MODES.iter().enumerate() {
-                ui.selectable_value(&mut st.capture_mode, i as u32, *n);
-            }
-        }).response.on_hover_text("what photo and rec capture. Framing guide: the square in the middle of the map, at the size chosen here (map only). Whole view: the view as it is on screen, map or microscope, with the data bar. Simulation only: the same without anything drawn over it. The two view modes follow you from the map into the microscope in one recording");
-        egui::ComboBox::from_id_salt("shot_size").selected_text(format!("{} px", st.shot_size)).width(70.0).show_ui(ui, |ui| {
-            for v in [512u32, 1024, 2048] {
-                ui.selectable_value(&mut st.shot_size, v, format!("{v} px"));
-            }
-        });
-    });
-    if st.rec || !st.rec_info.is_empty() {
-        ui.add(slider(&mut st.rec_every, 1..=30).text("1 image every N frames")).on_hover_text("the video runs at 30 images per second: with 2, one second of video is 60 frames of the simulation");
-        ui.small(&st.rec_info);
-    }
     ui.separator();
     if ui
         .button("new world with the default values")

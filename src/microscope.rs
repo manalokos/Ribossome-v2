@@ -2109,14 +2109,8 @@ pub fn controls(ui: &mut egui::Ui, s: &mut Scope, recording: bool, status: &str)
                 s.orbit.focus_shift = 0.0;
             }
         });
-        if s.embedded {
-            egui::ComboBox::from_id_salt("scope_capture_mode").selected_text(crate::ui::CAPTURE_MODES[s.capture_mode.min(2) as usize]).show_ui(ui, |ui| {
-                for (i, n) in crate::ui::CAPTURE_MODES.iter().enumerate() {
-                    ui.selectable_value(&mut s.capture_mode, i as u32, *n);
-                }
-            });
-        }
-        {
+        // (Na aplicação principal a câmara está sempre à vista no fundo do painel.)
+        if !s.embedded {
         ui.horizontal(|ui| {
             if ui.button("📷 Photo").on_hover_text("saves this view to saves/capturas").clicked() {
                 asked.photo = true;
@@ -2127,7 +2121,7 @@ pub fn controls(ui: &mut egui::Ui, s: &mut Scope, recording: bool, status: &str)
             }
         });
         }
-        if !status.is_empty() {
+        if !status.is_empty() && !s.embedded {
             ui.label(egui::RichText::new(status).small());
         }
         if !s.embedded {
