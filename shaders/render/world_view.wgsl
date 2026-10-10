@@ -258,7 +258,9 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
                 for (var ch = 0u; ch < 4u; ch++) {
                     let v = chem_view[cell * 4u + ch];
                     for (var st = 0u; st < 2u; st++) {
-                        let count = select(v >> 16u, v & 0xFFFFu, st == 0u);
+                        // (Os escondidos não se desenham nem fazem relevo.)
+                        let hidden = (view.hide_monomers & (1u << st)) != 0u;
+                        let count = select(select(v >> 16u, v & 0xFFFFu, st == 0u), 0u, hidden);
                         let shown = min(count, DOTS_PER_KIND);
                         var sum = 0.0;
                         for (var k = 0u; k < shown; k++) {

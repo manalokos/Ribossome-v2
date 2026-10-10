@@ -575,8 +575,12 @@ fn main_panel(ui: &mut egui::Ui, st: &mut UiState, world: &mut World, prof: &mut
                     ui.separator();
                     s.embedded = true;
                     s.capture_mode = st.capture_mode;
+                    s.show_activated = st.show_activated;
+                    s.show_spent = st.show_spent;
                     st.micro_asked = crate::microscope::controls(ui, s, st.rec, &st.rec_info);
                     st.capture_mode = s.capture_mode;
+                    st.show_activated = s.show_activated;
+                    st.show_spent = s.show_spent;
                 }
                 None => {
                     ui.weak("the microscope is not loaded");

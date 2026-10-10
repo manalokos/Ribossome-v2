@@ -946,6 +946,10 @@ pub struct Scope {
     pub colour: u32,
     /// Brilho dos monómeros na zona (0 = não se desenham).
     pub monomers: f32,
+    /// Que monómeros se veem: os ativados e os gastos, cada um por si (na
+    /// aplicação principal são as mesmas caixas da vista normal).
+    pub show_activated: bool,
+    pub show_spent: bool,
     /// Superamostragem: lado da imagem acumulada em múltiplos do do ecrã.
     pub ss: u32,
     /// Exposição: multiplica a imagem final.
@@ -1304,6 +1308,8 @@ impl Scope {
             paused: env("RUN", 0.0) == 0.0,
             colour: env("COLOR", 0.0) as u32,
             monomers: env("MONOMERS", 0.7),
+            show_activated: true,
+            show_spent: true,
             ss: 1,
             exposure: env("EXPOSURE", 1.0),
             rate: env("RATE", 2.0),
@@ -1583,7 +1589,8 @@ impl Scope {
         let tween_t = if tweening { (self.last_step.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0) } else { 1.0 };
         let a = self.approach.clamp(0.0, 1.0);
         let molecule_r = if self.embedded { self.map_molecule_r + (self.molecule_r - self.map_molecule_r) * a * a * (3.0 - 2.0 * a) } else { self.molecule_r };
-        let key = (zc, r, self.monomers + molecule_r, world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
+        let hide = (!self.show_activated) as u32 | ((!self.show_spent) as u32) << 1;
+        let key = (zc, r, self.monomers + molecule_r + 10.0 * hide as f32, world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
         if self.layer_key != Some(key) {
             self.layer_key = Some(key);
             self.layer_age = 0;
@@ -1670,6 +1677,8 @@ impl Scope {
         // (Moléculas pequenas: no microscópio são partículas, não manchas.)
         self.cap.view.coc_radius.set(molecule_r);
         self.height_view.coc_radius.set(molecule_r);
+        self.cap.view.hide_monomers.set(hide);
+        self.height_view.hide_monomers.set(hide);
         self.cap.view.relief_order.set(true);
         self.height_view.relief_order.set(true);
         self.cap.view.epoch.set(clock.0);
@@ -2101,11 +2110,14 @@ pub fn controls(ui: &mut egui::Ui, s: &mut Scope, recording: bool, status: &str)
             s.last_orbit = None;
         }
         ui.horizontal(|ui| {
-            let mut mono = s.monomers > 0.0;
-            if ui.checkbox(&mut mono, "Monomers").changed() {
-                s.monomers = if mono { 0.7 } else { 0.0 };
+            ui.label("Monomers:");
+            let mut changed = ui.checkbox(&mut s.show_activated, "activated").changed();
+            changed |= ui.checkbox(&mut s.show_spent, "spent").changed();
+            if changed {
                 s.last_orbit = None;
             }
+        });
+        ui.horizontal(|ui| {
             if ui.checkbox(&mut s.follow, "Follow").on_hover_text("the camera follows the agent nearest the centre (key F); moving the view by hand lets go").changed() && s.follow {
                 s.subject = None;
             }

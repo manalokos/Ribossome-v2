@@ -518,7 +518,10 @@ impl Running {
                 Key::Character("p") => self.photo_now = true,
                 Key::Character("v") => self.rec = !self.rec,
                 Key::Character("m") => {
-                    self.scope.monomers = if self.scope.monomers > 0.0 { 0.0 } else { 0.7 };
+                    // (M: mostra ou esconde todos os monómeros.)
+                    let on = !(self.scope.show_activated || self.scope.show_spent);
+                    self.scope.show_activated = on;
+                    self.scope.show_spent = on;
                     self.scope.last_orbit = None;
                 }
                 _ => {}
