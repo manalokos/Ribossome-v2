@@ -64,7 +64,8 @@ fn storage_len_factor(slot: u32, k: u32, o: u32) -> f32 {
         if (fwd && k + j < MAX_BODY && organ_type(organ_get(slot, k + j)) == ORGAN_STORAGE) { run += 1.0; } else { fwd = false; }
         if (back && j <= k && organ_type(organ_get(slot, k - j)) == ORGAN_STORAGE) { run += 1.0; } else { back = false; }
     }
-    return sqrt(clamp(organ_gain(o), 0.5, 2.0) * (1.0 + 0.25 * (min(run, 8.0) - 1.0)));
+    // (A intensidade já não muda a capacidade, por isso também não o tamanho.)
+    return sqrt(1.0 + 0.25 * (min(run, 8.0) - 1.0));
 }
 
 // Ângulo de repouso da junta (com sinal; tabela do v3 em src/life/amino.rs).

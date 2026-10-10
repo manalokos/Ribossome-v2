@@ -269,6 +269,9 @@ fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
         case ORGAN_INHIBITOR: { return vec3<f32>(0.95, 0.8, 0.9); }
         case ORGAN_HOLDFAST: { return vec3<f32>(0.85, 0.6, 0.3); }
         case ORGAN_CHIRAL: { return vec3<f32>(0.95, 0.35, 0.85); }
+        // (Um só tipo de depósito, uma só cor: antes tinha a do aminoácido
+        // em que assenta, e havia depósitos de três cores.)
+        case ORGAN_STORAGE: { return vec3<f32>(0.62, 0.45, 0.9); }
         default: { return base * 0.8; }
     }
 }
