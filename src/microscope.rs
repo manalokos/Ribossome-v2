@@ -875,6 +875,8 @@ pub struct Scope {
     /// as moléculas começam desse tamanho e só encolhem para o do
     /// microscópio (MOLECULE_R) à medida que a câmara se inclina.
     pub map_molecule_r: f32,
+    /// Raio das moléculas no microscópio (células), com a câmara já inclinada.
+    pub molecule_r: f32,
     /// Imagens por segundo (média corrida), para a barra de dados.
     pub fps: f32,
     /// Limite de imagens por segundo na aplicação principal, enquanto o
@@ -1320,6 +1322,7 @@ impl Scope {
             epoch: world.params.epoch,
             approach: 1.0,
             map_molecule_r: MOLECULE_R,
+            molecule_r: env("MOLECULE_R", MOLECULE_R),
             fps: 60.0,
             fps_limit: 24.0,
             capture_mode: 1,
@@ -1579,7 +1582,7 @@ impl Scope {
         let tweening = slow && self.smooth_motion;
         let tween_t = if tweening { (self.last_step.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0) } else { 1.0 };
         let a = self.approach.clamp(0.0, 1.0);
-        let molecule_r = self.map_molecule_r + (MOLECULE_R - self.map_molecule_r) * a * a * (3.0 - 2.0 * a);
+        let molecule_r = if self.embedded { self.map_molecule_r + (self.molecule_r - self.map_molecule_r) * a * a * (3.0 - 2.0 * a) } else { self.molecule_r };
         let key = (zc, r, self.monomers + molecule_r, world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
         if self.layer_key != Some(key) {
             self.layer_key = Some(key);
@@ -2094,6 +2097,9 @@ pub fn controls(ui: &mut egui::Ui, s: &mut Scope, recording: bool, status: &str)
                 }
             }
         });
+        if ui.add(egui::Slider::new(&mut s.molecule_r, 0.03..=0.5).text("Monomer radius (cells)")).on_hover_text("size of each molecule in the microscope: small = loose particles, large = a carpet. The three layers they stack in are spaced by this size").changed() {
+            s.last_orbit = None;
+        }
         ui.horizontal(|ui| {
             let mut mono = s.monomers > 0.0;
             if ui.checkbox(&mut mono, "Monomers").changed() {
