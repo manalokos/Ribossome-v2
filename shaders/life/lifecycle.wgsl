@@ -280,8 +280,16 @@ fn ghost_record(slot: u32, a: Agent) {
 // tudo numa célula só). O genoma volta GASTO; os complementos já capturados
 // para a cópia em curso voltam ATIVADOS: foram tirados ativados e ainda só
 // estavam emparelhados, não ligados (a ativação não foi gasta).
+// O que um corpo deixa quando morre: a energia que ainda tinha fica nos
+// restos, como monómeros ATIVADOS (lysis_yield dela; o resto é calor). Um
+// morto de fome não deixa nada; um que morre de velho, de UV ou de calor com
+// a barriga cheia deixa uma mancha de comida onde caiu. É o que dá de comer
+// a necrófagos e decompositores: antes essa energia evaporava-se toda.
 fn die(slot: u32, a_in: Agent) {
-    die_release(slot, a_in, 0u);
+    let left = max(a_in.energy, 0.0) * clamp(params.lysis_yield, 0.0, 1.0) / max(params.food_power, 1e-3);
+    // (Arredondamento ao acaso, para a parte fracionária não se perder.)
+    let r = rng_f4(a_in.id, params.epoch, S_EAT + 97u);
+    die_release(slot, a_in, min(u32(left) + select(0u, 1u, r.y < fract(left)), 256u));
 }
 
 // Morte em que `budget` monómeros dos restos saem ATIVADOS além dos
@@ -553,6 +561,17 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         var aff = vec4<f32>(prk.sub_a, prk.sub_u, prk.sub_g, prk.sub_c);
         let om = organ_get(slot, k);
         if (organ_type(om) == ORGAN_MOUTH) {
+            // O BOLSO da boca é o resíduo a seguir (como na protease e nos
+            // sensores): é ele que decide que monómeros ela prefere, e ao
+            // quadrado, para uma boca poder ser especialista a sério. Bocas
+            // com vizinhos diferentes comem coisas diferentes e deixam de
+            // competir pelo mesmo canal.
+            if (k + 1u < a.body_len) {
+                let pn = aa_props[body_get(slot, k + 1u)];
+                let an = vec4<f32>(pn.sub_a, pn.sub_u, pn.sub_g, pn.sub_c);
+                aff = an * an;
+                aff /= max(aff.x + aff.y + aff.z + aff.w, 1e-6);
+            }
             // Viés da boca: + prefere A/U, − prefere G/C (renormalizado).
             let b = clamp(organ_var(om).p1, -0.95, 0.95);
             aff *= vec4<f32>(1.0 + b, 1.0 + b, 1.0 - b, 1.0 - b);
@@ -574,7 +593,10 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         let st = joint_state[si];
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
         if (st == 0u) {
-            let full = params.hunger_regulation != 0u && a.energy + params.food_power > cap;
+            // (Cheio = no limite. Antes era "não cabe uma refeição inteira",
+            // e um corpo pequeno, com capacidade abaixo de uma refeição,
+            // nunca conseguia comer: ninguém podia ser pequeno sem depósito.)
+            let full = params.hunger_regulation != 0u && a.energy >= cap;
             if (r.x < pe && !full) {
                 joint_state[si] = 1u;
                 let rc = rw - p;

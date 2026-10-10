@@ -231,13 +231,16 @@ fn pack_defence(slot: u32, n: u32) -> f32 {
     let ex = protease_exposed(slot, n);
     let t = protease_targets(slot, n) * ex.xyz;
     let q = vec4<u32>(round(clamp(vec4<f32>(t, proline_fraction(slot, n)), vec4<f32>(0.0), vec4<f32>(1.0)) * 31.0));
-    return f32(q.x | (q.y << 5u) | (q.z << 10u) | (q.w << 15u) | (select(0u, 1u, ex.w < 1.0) << 20u));
+    // (A imunidade às generalistas em 4 bits, proporcional como as outras:
+    // num só bit, o inibidor mais fraco dava imunidade total.)
+    let gen = u32(round(clamp(1.0 - ex.w, 0.0, 1.0) * 15.0));
+    return f32(q.x | (q.y << 5u) | (q.z << 10u) | (q.w << 15u) | (gen << 20u));
 }
 
 // (alvo exposto das famílias 1, 2, 3; de TODOS os resíduos para a generalista).
 fn unpack_targets(w: f32) -> vec4<f32> {
     let u = u32(max(w, 0.0));
-    let gen = select(1.0, 1.0 - PROTEASE_IMMUNITY, ((u >> 20u) & 1u) != 0u);
+    let gen = 1.0 - PROTEASE_IMMUNITY * f32((u >> 20u) & 15u) / 15.0;
     return vec4<f32>(f32(u & 31u) / 31.0, f32((u >> 5u) & 31u) / 31.0, f32((u >> 10u) & 31u) / 31.0, gen);
 }
 
