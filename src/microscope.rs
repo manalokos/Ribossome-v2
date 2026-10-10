@@ -57,6 +57,9 @@ struct U {
     // esbatimento com a distância: centro (x, y) e raio, em unidades do mundo;
     // opacidade da imagem final
     fade: vec4<f32>,
+    // quanto da transição a partir do mapa já se fez (0 = como o mapa: a
+    // cores, sem escurecer com a distância; 1 = a micrografia), livre × 3
+    extra: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var color_tex: texture_2d<f32>;
@@ -660,14 +663,17 @@ fn fs_march(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         } else if (on_agent && ((u.photo.y < 0.5 && u.opts.x > 0.5) || (u.photo.y > 0.5 && is_subject))) {
             tinted = gray * 1.25 * hue;
         }
-        let base = max(tinted, vec3<f32>(0.03, 0.031, 0.034));
+        // (A entrar a partir do mapa, a imagem começa com as cores dele e só
+        // depois passa a micrografia: senão o fundido escurecia a vista.)
+        let map_like = albedo * select(1.0, 1.6, on_ground);
+        let base = max(mix(map_like, tinted, u.extra.x), vec3<f32>(0.03, 0.031, 0.034));
         col = base * (0.95 + 1.5 * edge) * ao + vec3<f32>(0.25) * edge * edge * select(0.0, 1.0, !on_ground);
         // O campo de visão não acaba num quadrado: esbate-se com a distância
         // ao centro da zona e com a distância para lá do plano de focagem.
         // O brilho cai com a DISTÂNCIA ao ponto para onde a câmara olha (uma
         // divisão, sem horizonte marcado), e chega a zero num CÍRCULO antes
         // da borda da zona desenhada, para nunca se ver o quadrado dela.
-        let away = length(p.xy - u.fade.xy) / u.fade.z;
+        let away = length(p.xy - u.fade.xy) / (u.fade.z * mix(8.0, 1.0, u.extra.x));
         col /= 1.0 + 7.0 * away * away;
         col *= 1.0 - smoothstep(0.7, 0.98, away);
     }
@@ -1119,7 +1125,7 @@ impl Scope {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scope"),
-            size: 10 * 16,
+            size: 11 * 16,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1734,7 +1740,7 @@ impl Scope {
         let up = cross(right, fwd);
         self.cam = [eye, right, up, fwd];
         let v4 = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
-        let data: [[f32; 4]; 10] = [
+        let data: [[f32; 4]; 11] = [
             v4(eye),
             v4(right),
             v4(up),
@@ -1745,6 +1751,7 @@ impl Scope {
             [self.colour as f32, GROUND as f32, GROUND_BLUR / (2.0 * r), self.ss as f32],
             [self.exposure, if subject_slot.is_some() { 1.0 } else { 0.0 }, embed.map_or(0.0, |e| e.0[0]), embed.map_or(0.0, |e| e.0[1])],
             [o.centre[0], o.centre[1], fade_r, self.opacity],
+            [self.approach.clamp(0.0, 1.0), 0.0, 0.0, 0.0],
         ];
         gpu.queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&data));
         let (src, dst) = ((self.frame % 2) as usize, ((self.frame + 1) % 2) as usize);
