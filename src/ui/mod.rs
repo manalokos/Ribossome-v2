@@ -6,7 +6,7 @@ use crate::gpu::profiler::Profiler;
 use crate::world::{Ledger, MAX_STEPS_PER_FRAME, World};
 
 /// Nomes dos modos de captura (`UiState::capture_mode`).
-pub const CAPTURE_MODES: [&str; 3] = ["framing guide (square)", "whole view (with data)", "simulation only"];
+pub const CAPTURE_MODES: [&str; 4] = ["framing guide (square)", "whole view (with data)", "simulation only", "whole window (interface)"];
 
 pub struct UiState {
     pub paused: bool,
@@ -97,7 +97,8 @@ pub struct UiState {
     pub rec: bool,
     /// O QUE se fotografa e grava: 0 = o quadrado da mira (só o mapa, ao
     /// tamanho escolhido); 1 = a vista como está no ecrã, com a barra de
-    /// dados e o que estiver por cima; 2 = a vista sem nada por cima.
+    /// dados e o que estiver por cima; 2 = a vista sem nada por cima; 3 = a
+    /// janela inteira, com os painéis.
     pub capture_mode: u32,
     /// O que o separador do microscópio pediu neste frame (foto, rec…).
     pub micro_asked: crate::microscope::Asked,
@@ -597,11 +598,11 @@ fn capture_bar(ui: &mut egui::Ui, st: &mut UiState) {
         if ui.button(label).on_hover_text("records what the framing guide frames straight into an MP4 video in saves/videos/ (the images go raw to ffmpeg, with no intermediate files). Move and zoom the camera freely while recording; the size stays as it was at the start").clicked() {
             st.rec = !st.rec;
         }
-        egui::ComboBox::from_id_salt("capture_mode").selected_text(CAPTURE_MODES[st.capture_mode.min(2) as usize]).width(150.0).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("capture_mode").selected_text(CAPTURE_MODES[st.capture_mode.min(3) as usize]).width(150.0).show_ui(ui, |ui| {
             for (i, n) in CAPTURE_MODES.iter().enumerate() {
                 ui.selectable_value(&mut st.capture_mode, i as u32, *n);
             }
-        }).response.on_hover_text("what photo and rec capture. Framing guide: the square in the middle of the map, at the size chosen here (map only). Whole view: the view as it is on screen, map or microscope, with the data bar. Simulation only: the same without anything drawn over it. The two view modes follow you from the map into the microscope in one recording");
+        }).response.on_hover_text("what photo and rec capture. Framing guide: the square in the middle of the map, at the size chosen here (map only). Whole view: the view as it is on screen, map or microscope, with the data bar. Simulation only: the same without anything drawn over it. Whole window: everything, with the control panel and the inspector. The two view modes follow you from the map into the microscope in one recording");
         egui::ComboBox::from_id_salt("shot_size").selected_text(format!("{} px", st.shot_size)).width(70.0).show_ui(ui, |ui| {
             for v in [512u32, 1024, 2048] {
                 ui.selectable_value(&mut st.shot_size, v, format!("{v} px"));

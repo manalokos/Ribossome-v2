@@ -1979,8 +1979,11 @@ impl Running {
             }
             // CAPTURA DA VISTA: o retângulo dela copiado da imagem da janela,
             // antes da interface ("simulation only") ou depois ("whole view").
-            let (cw, ch) = ((vp[2].min(sw as f32 - vp[0]).floor() as u32) & !1, (vp[3].min(sh as f32 - vp[1]).floor() as u32) & !1);
-            let shoot = *view_shot_want && !covered && cw >= 16 && ch >= 16;
+            // (Modo 3: a janela inteira, com os painéis.)
+            let whole = st.capture_mode == 3;
+            let (cx, cy) = if whole { (0, 0) } else { (vp[0] as u32, vp[1] as u32) };
+            let (cw, ch) = if whole { (sw & !1, sh & !1) } else { ((vp[2].min(sw as f32 - vp[0]).floor() as u32) & !1, (vp[3].min(sh as f32 - vp[1]).floor() as u32) & !1) };
+            let shoot = *view_shot_want && (whole || !covered) && cw >= 16 && ch >= 16;
             if shoot && view_shot.as_ref().is_none_or(|t| t.width() != cw || t.height() != ch) {
                 *view_shot = Some(gpu.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("view shot"),
@@ -1995,7 +1998,7 @@ impl Running {
             }
             let copy = |enc: &mut wgpu::CommandEncoder, dst: &wgpu::Texture| {
                 enc.copy_texture_to_texture(
-                    wgpu::TexelCopyTextureInfo { texture: surface_tex, mip_level: 0, origin: wgpu::Origin3d { x: vp[0] as u32, y: vp[1] as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
+                    wgpu::TexelCopyTextureInfo { texture: surface_tex, mip_level: 0, origin: wgpu::Origin3d { x: cx, y: cy, z: 0 }, aspect: wgpu::TextureAspect::All },
                     wgpu::TexelCopyTextureInfo { texture: dst, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
                     wgpu::Extent3d { width: cw, height: ch, depth_or_array_layers: 1 },
                 );
@@ -2021,7 +2024,7 @@ impl Running {
                 .forget_lifetime();
             egui_renderer.render(&mut pass, &jobs, &sd);
             drop(pass);
-            if let (true, 1, Some(dst)) = (shoot, st.capture_mode, view_shot.as_ref()) {
+            if let (true, 1 | 3, Some(dst)) = (shoot, st.capture_mode, view_shot.as_ref()) {
                 copy(enc, dst);
                 *view_shot_ready = true;
             }
