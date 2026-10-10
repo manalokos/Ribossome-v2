@@ -206,7 +206,9 @@ fn soup_at(pc: vec2<f32>, radius: f32, px: f32) -> Soup {
     s.h = 0.0;
     s.lift = 0.0;
     s.top = 0.0;
-    let r = clamp(radius, 0.05, 1.0);
+    // (Até 3 células de raio: acima de 1 cada ponto lê mais células à volta
+    // e o desenho fica mais pesado.)
+    let r = clamp(radius, 0.05, 3.0);
     // Núcleo GAUSSIANO, σ = r / DOT_SIGMAS, cortado em r e descido para
     // acabar em zero aí (sem degrau na borda). O integral sobre o disco é
     // 0,8611·r², por isso 1,1613/r² dá integral 1 (um monómero). Com o raio

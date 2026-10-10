@@ -809,7 +809,7 @@ fn tab_view(ui: &mut egui::Ui, b: &Busca, st: &mut UiState) {
             ui.checkbox(&mut st.show_activated, "activated").on_hover_text("the activated monomers (coloured): the ones that can be eaten or paired into a copy");
             ui.checkbox(&mut st.show_spent, "spent").on_hover_text("the spent monomers (grey): matter with no energy, waiting to be reactivated");
         });
-        c.slider("monomer circle of confusion (cells)", slider(&mut st.coc_radius, 0.0..=1.0))
+        c.slider("monomer circle of confusion (cells)", slider(&mut st.coc_radius, 0.0..=3.0))
             .tip("up close, each monomer is drawn as a soft disc of this radius, at its own position inside the cell (drawing only: the simulation counts monomers per cell). Small = loose molecules; large = continuous haze; 0 = squares, one color per cell");
         const SIGNAL_VIEWS: [&str; 6] = [
             "chemistry",
