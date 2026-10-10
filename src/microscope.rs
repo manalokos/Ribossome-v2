@@ -871,6 +871,10 @@ pub struct Scope {
     /// (visto exatamente de cima, sem rotação nem desfoque, como o mapa) a 1
     /// (a câmara escolhida em `orbit`); `opacity` é o fundido da imagem.
     pub approach: f32,
+    /// Raio das moléculas na vista do MAPA (células): a entrar a partir dele,
+    /// as moléculas começam desse tamanho e só encolhem para o do
+    /// microscópio (MOLECULE_R) à medida que a câmara se inclina.
+    pub map_molecule_r: f32,
     /// Imagens por segundo (média corrida), para a barra de dados.
     pub fps: f32,
     /// Limite de imagens por segundo na aplicação principal, enquanto o
@@ -1315,6 +1319,7 @@ impl Scope {
             last_step: std::time::Instant::now(),
             epoch: world.params.epoch,
             approach: 1.0,
+            map_molecule_r: MOLECULE_R,
             fps: 60.0,
             fps_limit: 24.0,
             capture_mode: 1,
@@ -1573,7 +1578,9 @@ impl Scope {
         // frames: o instante entre os dois passos faz parte do estado.)
         let tweening = slow && self.smooth_motion;
         let tween_t = if tweening { (self.last_step.elapsed().as_secs_f32() * self.rate).clamp(0.0, 1.0) } else { 1.0 };
-        let key = (zc, r, self.monomers, world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
+        let a = self.approach.clamp(0.0, 1.0);
+        let molecule_r = self.map_molecule_r + (MOLECULE_R - self.map_molecule_r) * a * a * (3.0 - 2.0 * a);
+        let key = (zc, r, self.monomers + molecule_r, world.params.epoch + step_now as u32, subject_slot, tween_t.to_bits());
         if self.layer_key != Some(key) {
             self.layer_key = Some(key);
             self.layer_age = 0;
@@ -1658,8 +1665,8 @@ impl Scope {
         }
         let cam = Camera { center: zc, zoom: TEX as f32 / (2.0 * r) };
         // (Moléculas pequenas: no microscópio são partículas, não manchas.)
-        self.cap.view.coc_radius.set(MOLECULE_R);
-        self.height_view.coc_radius.set(MOLECULE_R);
+        self.cap.view.coc_radius.set(molecule_r);
+        self.height_view.coc_radius.set(molecule_r);
         self.cap.view.relief_order.set(true);
         self.height_view.relief_order.set(true);
         self.cap.view.epoch.set(clock.0);
@@ -1673,7 +1680,7 @@ impl Scope {
         if let Some(slot) = subject_slot {
             self.subject_view.focus.set(slot);
             self.subject_view.relief_order.set(true);
-            self.subject_view.coc_radius.set(MOLECULE_R);
+            self.subject_view.coc_radius.set(molecule_r);
             self.subject_view.epoch.set(world.params.epoch);
             self.subject_view.update(&gpu.queue, &cam, [TEX as f32; 2], 0, self.monomers, 0);
         }

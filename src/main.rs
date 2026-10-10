@@ -1888,6 +1888,7 @@ impl Running {
             scope.orbit.dist = dist;
             scope.region = region;
             scope.monomers = if self.ui.monomer_brightness > 0.0 { 0.7 } else { 0.0 };
+            scope.map_molecule_r = self.ui.coc_radius.max(0.05);
             if micro_asked.supersampling {
                 scope.ss = if scope.ss >= 2 { 1 } else { 2 };
                 let size = scope.size;
