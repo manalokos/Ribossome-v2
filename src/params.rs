@@ -603,7 +603,9 @@ impl Default for SimParams {
             brownian_rot: 0.0,
             transport_every: 3,
             signal_crosstalk: 0.1,
-            flow_mass: 4.0,
+            // (0: a baixo Reynolds um corpo solto segue a água seja qual for o
+            // seu peso; só fica para trás quem se agarra ao terreno.)
+            flow_mass: 0.0,
             chemo_take: 0.008,
             vent_cycle_period: 7000.0,
             vent_cycle_amp: 0.91,

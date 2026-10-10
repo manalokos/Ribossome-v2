@@ -48,7 +48,7 @@
     "death_metab": 0.2,
     "brownian_rot": 0,
     "transport_every": 3,
-    "flow_mass": 4,
+    "flow_mass": 0,
     "chemo_take": 0.008,
     "protease_power": 2,
     "vent_cycle_period": 7000,
