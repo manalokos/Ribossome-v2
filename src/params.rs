@@ -603,8 +603,8 @@ impl Default for SimParams {
             brownian_rot: 0.0,
             transport_every: 3,
             signal_crosstalk: 0.1,
-            // (0: a baixo Reynolds um corpo solto segue a água seja qual for o
-            // seu peso; só fica para trás quem se agarra ao terreno.)
+            // (Já não é usado: o peso deixou de travar o arrasto pela água.
+            // Fica só para as cenas antigas abrirem.)
             flow_mass: 0.0,
             chemo_take: 0.008,
             vent_cycle_period: 7000.0,

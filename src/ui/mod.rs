@@ -1265,8 +1265,6 @@ fn tab_body(ui: &mut egui::Ui, b: &Busca, world: &mut World) {
     section(ui, b, T, "Body in the current and gravity", |c| {
         c.slider("drag by the current", slider(&mut p.flow_coupling, 0.0..=1.0))
             .tip("1 = physical (a free body follows the water); less = experiment: currents carry them less and they also push the water less");
-        c.slider("heavy bodies follow the current less", slider(&mut p.flow_mass, 0.0..=4.0))
-            .tip("each agent's drag by the current is divided by 1 + this value × (mean mass per residue ÷ that of a normal residue − 1): a body with heavy organs (stores, proteases with reach) is carried less by the water. Density counts, not length. 0 = all follow the water equally, which is the physical case: with no inertia, a free body is carried by the water whatever it weighs, and only one holding on to the terrain stays behind. Above 0 is an experiment, and it gives heavy bodies a free meal (food flows past them)");
         c.slider("agents push the water", slider(&mut p.agent_fluid_push, -1.0..=1.0))
             .tip("each residue gives its drag back to the fluid (only in the world with fluid)");
         c.slider("gravity on AGENTS × (∝ √n)", slider(&mut p.sedimentation, 0.0..=0.5))

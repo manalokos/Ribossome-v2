@@ -452,14 +452,14 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     var aux = rna_tail[slot * 4u + 1u];
     if (a.age == 0u) { aux = vec4<f32>(0.0); } // slot reutilizado: sem herança
     // Orientação a meio do passo (o corpo roda durante o passo).
-    // Transporte pela água × flow_coupling (1 = físico).
-    // CORPOS PESADOS (órgãos densos, depósitos) seguem MENOS a corrente:
-    // divide-se por 1 + flow_mass × (massa média por resíduo ÷ a de um
-    // resíduo normal − 1). Conta a densidade, não o comprimento: um corpo
-    // comprido e leve é levado como um curto.
+    // Transporte pela água × flow_coupling (1 = físico). O PESO NÃO CONTA: a
+    // baixo Reynolds um corpo solto é levado pela água seja qual for a sua
+    // massa. (Havia aqui uma regra que fazia os corpos densos seguir menos
+    // a corrente; dava refeições grátis a depósitos e proteases, com a
+    // comida a passar por eles.) A massa e a área dos órgãos só entram na
+    // NATAÇÃO, pelo arrasto de cada resíduo.
     let mass = body_mass(slot, a.body_len);
-    let heavy = max(mass / (f32(max(a.body_len, 1u)) * MASS_RESIDUE_REF) - 1.0, 0.0);
-    let fc = clamp(params.flow_coupling, 0.0, 1.0) / (1.0 + max(params.flow_mass, 0.0) * heavy);
+    let fc = clamp(params.flow_coupling, 0.0, 1.0);
     let rot_mid = a.rot + 0.5 * (js.swim.z + fc * js.flow.z);
     let sv_phys = rotate(js.swim.xy, rot_mid);
     let avg = mix(aux.zw, sv_phys, 1.0 / max(params.swim_memory, 1.0));
