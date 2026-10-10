@@ -1,7 +1,8 @@
 // LIGAÇÕES ENTRE AGENTES POR ÂNCORAS: o órgão "âncora" (promotor tirosina,
 // como as colas DOPA dos mexilhões) tem polaridade + ou − e uma força (a
 // variante). Uma âncora livre que toca numa âncora livre de polaridade
-// oposta de outro agente liga-se a ela; cada âncora segura UMA ligação.
+// oposta de outro agente liga-se a ela; cada âncora segura até ANCHOR_HOLDS
+// ligações (com agentes diferentes).
 // A força da variante decide quanto dura (as permanentes só se soltam se a
 // ligação esticar demais ou o outro morrer). Nenhuma regra olha para o
 // genoma: só para os órgãos que o corpo tem.
@@ -89,13 +90,17 @@ fn bond_partner_ok(b: vec4<u32>) -> bool {
     return o.alive != 0u && o.id == b.y && bond_theirs(b) < o.body_len;
 }
 
-// A âncora k deste agente já segura uma ligação?
+// A âncora k deste agente já está CHEIA? Cada âncora segura até
+// ANCHOR_HOLDS agentes (e o corpo todo, até MAX_BONDS): uma só âncora pode
+// ser o centro de um cacho, em vez de só fazer pares e filas.
+const ANCHOR_HOLDS: u32 = 3u;
 fn anchor_busy(slot: u32, k: u32) -> bool {
+    var held = 0u;
     for (var i = 0u; i < MAX_BONDS; i++) {
         let b = bond_at(slot, i);
-        if (b.x != BOND_NONE && bond_mine(b) == k) { return true; }
+        if (b.x != BOND_NONE && bond_mine(b) == k) { held += 1u; }
     }
-    return false;
+    return held >= ANCHOR_HOLDS;
 }
 
 // Marca as ligações de um slot novo como livres.
