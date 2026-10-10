@@ -73,6 +73,7 @@ const PRED_PROLINE_DEFENSE: f32 = 0.9;
 const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 10000.0;
 const S_DIGEST: u32 = 13u;
+const S_SPILL: u32 = 15u;
 
 // FAMÍLIA de uma protease = o que corta, decidido pelo aminoácido SEGUINTE
 // da cadeia (o bolso de especificidade; a mesma regra da antena do sensor
@@ -354,7 +355,26 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     atomicStore(&matter_claim[slot], BOND_NONE);
     // O que este agente tirou a outros: a parte direta entra-lhe na energia.
     let direct = clamp(params.protease_direct, 0.0, 1.0);
-    a.energy = min(max(a.energy + contact_disp[slot].z * direct + bd.w, 0.0), energy_capacity(slot, a));
+    let cap_a = energy_capacity(slot, a);
+    let fed = max(a.energy + contact_disp[slot].z * direct + bd.w, 0.0);
+    a.energy = min(fed, cap_a);
+    // O que um predador de barriga cheia ganha A MAIS não se perde: reativa
+    // gastos na célula onde está (um por cada food_power), como o excesso de
+    // um fotossistema. É assim que a energia das presas vira monómeros para
+    // a cópia dele, ali mesmo, onde ficaram os restos.
+    let spill = min(fed - a.energy, max(contact_disp[slot].z * direct, 0.0)) / max(params.food_power, 1e-3);
+    if (spill > 0.0) {
+        let qs = rng_f4(a.id, params.epoch, S_SPILL);
+        var ns = u32(spill);
+        if (qs.x < fract(spill)) { ns += 1u; }
+        let cell_a = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
+        let c0 = min(u32(qs.y * 4.0), 3u);
+        for (var i = 0u; i < min(ns, 8u); i++) {
+            for (var t = 0u; t < 4u; t++) {
+                if (chem_activate_one(cell_a * 4u + (c0 + i + t) % 4u)) { break; }
+            }
+        }
+    }
     // O que lhe tiraram: sai da energia; a parte que não foi direta para os
     // atacantes reativa gastos da célula onde está (× lysis_yield, um por
     // cada food_power, arredondamento ao acaso). Sem gastos ali, perde-se.
@@ -375,7 +395,10 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Sem energia: morre aqui, e conta como morte por protease.
         if (a.energy <= 0.0) {
             atomicAdd(&life_counters[LC_BITES], 1u);
-            die(slot, a);
+            // DIGESTÃO: parte da matéria do corpo sai já ativada (ver
+            // lysis_matter). Só conta o genoma: os complementos já
+            // capturados saem sempre ativados.
+            die_release(slot, a, u32(f32(a.gene_len) * clamp(params.lysis_matter, 0.0, 1.0)));
             contact_disp[slot] = vec4<f32>(0.0);
             return;
         }

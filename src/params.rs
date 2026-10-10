@@ -418,7 +418,11 @@ gpu_struct! {
         /// não larga nada). É por aqui que as correntes e os bichos desfazem
         /// rocha: levam o entulho da base, a face fica a pique e larga mais.
         pub rock_crumble: f32,
-        pub _pad_s3: u32,
+        /// DIGESTÃO: fração da matéria do corpo de quem morre por protease
+        /// que sai já ATIVADA (pronta para emparelhar ou comer); o resto sai
+        /// gasto, como em qualquer morte. Não é paga por energia nenhuma: é
+        /// uma fonte de ativação à custa das presas (0 = não há).
+        pub lysis_matter: f32,
     }
 }
 
@@ -606,7 +610,7 @@ impl Default for SimParams {
             sediment_cohesion: 0.5,
             sediment_compaction: 0.00001,
             rock_crumble: 0.0001,
-            _pad_s3: 0,
+            lysis_matter: 0.5,
         }
     }
 }

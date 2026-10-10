@@ -1114,6 +1114,8 @@ fn tab_energy(ui: &mut egui::Ui, b: &Busca, world: &mut World) {
             .tip("multiplies the energy that proteases take from the victim per step of contact (base: 0.2 × strength × intensity for a victim with 10% target residues). When the victim's energy reaches zero, it dies. Each family cuts certain amino acids and proline defends. 0 = no predation");
         c.slider("direct fraction to the predator", slider(&mut p.protease_direct, 0.0..=1.0))
             .tip("share of the energy taken that goes straight into the attacker. The rest goes to the medium (see the next slider). 0 = the predator has to eat the remains; 1 = it sucks up everything");
+        c.slider("digested matter of the prey", slider(&mut p.lysis_matter, 0.0..=1.0))
+            .tip("when a protease kills, this fraction of the monomers of the body comes out already ACTIVATED where it fell, ready to be eaten or paired into a copy; the rest comes out spent, as in any death. It is what gives a predator building blocks, not just energy. No energy pays for it: it is activation at the expense of prey (0 = a kill leaves only spent monomers)");
         c.slider("yield of the remains", slider(&mut p.lysis_yield, 0.0..=1.0))
             .tip("of the energy that does not go straight to the predator, the fraction that stays in the medium as activated monomers next to the victim (one for each 'energy per monomer'); the rest is lost");
     });
