@@ -1851,6 +1851,14 @@ impl Running {
         };
         self.micro_t = if self.ui.microscope && !covered && vp[2] >= 32.0 && vp[3] >= 32.0 { smooth(MICRO_Z0.ln(), MICRO_Z1.ln(), self.cam.zoom.max(1e-6).ln()) } else { 0.0 };
         let micro = self.micro_t > 0.0;
+        // SEGUIR (tecla F, ou a caixa "Follow"): a câmara acompanha o agente
+        // que estava mais perto do centro, no mapa e no microscópio; deslocar
+        // a vista à mão larga-o, e se ele morrer deixa de seguir.
+        if let Some(scope) = self.scope.as_mut().filter(|s| s.follow) {
+            scope.orbit.centre = self.cam.center;
+            scope.follow_step(&self.gpu, &self.world);
+            self.cam.center = scope.orbit.centre;
+        }
         // De volta ao mapa, a rotação que se tinha dado esquece-se: a próxima
         // aproximação começa outra vez alinhada com ele.
         // (Logo que a vista volta a estar a direito, a meio do fundido: não é
@@ -1870,13 +1878,8 @@ impl Running {
             // microscópio já pesa mais do que o mapa.)
             scope.opacity = smooth(0.0, 0.75, self.micro_t);
             scope.approach = smooth(0.5, 1.0, self.micro_t);
-            // SEGUIR: é o microscópio que leva a câmara (a do mapa vai atrás).
             // MIRA: procura-se o agente do centro de vez em quando.
-            if scope.follow {
-                scope.orbit.centre = self.cam.center;
-                scope.follow_step(&self.gpu, &self.world);
-                self.cam.center = scope.orbit.centre;
-            } else if scope.reticle && scope.subject.as_ref().is_none_or(|s| s.read_at.elapsed().as_secs_f32() > 1.0) {
+            if !scope.follow && scope.reticle && scope.subject.as_ref().is_none_or(|s| s.read_at.elapsed().as_secs_f32() > 1.0) {
                 scope.find_subject(&self.gpu, &self.world);
             }
             scope.orbit.centre = self.cam.center;
@@ -2167,6 +2170,15 @@ impl Running {
                 match event.logical_key.as_ref() {
                     Key::Named(NamedKey::Space) => self.ui.paused = !self.ui.paused,
                     Key::Named(NamedKey::Home) => self.cam = Camera::fit(&self.world.cfg, self.screen()),
+                    Key::Character("f") | Key::Character("F") => {
+                        if let Some(scope) = self.scope.as_mut() {
+                            scope.follow = !scope.follow;
+                            if scope.follow {
+                                scope.orbit.centre = self.cam.center;
+                                scope.find_subject(&self.gpu, &self.world);
+                            }
+                        }
+                    }
                     Key::Character(c) => {
                         if let Some(d) = c.chars().next().and_then(|c| c.to_digit(10))
                             && d <= 9
