@@ -73,8 +73,10 @@ const PRED_PROLINE_DEFENSE: f32 = 0.9;
 const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 10000.0;
 // Limites do efeito do tamanho na mordida (atacante / vítima, em resíduos).
-const PRED_SIZE_MIN: f32 = 0.2;
-const PRED_SIZE_MAX: f32 = 5.0;
+// (Mais brando do que ×0,2 a ×5: com esses limites e a força das proteases
+// alta, os corpos pequenos desapareciam todos.)
+const PRED_SIZE_MIN: f32 = 0.4;
+const PRED_SIZE_MAX: f32 = 2.5;
 // Passos de recarga das proteases de um agente depois de um disparo.
 const PROTEASE_RELOAD: u32 = 60u;
 const S_DIGEST: u32 = 13u;
@@ -228,7 +230,12 @@ fn protease_exposed(slot: u32, n: u32) -> vec4<f32> {
     // duas = 50% em cada; a tudo = 25%. Quem quer estar a salvo dos seus
     // (que atacam com uma família) consegue; quem quer ser imune a toda a
     // gente não, e fica sempre uma família que o apanha: pedra, papel, tesoura.
-    let total = own.x + own.y + own.z + own.w;
+    // A GENERALISTA NÃO TEM DEFESA: o inibidor só bloqueia as três famílias
+    // especializadas. A generalista morde qualquer corpo, a um terço da força,
+    // e quem a usa não pode proteger os seus (morde parentes e vizinhos de
+    // colónia). Contra ela só valem o tamanho, as reservas e a prolina.
+    own.w = 0.0;
+    let total = own.x + own.y + own.z;
     if (total > 1.0) { own /= total; }
     return vec4<f32>(1.0) - PROTEASE_IMMUNITY * own;
 }
