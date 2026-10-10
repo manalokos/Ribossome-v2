@@ -124,6 +124,9 @@ fn take_around(cell: u32, ch: u32) -> bool {
 }
 
 fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, generation: u32, parent: u32) {
+    // (Um corpo novo nasce com as proteases carregadas, mesmo num slot que
+    // foi de outro.)
+    protease_fired[slot] = 0u;
     var a: Agent;
     a.pos_x = pos.x;
     a.pos_y = pos.y;

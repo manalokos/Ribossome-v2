@@ -75,7 +75,7 @@ const BITE_SCALE: f32 = 10000.0;
 // Limites do efeito do tamanho na mordida (atacante / vítima, em resíduos).
 const PRED_SIZE_MIN: f32 = 0.2;
 const PRED_SIZE_MAX: f32 = 5.0;
-// Passos entre dois disparos das proteases de um agente.
+// Passos de recarga das proteases de um agente depois de um disparo.
 const PROTEASE_RELOAD: u32 = 60u;
 const S_DIGEST: u32 = 13u;
 const S_SPILL: u32 = 15u;
@@ -285,12 +285,12 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     // As células de contacto têm 120 unidades: com proteases de alcance é
     // preciso olhar duas células em vez de uma (raios 60 + 60 + alcance).
     let span = select(1, 2, arms.r_mid > 0.0 || arms.r_far > 0.0);
-    // DISPARO E RECARGA: a protease não corrói aos poucos; dispara de uma vez
-    // (o dano de PROTEASE_RELOAD passos num só) e fica a recarregar esse
-    // tempo. Cada agente tem o seu instante (pelo id), por isso um encontro
-    // curto pode calhar com a arma descarregada. Em média tira o mesmo que
-    // antes; a diferença é que um golpe pode matar de uma vez.
-    let loaded = (params.epoch + a.id) % PROTEASE_RELOAD == 0u;
+    // DISPARO E RECARGA: a protease não corrói aos poucos. Com a arma
+    // carregada e aberta, dispara no PRIMEIRO passo em que tem uma vítima ao
+    // alcance (o dano de PROTEASE_RELOAD passos de uma vez, em todas as que lá
+    // estiverem) e fica esse tempo a recarregar. Um golpe pode matar à primeira.
+    let last = protease_fired[slot];
+    let loaded = last == 0u || params.epoch + 1u - last >= PROTEASE_RELOAD || params.epoch + 1u < last;
     // Energia que este agente tira a outros neste passo.
     var gained = 0.0;
     for (var dy = -span; dy <= span; dy++) {
@@ -340,6 +340,8 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     }
+    // Disparou: começa a recarga.
+    if (gained > 0.0) { protease_fired[slot] = params.epoch + 1u; }
     let dp = push;
     // .w (defesa) fica igual: outros atacantes ainda a podem estar a ler.
     contact_disp[slot] = vec4<f32>(dp, gained, contact_disp[slot].w);
