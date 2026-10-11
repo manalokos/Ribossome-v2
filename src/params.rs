@@ -438,6 +438,16 @@ gpu_struct! {
         /// (0) e o valor tirado ao acaso (1). Mesma semente, mesmo sorteio:
         /// só muda a distância a que se vai da física desenhada.
         pub scramble_amount: f32,
+        /// CÓPIA LIGADA À ENERGIA (cinética de enzima: polimerizar gasta
+        /// energia, e com pouca abranda). As bases por passo multiplicam-se
+        /// por f·(1 + K)/(f + K), com f = energia / capacidade do corpo e K
+        /// este valor: cheio copia à velocidade inteira; com f = K, a pouco
+        /// mais de metade. 0 = a velocidade não depende da energia.
+        pub pairing_energy_half: f32,
+        /// Energia mínima para emparelhar (abaixo disto a cópia pára).
+        pub pairing_min_energy: f32,
+        pub _pad_p1: u32,
+        pub _pad_p2: u32,
     }
 }
 
@@ -632,6 +642,10 @@ impl Default for SimParams {
             scramble_angles: 0,
             scramble_response: 0,
             scramble_amount: 1.0,
+            pairing_energy_half: 0.5,
+            pairing_min_energy: 1.0,
+            _pad_p1: 0,
+            _pad_p2: 0,
         }
     }
 }

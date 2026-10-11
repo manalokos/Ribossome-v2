@@ -844,9 +844,16 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // ---- EMPARELHAMENTO (v3): captura complementos ATIVADOS da vizinhança ----
     // O molde é o genoma; a captura é na célula de um resíduo ao acaso (ou
     // do próprio agente, se for RNA nu). Base a base, pela ordem do genoma.
-    if (a.pair_count < a.gene_len && a.energy > 1.0 + params.pairing_cost) {
+    // VELOCIDADE LIGADA À ENERGIA: a cópia é uma reação que gasta energia, e
+    // satura com ela (f = quão cheio está o corpo; ver pairing_energy_half).
+    // Um agente com pouca energia copia devagar e chega à divisão mais tarde
+    // e mais cheio, em vez de se dividir em dois moribundos.
+    let pair_floor = max(params.pairing_min_energy, 0.0) + params.pairing_cost;
+    if (a.pair_count < a.gene_len && a.energy > pair_floor) {
         let rr = rng_f4(a.id, params.epoch, S_PAIR);
-        let pr = params.pairing_rate * metab;
+        let fill = clamp(a.energy / max(cap, 1e-6), 0.0, 1.0);
+        let half = max(params.pairing_energy_half, 0.0);
+        let pr = params.pairing_rate * metab * fill * (1.0 + half) / max(fill + half, 1e-6);
         var attempts = u32(pr);
         if (rr.x < fract(pr)) { attempts += 1u; }
         attempts = min(attempts, PAIRING_MAX_PER_STEP);
@@ -859,7 +866,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let ang = q.y * 6.2831853;
             site += vec2<f32>(cos(ang), sin(ang)) * q.z * PAIRING_REACH;
             let comp = genome_get(slot, a.pair_count) ^ 1u;
-            if (a.energy < 1.0 + params.pairing_cost) { break; }
+            if (a.energy < pair_floor) { break; }
             // Tentativas independentes: uma falha (não havia o complemento
             // ali) não impede as outras deste passo, noutros sítios.
             if (!chem_take_state_one(world_to_cell(site) * 4u + comp, false)) { continue; }

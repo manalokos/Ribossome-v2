@@ -1205,6 +1205,10 @@ fn tab_cycle(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
     section(ui, b, T, "Reproduction", |c| {
         c.slider("initial energy", slider(&mut p.spawn_energy, 0.1..=50.0));
         c.slider("pairing (bases/step)", slider(&mut p.pairing_rate, 0.0..=8.0));
+        c.slider("pairing slows with low energy (K)", slider(&mut p.pairing_energy_half, 0.0..=2.0))
+            .tip("copying is a reaction that spends energy and saturates with it: bases per step × f·(1 + K)/(f + K), with f = how full the body is (energy / capacity). A full body copies at full speed; at f = K, a little over half; near empty, almost nothing. A poor agent reaches division later and fuller instead of splitting into two dying halves. 0 = speed does not depend on energy (the old rule)");
+        c.slider("minimum energy to pair", slider(&mut p.pairing_min_energy, 0.0..=5.0))
+            .tip("below this energy (plus the cost of one base) copying stops altogether. 1 = the value it always had; 0 = no floor, only the slowdown above");
         let mut salvage = p.salvage > 0.0;
         c.check("recharge: producers copy themselves with spent monomers", &mut salvage)
             .tip("the energy that overflows from a photosystem or a chemosynthesis organ first charges a spent monomer for the copy of its own genome (building with raw material); only what is of no use for that goes on to reactivate monomers in the medium. Off = all the overflow goes to the medium (as it was)");
