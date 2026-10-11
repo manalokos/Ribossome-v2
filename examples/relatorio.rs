@@ -12,8 +12,14 @@ fn main() {
     let path = std::env::var("SCENE").unwrap_or_else(|_| "saves/autosave.ribo".into());
     let steps: u32 = std::env::var("STEPS").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
     let gpu = Gpu::new_headless().unwrap();
-    let mut w = World::new(&gpu, WorldConfig::DEFAULT, 1);
     let scene = Scene::read(std::path::Path::new(&path)).unwrap();
+    // (O tamanho do mundo é o da cena.)
+    let cfg = {
+        let c = &scene.header["cfg"];
+        let g = |k: &str, d: u32| c[k].as_u64().map(|v| v as u32).unwrap_or(d);
+        WorldConfig { grid_size: g("grid_size", 2048), fluid_size: g("fluid_size", 1024), world_units_per_cell: g("world_units_per_cell", 30), max_agents: g("max_agents", 400_000) }
+    };
+    let mut w = World::new(&gpu, cfg, 1);
     let mut lineages = scene.extra_block("linhagens").and_then(Lineages::from_bytes);
     w.load_scene(&gpu, &scene).unwrap();
     // CENSOS=n e CADA=k: corre n × k passos com um censo das linhagens em

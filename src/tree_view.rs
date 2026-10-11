@@ -276,6 +276,34 @@ fn form_json(genome: &[u8], w: &World, code: &[u32]) -> String {
     s
 }
 
+/// MODO DE VIDA de uma linhagem, pelos órgãos de captação das DUAS formas:
+/// 0 = nenhum; 1 = herbívoro (só bocas); 2 = fotossintético; 3 =
+/// quimiossintético; 4 = misto (mais de uma destas três maneiras, numa forma
+/// ou repartidas pelas duas); 5 = carnívoro (tem protease, coma ou não mais
+/// alguma coisa). São as manchas de cor da árvore.
+fn diet(genome: &[u8], w: &World, code: &[u32]) -> u8 {
+    let (mut mouth, mut photo, mut chemo, mut hunt) = (false, false, false, false);
+    for g in [genome.to_vec(), reverse_complement(genome)] {
+        for r in translate_organs(&g, w.params.require_start != 0, code) {
+            match r.organ.map(|(t, _, _)| t) {
+                Some(0) => mouth = true,
+                Some(10) => photo = true,
+                Some(14) => chemo = true,
+                Some(11) => hunt = true,
+                _ => {}
+            }
+        }
+    }
+    match (hunt, mouth as u8 + photo as u8 + chemo as u8) {
+        (true, _) => 5,
+        (_, 0) => 0,
+        (_, 1) if mouth => 1,
+        (_, 1) if photo => 2,
+        (_, 1) => 3,
+        _ => 4,
+    }
+}
+
 /// O retrato `f` do ramo `i` como endereço de dados (ou cadeia vazia).
 fn pic(pics: Option<&[[Vec<u8>; 2]]>, i: usize, f: usize) -> String {
     match pics.and_then(|p| p.get(i)).map(|p| &p[f]) {
@@ -298,7 +326,7 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
         let counts: Vec<String> = b.counts.iter().map(|(e, n)| format!("[{e},{n}]")).collect();
         write!(
             data,
-            "{}{{\"id\":{},\"name\":{},\"par\":{},\"born\":{},\"last\":{},\"alive\":{},\"peak\":{},\"bases\":{},\"c\":[{}],\"a\":{},\"b\":{},\"ia\":{},\"ib\":{}}}",
+            "{}{{\"id\":{},\"name\":{},\"par\":{},\"born\":{},\"last\":{},\"alive\":{},\"peak\":{},\"bases\":{},\"d\":{},\"c\":[{}],\"a\":{},\"b\":{},\"ia\":{},\"ib\":{}}}",
             if i > 0 { "," } else { "" },
             b.id,
             // Nome em latim da linhagem do líder (as duas formas partilham-no).
@@ -309,6 +337,7 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
             l.alive(b),
             b.peak,
             b.leader.len(),
+            diet(&b.leader, w, &code),
             counts.join(","),
             form_json(&b.leader, w, &code),
             form_json(&reverse_complement(&b.leader), w, &code),
@@ -320,8 +349,8 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
     data.push(']');
     let alive = l.branches.iter().filter(|b| l.alive(b)).count();
     format!(
-        "<p>{} branches recorded in {} censuses (every {} epochs), {} alive. The horizontal axis is TIME: each node sits at the epoch in which the branch appeared and the bar in front of it lasts for as long as it existed. A curve links it to the branch it came from. Green = alive (the bar ends in an arrow); gray = extinct (the bar ends in a crossbar, at the last census in which it appeared); thicker = more agents at the peak. Dashed = the new branch appeared after the one it came from had disappeared. <b>Wheel</b> = zoom, <b>drag</b> = move, <b>click</b> = view the branch. Up close each node shows the drawing of the two forms.</p>\
-<div class=\"tv-bar\"><label>hide branches with a peak below <input id=\"tv-min\" type=\"range\" min=\"0\" max=\"100\" value=\"0\"> <span id=\"tv-minv\">0</span></label> <label><input id=\"tv-alive\" type=\"checkbox\"> only the living and their ancestors</label> <button id=\"tv-fit\">see all</button></div>\
+        "<p>{} branches recorded in {} censuses (every {} epochs), {} alive. The horizontal axis is TIME: each node sits at the epoch in which the branch appeared and the bar in front of it lasts for as long as it existed. A curve links it to the branch it came from. Green = alive (the bar ends in an arrow); gray = extinct (the bar ends in a crossbar, at the last census in which it appeared); thicker = more agents at the peak. The coloured patches behind the branches show how each lineage makes a living, counting the organs of both forms: herbivore (only mouths), photosynthetic, chemosynthetic, mixed (more than one of those) or carnivore (has a protease). Dashed = the new branch appeared after the one it came from had disappeared. <b>Wheel</b> = zoom, <b>drag</b> = move, <b>click</b> = view the branch. Up close each node shows the drawing of the two forms.</p>\
+<div class=\"tv-bar\"><label>hide branches with a peak below <input id=\"tv-min\" type=\"range\" min=\"0\" max=\"100\" value=\"0\"> <span id=\"tv-minv\">0</span></label> <label><input id=\"tv-alive\" type=\"checkbox\"> only the living and their ancestors</label> <label><input id=\"tv-diet\" type=\"checkbox\" checked> colour by way of life</label> <button id=\"tv-fit\">see all</button></div>\
 <div class=\"tv-wrap\"><canvas id=\"tv\"></canvas><div id=\"tv-info\"><i>click a branch</i></div></div>\
 <script>const TV_DATA={data};const TV_T0={};const TV_T1={};const TV_EVERY={};\n{JS}</script>",
         l.branches.len(),
@@ -354,7 +383,10 @@ const JS: &str = r##"(function(){
 const cv=document.getElementById('tv'),ctx=cv.getContext('2d'),info=document.getElementById('tv-info');
 const byId=new Map(TV_DATA.map(b=>[b.id,b]));
 const kids=new Map();TV_DATA.forEach(b=>{const k=b.par===null?-1:b.par;if(!kids.has(k))kids.set(k,[]);kids.get(k).push(b);});
-let minPeak=0,onlyAlive=false,nodes=[],sel=null;
+let minPeak=0,onlyAlive=false,nodes=[],sel=null,showDiet=true;
+// MODO DE VIDA de cada ramo (b.d, ver diet em tree_view.rs): cor da mancha.
+const DIET=[null,'#d9a441','#35c4b0','#5b7cff','#b56be0','#e5484d'];
+const DIET_NAME=['','herbivore (only mouths)','photosynthetic','chemosynthetic','mixed','carnivore (has a protease)'];
 // Os ramos que saem do mesmo ramo ficam do MAIS NOVO para o mais velho por
 // baixo dele: assim a descida para um ramo antigo passa a esquerda de todos
 // os mais novos e nenhuma linha atravessa outra.
@@ -404,6 +436,14 @@ function draw(){
   const cards=CW*z>=96, thumbs=!cards&&IM*z>=11, text=cards;
   const wd=n=>Math.max(1.2/z,1.5+1.3*Math.log10(Math.max(1,n.peak)));
   ctx.lineCap='round';
+  // MANCHAS: por trás de tudo, uma faixa larga e transparente ao longo da vida
+  // de cada ramo, da cor do seu modo de vida. Ramos vizinhos com o mesmo modo
+  // fundem-se numa mancha só: vê-se onde a árvore mudou de ofício.
+  if(showDiet){ ctx.globalAlpha=0.17; ctx.lineWidth=ROW*0.96;
+    for(const n of nodes){ const c=DIET[n.d]; if(!c) continue; const e=Math.max(n.reach,n.x+CW);
+      if(n.y<vy0-ROW||n.y>vy1+ROW||n.x-ROW>vx1||e+ROW<vx0) continue;
+      ctx.strokeStyle=c; ctx.beginPath(); ctx.moveTo(n.x,n.y); ctx.lineTo(e,n.y); ctx.stroke(); }
+    ctx.globalAlpha=1; }
   // ligações: saem da barra do ramo de origem, um pouco antes do nó, e descem em curva
   for(const n of nodes){ const p=n.up; if(!p) continue; if(n.y<vy0-ROW||p.y>vy1+ROW||n.x<vx0||n.x-60>vx1) continue;
     // sai da barra do ramo de origem; se este ja tinha desaparecido dos censos
@@ -442,6 +482,9 @@ function draw(){
     row(1,y=>{ ctx.strokeStyle='#56606b'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(lx,y); ctx.lineTo(lx+40,y); ctx.stroke(); ctx.strokeStyle='#8a94a0'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(lx+40,y-6); ctx.lineTo(lx+40,y+6); ctx.stroke(); },'extinct (the bar ends at its last census)');
     row(2,y=>{ ctx.strokeStyle='#4f9e62'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(lx,y-6); ctx.bezierCurveTo(lx+2,y+2,lx+8,y+2,lx+44,y+2); ctx.stroke(); },'branch that split from the line above');
     row(3,y=>{ ctx.strokeStyle='#4f9e62'; ctx.lineWidth=2; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(lx,y); ctx.lineTo(lx+44,y); ctx.stroke(); ctx.setLineDash([]); },'appeared after its parent line had vanished'); }
+  if(showDiet){ const w2=214, lx=W-w2-6, ly=H-112; ctx.fillStyle='rgba(10,12,16,0.85)'; ctx.fillRect(lx-6,ly-14,w2,120); ctx.strokeStyle='#2c333b'; ctx.lineWidth=1; ctx.strokeRect(lx-6,ly-14,w2,120);
+    ctx.font='11px system-ui'; ctx.textAlign='left';
+    for(let i=1;i<DIET.length;i++){ const y=ly+(i-1)*20; ctx.globalAlpha=0.55; ctx.fillStyle=DIET[i]; ctx.fillRect(lx,y-7,30,14); ctx.globalAlpha=1; ctx.fillStyle='#aab4c0'; ctx.fillText(DIET_NAME[i],lx+40,y+4); } }
 }
 function pick(mx,my){ const x=(mx-ox)/z,y=(my-oy)/z; const cards=CW*z>=96, thumbs=!cards&&IM*z>=11; let best=null,bd=1e18;
   for(const n of nodes){ if(cards){ if(x>=n.x&&x<=n.x+CW&&Math.abs(y-n.y)<=CH/2) return n; } else { const dd=(x-n.x)**2+(y-n.y)**2; if(dd<bd){bd=dd;best=n;} } }
@@ -451,7 +494,7 @@ function show(b){
   const nm=x=>'<i>'+x.name+'</i> (B'+x.id+')';
   const par=b.par===null?'root (no recognizable relative)':(byId.has(b.par)?nm(byId.get(b.par)):'B'+b.par);
   const kn=(kids.get(b.id)||[]).map(nm).join(', ')||'none';
-  let h='<h3 style="margin:0"><i>'+b.name+'</i></h3><div>B'+b.id+(b.alive?' · alive':' · extinct')+'</div><div>'+b.bases+' bases · peak '+b.peak+' agents</div><div>appeared at epoch '+b.born+', last census '+b.last+'</div><div>comes from: '+par+'</div><div>branches that come from it: '+kn+'</div>';
+  let h='<h3 style="margin:0"><i>'+b.name+'</i></h3><div>B'+b.id+(b.alive?' · alive':' · extinct')+(DIET[b.d]?' · <span style="color:'+DIET[b.d]+'">'+DIET_NAME[b.d]+'</span>':'')+'</div><div>'+b.bases+' bases · peak '+b.peak+' agents</div><div>appeared at epoch '+b.born+', last census '+b.last+'</div><div>comes from: '+par+'</div><div>branches that come from it: '+kn+'</div>';
   h+='<h4>population at the censuses</h4><canvas id="tv-sp" width="300" height="60"></canvas>';
   for(const [nm,f,im] of [['form A',b.a,b.ia],['form B (the complement, the children)',b.b,b.ib]]){
     h+='<h4>'+nm+' · '+f.n+' residues</h4>'+(im?'<img width="300" height="300" src="'+im+'">':'<canvas class="tv-b" width="300" height="200"></canvas>')+'<div class="seq" title="list of amino acids, from N to C; organs in white">'+f.ph+'</div><ul>'+(f.list.length?f.list.map(x=>'<li>'+x.replace(/</g,'&lt;')+'</li>').join(''):'<li>no organs</li>')+'</ul>';
@@ -473,6 +516,7 @@ const mn=document.getElementById('tv-min'),mv=document.getElementById('tv-minv')
 const peaks=TV_DATA.map(b=>b.peak).sort((a,b)=>a-b);
 mn.addEventListener('input',()=>{ minPeak=mn.value==0?0:peaks[Math.min(peaks.length-1,Math.floor(peaks.length*mn.value/101))]; mv.textContent=minPeak; layout(); fit(); });
 document.getElementById('tv-alive').addEventListener('change',e=>{ onlyAlive=e.target.checked; layout(); fit(); });
+document.getElementById('tv-diet').addEventListener('change',e=>{ showDiet=e.target.checked; draw(); });
 document.getElementById('tv-fit').addEventListener('click',fit);
 window.addEventListener('resize',()=>{ resize(); draw(); });
 layout(); resize(); fit();
