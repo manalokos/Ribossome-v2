@@ -276,22 +276,20 @@ fn form_json(genome: &[u8], w: &World, code: &[u32]) -> String {
     s
 }
 
-/// MODO DE VIDA de uma linhagem, pelos órgãos de captação das DUAS formas:
+/// MODO DE VIDA de UMA FORMA (um corpo), pelos seus órgãos de captação:
 /// 0 = nenhum; 1 = herbívoro (só bocas); 2 = fotossintético; 3 =
-/// quimiossintético; 4 = misto (mais de uma destas três maneiras, numa forma
-/// ou repartidas pelas duas); 5 = carnívoro (tem protease, coma ou não mais
-/// alguma coisa). São as manchas de cor da árvore.
+/// quimiossintético; 4 = misto (mais de uma destas três no mesmo corpo); 5 =
+/// carnívoro (tem protease, coma ou não mais alguma coisa). As duas formas de
+/// uma linhagem têm muitas vezes modos diferentes: cada uma leva a sua cor.
 fn diet(genome: &[u8], w: &World, code: &[u32]) -> u8 {
     let (mut mouth, mut photo, mut chemo, mut hunt) = (false, false, false, false);
-    for g in [genome.to_vec(), reverse_complement(genome)] {
-        for r in translate_organs(&g, w.params.require_start != 0, code) {
-            match r.organ.map(|(t, _, _)| t) {
-                Some(0) => mouth = true,
-                Some(10) => photo = true,
-                Some(14) => chemo = true,
-                Some(11) => hunt = true,
-                _ => {}
-            }
+    for r in translate_organs(genome, w.params.require_start != 0, code) {
+        match r.organ.map(|(t, _, _)| t) {
+            Some(0) => mouth = true,
+            Some(10) => photo = true,
+            Some(14) => chemo = true,
+            Some(11) => hunt = true,
+            _ => {}
         }
     }
     match (hunt, mouth as u8 + photo as u8 + chemo as u8) {
@@ -326,7 +324,7 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
         let counts: Vec<String> = b.counts.iter().map(|(e, n)| format!("[{e},{n}]")).collect();
         write!(
             data,
-            "{}{{\"id\":{},\"name\":{},\"par\":{},\"born\":{},\"last\":{},\"alive\":{},\"peak\":{},\"bases\":{},\"d\":{},\"c\":[{}],\"a\":{},\"b\":{},\"ia\":{},\"ib\":{}}}",
+            "{}{{\"id\":{},\"name\":{},\"par\":{},\"born\":{},\"last\":{},\"alive\":{},\"peak\":{},\"bases\":{},\"d\":[{},{}],\"c\":[{}],\"a\":{},\"b\":{},\"ia\":{},\"ib\":{}}}",
             if i > 0 { "," } else { "" },
             b.id,
             // Nome em latim da linhagem do líder (as duas formas partilham-no).
@@ -338,6 +336,7 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
             b.peak,
             b.leader.len(),
             diet(&b.leader, w, &code),
+            diet(&reverse_complement(&b.leader), w, &code),
             counts.join(","),
             form_json(&b.leader, w, &code),
             form_json(&reverse_complement(&b.leader), w, &code),
@@ -349,7 +348,7 @@ pub fn viewer(l: &Lineages, w: &World, pics: Option<&[[Vec<u8>; 2]]>) -> String 
     data.push(']');
     let alive = l.branches.iter().filter(|b| l.alive(b)).count();
     format!(
-        "<p>{} branches recorded in {} censuses (every {} epochs), {} alive. The horizontal axis is TIME: each node sits at the epoch in which the branch appeared and the bar in front of it lasts for as long as it existed. A curve links it to the branch it came from. Green = alive (the bar ends in an arrow); gray = extinct (the bar ends in a crossbar, at the last census in which it appeared); thicker = more agents at the peak. The coloured patches behind the branches show how each lineage makes a living, counting the organs of both forms: herbivore (only mouths), photosynthetic, chemosynthetic, mixed (more than one of those) or carnivore (has a protease). Dashed = the new branch appeared after the one it came from had disappeared. <b>Wheel</b> = zoom, <b>drag</b> = move, <b>click</b> = view the branch. Up close each node shows the drawing of the two forms.</p>\
+        "<p>{} branches recorded in {} censuses (every {} epochs), {} alive. The horizontal axis is TIME: each node sits at the epoch in which the branch appeared and the bar in front of it lasts for as long as it existed. A curve links it to the branch it came from. Green = alive (the bar ends in an arrow); gray = extinct (the bar ends in a crossbar, at the last census in which it appeared); thicker = more agents at the peak. The coloured patches behind the branches show how each lineage makes a living: herbivore (only mouths), photosynthetic, chemosynthetic, mixed (more than one of those in the same body) or carnivore (has a protease). The two forms of a lineage often live differently: then the patch is split in two halves, one colour for each form (always in the same order, so relatives line up), and the bar under each portrait on the card says which form is which. Dashed = the new branch appeared after the one it came from had disappeared. <b>Wheel</b> = zoom, <b>drag</b> = move, <b>click</b> = view the branch. Up close each node shows the drawing of the two forms.</p>\
 <div class=\"tv-bar\"><label>hide branches with a peak below <input id=\"tv-min\" type=\"range\" min=\"0\" max=\"100\" value=\"0\"> <span id=\"tv-minv\">0</span></label> <label><input id=\"tv-alive\" type=\"checkbox\"> only the living and their ancestors</label> <label><input id=\"tv-diet\" type=\"checkbox\" checked> colour by way of life</label> <button id=\"tv-fit\">see all</button></div>\
 <div class=\"tv-wrap\"><canvas id=\"tv\"></canvas><div id=\"tv-info\"><i>click a branch</i></div></div>\
 <script>const TV_DATA={data};const TV_T0={};const TV_T1={};const TV_EVERY={};\n{JS}</script>",
@@ -384,9 +383,10 @@ const cv=document.getElementById('tv'),ctx=cv.getContext('2d'),info=document.get
 const byId=new Map(TV_DATA.map(b=>[b.id,b]));
 const kids=new Map();TV_DATA.forEach(b=>{const k=b.par===null?-1:b.par;if(!kids.has(k))kids.set(k,[]);kids.get(k).push(b);});
 let minPeak=0,onlyAlive=false,nodes=[],sel=null,showDiet=true;
-// MODO DE VIDA de cada ramo (b.d, ver diet em tree_view.rs): cor da mancha.
+// MODO DE VIDA das duas formas de cada ramo (b.d = [forma A, forma B], ver
+// diet em tree_view.rs): meia mancha para cada forma.
 const DIET=[null,'#d9a441','#35c4b0','#5b7cff','#b56be0','#e5484d'];
-const DIET_NAME=['','herbivore (only mouths)','photosynthetic','chemosynthetic','mixed','carnivore (has a protease)'];
+const DIET_NAME=['no way of feeding','herbivore (only mouths)','photosynthetic','chemosynthetic','mixed','carnivore (has a protease)'];
 // Os ramos que saem do mesmo ramo ficam do MAIS NOVO para o mais velho por
 // baixo dele: assim a descida para um ramo antigo passa a esquerda de todos
 // os mais novos e nenhuma linha atravessa outra.
@@ -439,10 +439,15 @@ function draw(){
   // MANCHAS: por trás de tudo, uma faixa larga e transparente ao longo da vida
   // de cada ramo, da cor do seu modo de vida. Ramos vizinhos com o mesmo modo
   // fundem-se numa mancha só: vê-se onde a árvore mudou de ofício.
-  if(showDiet){ ctx.globalAlpha=0.17; ctx.lineWidth=ROW*0.96;
-    for(const n of nodes){ const c=DIET[n.d]; if(!c) continue; const e=Math.max(n.reach,n.x+CW);
+  if(showDiet){ ctx.globalAlpha=0.17; const hh=ROW*0.48, pad=ROW*0.35;
+    for(const n of nodes){ const ca=DIET[Math.min(n.d[0],n.d[1])], cb=DIET[Math.max(n.d[0],n.d[1])]; if(!ca&&!cb) continue; const e=Math.max(n.reach,n.x+CW);
       if(n.y<vy0-ROW||n.y>vy1+ROW||n.x-ROW>vx1||e+ROW<vx0) continue;
-      ctx.strokeStyle=c; ctx.beginPath(); ctx.moveTo(n.x,n.y); ctx.lineTo(e,n.y); ctx.stroke(); }
+      if(ca===cb){ ctx.lineWidth=2*hh; ctx.strokeStyle=ca; ctx.beginPath(); ctx.moveTo(n.x,n.y); ctx.lineTo(e,n.y); ctx.stroke(); continue; }
+      // duas formas, dois modos: meia mancha para cada uma. A ordem é a das
+      // classes (não a de A e B, que é ao acaso): assim parentes com os mesmos
+      // dois modos ficam com as faixas do mesmo lado e fundem-se.
+      if(ca){ ctx.fillStyle=ca; ctx.fillRect(n.x-pad,n.y-hh,e-n.x+2*pad,hh); }
+      if(cb){ ctx.fillStyle=cb; ctx.fillRect(n.x-pad,n.y,e-n.x+2*pad,hh); } }
     ctx.globalAlpha=1; }
   // ligações: saem da barra do ramo de origem, um pouco antes do nó, e descem em curva
   for(const n of nodes){ const p=n.up; if(!p) continue; if(n.y<vy0-ROW||p.y>vy1+ROW||n.x<vx0||n.x-60>vx1) continue;
@@ -469,6 +474,7 @@ function draw(){
     const ia=img(n,'ia'), ib=img(n,'ib');
     if(ia) ctx.drawImage(ia,n.x+3,y+3,IM,IM); else body(ctx,n.a,n.x+3+IM/2,y+3+IM/2,IM*0.8);
     if(ib) ctx.drawImage(ib,n.x+CW-3-IM,y+3,IM,IM); else body(ctx,n.b,n.x+CW-3-IM/2,y+3+IM/2,IM*0.8);
+    if(showDiet){ if(DIET[n.d[0]]){ ctx.fillStyle=DIET[n.d[0]]; ctx.fillRect(n.x+3,y+IM-2,IM,5); } if(DIET[n.d[1]]){ ctx.fillStyle=DIET[n.d[1]]; ctx.fillRect(n.x+CW-3-IM,y+IM-2,IM,5); } }
     if(text){ const tx=n.x+8; ctx.fillStyle=n.alive?'#e6edf3':'#9aa4af'; ctx.font='italic bold 14px system-ui'; ctx.fillText(n.name,tx,y+IM+22,CW-16);
       ctx.font='11px system-ui'; ctx.fillStyle='#9fb0c0'; ctx.fillText('B'+n.id+' · '+n.bases+' bases · peak '+n.peak,tx,y+IM+40,CW-16);
       ctx.fillText(fmtT(n.born)+' → '+(n.alive?'alive':fmtT(n.last)),tx,y+IM+55,CW-16);
@@ -494,10 +500,10 @@ function show(b){
   const nm=x=>'<i>'+x.name+'</i> (B'+x.id+')';
   const par=b.par===null?'root (no recognizable relative)':(byId.has(b.par)?nm(byId.get(b.par)):'B'+b.par);
   const kn=(kids.get(b.id)||[]).map(nm).join(', ')||'none';
-  let h='<h3 style="margin:0"><i>'+b.name+'</i></h3><div>B'+b.id+(b.alive?' · alive':' · extinct')+(DIET[b.d]?' · <span style="color:'+DIET[b.d]+'">'+DIET_NAME[b.d]+'</span>':'')+'</div><div>'+b.bases+' bases · peak '+b.peak+' agents</div><div>appeared at epoch '+b.born+', last census '+b.last+'</div><div>comes from: '+par+'</div><div>branches that come from it: '+kn+'</div>';
+  let h='<h3 style="margin:0"><i>'+b.name+'</i></h3><div>B'+b.id+(b.alive?' · alive':' · extinct')+'</div><div>'+b.bases+' bases · peak '+b.peak+' agents</div><div>appeared at epoch '+b.born+', last census '+b.last+'</div><div>comes from: '+par+'</div><div>branches that come from it: '+kn+'</div>';
   h+='<h4>population at the censuses</h4><canvas id="tv-sp" width="300" height="60"></canvas>';
-  for(const [nm,f,im] of [['form A',b.a,b.ia],['form B (the complement, the children)',b.b,b.ib]]){
-    h+='<h4>'+nm+' · '+f.n+' residues</h4>'+(im?'<img width="300" height="300" src="'+im+'">':'<canvas class="tv-b" width="300" height="200"></canvas>')+'<div class="seq" title="list of amino acids, from N to C; organs in white">'+f.ph+'</div><ul>'+(f.list.length?f.list.map(x=>'<li>'+x.replace(/</g,'&lt;')+'</li>').join(''):'<li>no organs</li>')+'</ul>';
+  for(const [nm,f,im,dd] of [['form A',b.a,b.ia,b.d[0]],['form B (the complement, the children)',b.b,b.ib,b.d[1]]]){
+    h+='<h4>'+nm+' · '+f.n+' residues · <span style="color:'+(DIET[dd]||'#8b96a3')+'">'+DIET_NAME[dd]+'</span></h4>'+(im?'<img width="300" height="300" src="'+im+'">':'<canvas class="tv-b" width="300" height="200"></canvas>')+'<div class="seq" title="list of amino acids, from N to C; organs in white">'+f.ph+'</div><ul>'+(f.list.length?f.list.map(x=>'<li>'+x.replace(/</g,'&lt;')+'</li>').join(''):'<li>no organs</li>')+'</ul>';
   }
   info.innerHTML=h;
   let ci=0; const cs=info.querySelectorAll('canvas.tv-b'); [[b.a,b.ia],[b.b,b.ib]].forEach(([f,im])=>{ if(!im){ const c=cs[ci++].getContext('2d'); body(c,f,150,100,180); } });
