@@ -79,7 +79,7 @@ const AGENT_Z: f32 = 6.0;
 // Altura dos sensores em relação à de uma bola do mesmo contorno.
 const SENSOR_FLAT: f32 = 0.45;
 // Altura dos troços do corpo em relação à forma insuflada do seu sprite.
-const AMINO_RELIEF: f32 = 1.8;
+const AMINO_RELIEF: f32 = 1.2;
 // ...e a altura do CENTRO da peça acima do chão: o volume vai de g_c - g_h
 // a g_c + g_h (a mesma forma para cima e para baixo: uma cúpula fica uma
 // bola, meio tubo um tubo).
