@@ -1076,7 +1076,14 @@ fn tail_link(p: vec2<f32>, leader: vec2<f32>, link: f32, straight: vec2<f32>, fr
 // cada metade são 3 pontos que o seguem, como as caudas. Cada ponto é levado
 // pela água ONDE ESTÁ (como o centro): numa corrente uniforme o fio vai
 // inteiro com ela, e é a diferença de corrente ao longo dele que o dobra.
-const NAKED_JIGGLE: f32 = 1.2;
+const NAKED_JIGGLE: f32 = 2.5;
+// Nasce já ENROLADO: cada troço sai virado ao acaso (até ±NAKED_TURN rad em
+// relação ao anterior) e mais curto do que o fio esticado.
+const NAKED_TURN: f32 = 1.5;
+const NAKED_SLACK: f32 = 0.6;
+fn naked_coil(p: vec2<f32>, d: vec2<f32>, h: f32, link: f32) -> vec2<f32> {
+    return p + rotate(d, (h * 2.0 - 1.0) * NAKED_TURN) * link * NAKED_SLACK;
+}
 fn naked_drift(p: vec2<f32>, j: vec2<f32>, fc: f32) -> vec2<f32> {
     var q = p + j;
     if (fc > 0.0) { q += fc * water_at(p, true); }
@@ -1095,12 +1102,18 @@ fn update_naked_strand(slot: u32, a: Agent) {
     let j0 = (rng_f4(a.id, params.epoch, S_TAIL) - vec4<f32>(0.5)) * NAKED_JIGGLE;
     let j1 = (rng_f4(a.id, params.epoch, S_TAIL + 1u) - vec4<f32>(0.5)) * NAKED_JIGGLE;
     let j2 = (rng_f4(a.id, params.epoch, S_TAIL + 2u) - vec4<f32>(0.5)) * NAKED_JIGGLE;
-    let n1 = tail_link(naked_drift(q0.xy, j0.xy, fc), c0, link, c0 - d * link, fresh);
-    let n2 = tail_link(naked_drift(q0.zw, j0.zw, fc), n1, link, n1 - d * link, fresh);
-    let n3 = tail_link(naked_drift(q2.xy, j1.xy, fc), n2, link, n2 - d * link, fresh);
-    let c1 = tail_link(naked_drift(q2.zw, j1.zw, fc), c0, link, c0 + d * link, fresh);
-    let c2 = tail_link(naked_drift(q3.xy, j2.xy, fc), c1, link, c1 + d * link, fresh);
-    let c3 = tail_link(naked_drift(q3.zw, j2.zw, fc), c2, link, c2 + d * link, fresh);
+    let ha = rng_f4(a.id, 0u, S_TAIL + 3u);
+    let hb = rng_f4(a.id, 0u, S_TAIL + 4u);
+    let n1 = tail_link(naked_drift(q0.xy, j0.xy, fc), c0, link, naked_coil(c0, -d, ha.x, link), fresh);
+    let dn = normalize(n1 - c0 + vec2<f32>(1e-6, 0.0));
+    let n2 = tail_link(naked_drift(q0.zw, j0.zw, fc), n1, link, naked_coil(n1, dn, ha.y, link), fresh);
+    let dn2 = normalize(n2 - n1 + vec2<f32>(1e-6, 0.0));
+    let n3 = tail_link(naked_drift(q2.xy, j1.xy, fc), n2, link, naked_coil(n2, dn2, ha.z, link), fresh);
+    let c1 = tail_link(naked_drift(q2.zw, j1.zw, fc), c0, link, naked_coil(c0, d, hb.x, link), fresh);
+    let dc = normalize(c1 - c0 + vec2<f32>(1e-6, 0.0));
+    let c2 = tail_link(naked_drift(q3.xy, j2.xy, fc), c1, link, naked_coil(c1, dc, hb.y, link), fresh);
+    let dc2 = normalize(c2 - c1 + vec2<f32>(1e-6, 0.0));
+    let c3 = tail_link(naked_drift(q3.zw, j2.zw, fc), c2, link, naked_coil(c2, dc2, hb.z, link), fresh);
     rna_tail[slot * 4u] = vec4<f32>(n1, n2);
     rna_tail[slot * 4u + 2u] = vec4<f32>(n3, c1);
     rna_tail[slot * 4u + 3u] = vec4<f32>(c2, c3);

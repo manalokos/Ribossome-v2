@@ -965,6 +965,18 @@ fn tail_curve(p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>, out: v
     return 0.5 * ((2.0 * b) + (c - a) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (3.0 * b - a - 3.0 * c + d) * t3);
 }
 
+// Ponto da base `i` (de `cnt`) de uma metade do RNA nu: a curva pelos pontos
+// do fio, mais uma ondulação miúda de lado (duas ondas somadas, para não
+// parecer uma mola), a zero no centro para as duas metades se encontrarem.
+fn naked_point(p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>, out: vec2<f32>, i: f32, cnt: f32, amp: f32, ph: f32) -> vec2<f32> {
+    let p = tail_curve(p0, p1, p2, p3, out, 3.0 * i / cnt);
+    let ta = tail_curve(p0, p1, p2, p3, out, 3.0 * max(i - 0.5, 0.0) / cnt);
+    let tb = tail_curve(p0, p1, p2, p3, out, 3.0 * min(i + 0.5, cnt) / cnt);
+    let t = normalize(tb - ta + vec2<f32>(1e-6, 0.0));
+    let w = sin(i * 0.9 + ph) + 0.6 * sin(i * 0.37 + 1.7 * ph);
+    return p + vec2<f32>(-t.y, t.x) * amp * w * min(i / 3.0, 1.0);
+}
+
 const SHOW_RNA_TAILS: bool = false;
 fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
     var o: AgentVsOut;
@@ -1030,9 +1042,14 @@ fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
             p3 = p2 + dw * link;
             other = c0 - dw * link;
         }
+        // ENCARQUILHADO: o comprimento do fio não muda, por isso o que os
+        // pontos se aproximaram (a folga) sai em ondas miúdas ao longo dele.
+        let slack = clamp(1.0 - (length(p1 - c0) + length(p2 - p1) + length(p3 - p2)) / max(3.0 * link, 1e-3), 0.0, 1.0);
+        let amp = RNA_SPACING * (0.5 + 2.2 * slack);
+        let ph = f32(a.id % 977u) * 0.37 + select(0.0, 2.1, trailer) + f32(a.age) * 0.02;
         let cnt = f32(naked_cnt);
-        qw = tail_curve(c0, p1, p2, p3, c0 - other, 3.0 * f32(m) / cnt);
-        pw = tail_curve(c0, p1, p2, p3, c0 - other, 3.0 * f32(m + 1u) / cnt);
+        qw = naked_point(c0, p1, p2, p3, c0 - other, f32(m), cnt, amp, ph);
+        pw = naked_point(c0, p1, p2, p3, c0 - other, f32(m + 1u), cnt, amp, ph);
     } else {
         // FITA MOLE (ver update_rna_tails): curva suave (Catmull-Rom) pela
         // raiz e pelos 3 pontos do fio guardados no mundo.
