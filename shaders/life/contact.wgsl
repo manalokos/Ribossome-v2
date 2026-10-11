@@ -82,8 +82,6 @@ const PRED_SIZE_MAX: f32 = 2.5;
 // dentes mais a espessura do resíduo). E quantas proteases de um corpo contam.
 const PROTEASE_TOUCH: f32 = 14.0;
 const PROTEASE_SLOTS: u32 = 12u;
-// Passos de recarga das proteases de um agente depois de um disparo.
-const PROTEASE_RELOAD: u32 = 60u;
 const S_DIGEST: u32 = 13u;
 const S_SPILL: u32 = 15u;
 
@@ -119,17 +117,7 @@ fn family_weights(f: u32) -> vec4<f32> {
 // zimogenio: a enzima so e ativada a partir de um certo estimulo.) O desenho
 // usa o mesmo limiar (agents_view.wgsl).
 const PROTEASE_MIN_DRIVE: f32 = 0.25;
-// A recarregar depois de um disparo (ver PROTEASE_RELOAD)?
-fn protease_loaded(slot: u32) -> bool {
-    let last = protease_fired[slot];
-    return last == 0u || params.epoch + 1u - last >= PROTEASE_RELOAD || params.epoch + 1u < last;
-}
-
 fn protease_drive(slot: u32, k: u32, v: OrganVariant) -> f32 {
-    // A RECARREGAR, a protease está FECHADA: não morde, não paga o custo de
-    // estar aberta, não faz arrasto e os outros não a cheiram. Volta a abrir
-    // sozinha quando fica pronta (se o sinal dela a deixar).
-    if (!protease_loaded(slot)) { return 0.0; }
     var drive = 1.0;
     if (v.p2 >= 0.0) { drive = clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p2, 0.0, 3.0))], 0.0, 1.0); }
     return select(0.0, drive, drive >= PROTEASE_MIN_DRIVE);
@@ -267,9 +255,6 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p = vec2<f32>(a.pos_x, a.pos_y);
     let c = contact_cell_xy(p);
     var push = vec2<f32>(0.0);
-    // DISPARO E RECARGA: ver mais abaixo. (Lido antes: só uma arma carregada
-    // precisa de saber onde estão as suas proteases.)
-    let loaded = protease_loaded(slot);
     // ONDE ESTÃO AS PROTEASES: a mordida é do ÓRGÃO, não do corpo. Cada
     // protease aberta guarda a sua posição no mundo, os pesos por família e o
     // alcance; morde quem tiver um RESÍDUO a tocar-lhe (ou dentro do alcance).
@@ -280,7 +265,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     var pwt: array<vec4<f32>, PROTEASE_SLOTS>;
     var preach: array<f32, PROTEASE_SLOTS>;
     var np = 0u;
-    if (loaded) {
+    {
         let harvest = harvest_share(slot, a.body_len);
         for (var k = 0u; k < a.body_len; k++) {
             let o = organ_get(slot, k);
@@ -301,10 +286,9 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     // centro: quem está armado olha duas células em vez de uma, para apanhar
     // corpos compridos cuja ponta lhe toca na protease.
     let span = select(1, 2, armed);
-    // DISPARO E RECARGA: a protease não corrói aos poucos. Com a arma
-    // carregada e aberta, dispara no PRIMEIRO passo em que tem uma vítima ao
-    // alcance (o dano de PROTEASE_RELOAD passos de uma vez, em todas as que lá
-    // estiverem) e fica esse tempo a recarregar. Um golpe pode matar à primeira.
+    // CONTÍNUO: uma protease aberta corrói em todos os passos em que toca na
+    // vítima (PRED_DRAIN por passo). (Houve um disparo único com recarga de 60
+    // passos; via-se mal o que mordia o quê e foi retirado.)
     // Energia que este agente tira a outros neste passo.
     var gained = 0.0;
     for (var dy = -span; dy <= span; dy++) {
@@ -355,7 +339,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         // vítima (resíduos): um grande devora os pequenos, e um
                         // pequeno mal belisca um grande.
                         let size = clamp(f32(max(a.body_len, 1u)) / f32(max(b.body_len, 1u)), PRED_SIZE_MIN, PRED_SIZE_MAX);
-                        let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist * size * f32(PROTEASE_RELOAD), b.energy);
+                        let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist * size, b.energy);
                         if (bite > 0.0) {
                             atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
                             gained += bite;
@@ -366,8 +350,6 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
     }
-    // Disparou: começa a recarga.
-    if (gained > 0.0) { protease_fired[slot] = params.epoch + 1u; }
     let dp = push;
     // .w (defesa) fica igual: outros atacantes ainda a podem estar a ler.
     contact_disp[slot] = vec4<f32>(dp, gained, contact_disp[slot].w);

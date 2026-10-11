@@ -92,9 +92,6 @@ const GHOST_VIEW_MAX: f32 = 12000.0;
 // TOM DA ESPÉCIE (só para o desenho): um ângulo de cor por agente, tirado da
 // composição do genoma (ver species_hue em drawlist.wgsl).
 @group(3) @binding(35) var<storage, read_write> tint_out: array<f32>;
-// RECARGA DAS PROTEASES: epoch + 1 do último disparo de cada agente (0 =
-// nunca disparou). Ver PROTEASE_RELOAD em contact.wgsl.
-@group(3) @binding(36) var<storage, read_write> protease_fired: array<u32>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;
