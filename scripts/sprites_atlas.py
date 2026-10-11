@@ -27,6 +27,13 @@ Encaixe no mosaico:
   haste     (sensores de um lado) a esfera no centro com raio STALK_BODY do
             meio mosaico, a antena para cima
 
+ALTURAS DESENHADAS (opcional): se existir saves/sprites/alturas/ com um mapa
+de alturas para uma fonte (o mesmo nome do ficheiro; para uma grelha,
+NN_nome_cK.png = a célula K, ou a grelha inteira com o mesmo nome), usa-se
+esse mapa (cinzento: branco = mais alto, alinhado com a fonte) em vez do
+contorno insuflado. A escala fica a do insuflado (o ponto mais alto igual).
+ALTURAS_SO=1 (para testes): as linhas com mapas usam só as variantes que os têm.
+
 Uso: python -X utf8 scripts/sprites_atlas.py
 """
 import glob
@@ -42,6 +49,7 @@ from sprites_escolha import ORGANS, mask_of  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "saves", "sprites", "fontes")
+HEIGHTS = os.path.join(ROOT, "saves", "sprites", "alturas")
 TILE, COLS, ROWS = 512, 9, 32
 STALK_BODY = 0.3
 STRETCH = {7, 22, 23}
@@ -51,7 +59,7 @@ BODY_MARGIN = 1.3
 HOLES = {t for t, o in ORGANS.items() if o[2]}
 
 
-def fit(lum, mask, box):
+def fit(lum, mask, box, height=None):
     w, h = box[2] - box[0], box[3] - box[1]
     out_l = Image.new("L", (w, h), 0)
     out_m = Image.new("L", (w, h), 0)
@@ -59,11 +67,16 @@ def fit(lum, mask, box):
     out_m.paste(mask, (-box[0], -box[1]))
     out_l = out_l.resize((TILE, TILE), Image.LANCZOS)
     out_m = out_m.resize((TILE, TILE), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.5))
-    hi, lo = inflate(out_l, out_m)
+    out_h = None
+    if height is not None:
+        out_h = Image.new("L", (w, h), 0)
+        out_h.paste(height, (-box[0], -box[1]))
+        out_h = out_h.resize((TILE, TILE), Image.LANCZOS)
+    hi, lo = inflate(out_l, out_m, out_h)
     return Image.merge("RGBA", (out_l, out_m, hi, lo))
 
 
-def inflate(lum, mask):
+def inflate(lum, mask, given=None):
     """Altura da forma insuflada (0..255 = 0..meio mosaico): em cada ponto,
     a da maior esfera inscrita que o cobre, mais um relevo fino tirado da
     luminância (as estrias e bossas do desenho)."""
@@ -89,8 +102,14 @@ def inflate(lum, mask):
     w = ndi.gaussian_filter(w, k)
     w = np.where(m, np.maximum(w, d), 0.0)
     h = np.sqrt(np.clip(d * (2.0 * w - d), 0.0, None))
-    relief = ndi.gaussian_filter(np.array(lum, dtype=np.float32) / 255.0, 1.0)
-    h = np.where(m, h + 0.05 * (TILE / 2) * (relief - relief[m].mean()), 0.0)
+    if given is not None:
+        # Mapa de alturas desenhado: a forma vem dele, a escala do insuflado.
+        # (Um pouco de desfoque: o mapa tem 8 bits e fazia degraus.)
+        g = ndi.gaussian_filter(np.array(given, dtype=np.float32) / 255.0, 1.2)
+        h = np.where(m, g / max(float(g[m].max()), 1e-6) * float(h.max()), 0.0)
+    else:
+        relief = ndi.gaussian_filter(np.array(lum, dtype=np.float32) / 255.0, 1.0)
+        h = np.where(m, h + 0.05 * (TILE / 2) * (relief - relief[m].mean()), 0.0)
     h = ndi.gaussian_filter(h, 0.8)
     # ALTURA EM 16 BITS, partida por dois canais (azul = byte alto, alfa = byte
     # baixo): com 8 bits as encostas saíam em degraus no microscópio 3D. A
@@ -99,7 +118,9 @@ def inflate(lum, mask):
     return Image.fromarray((v >> 8).astype(np.uint8), "L"), Image.fromarray((v & 255).astype(np.uint8), "L")
 
 
-def tile(lum, row):
+def tile(lum, row, height=None):
+    if height is not None:
+        height = height.resize(lum.size, Image.LANCZOS)
     mask = mask_of(lum, row in HOLES)
     clean = mask.filter(ImageFilter.MinFilter(5)).filter(ImageFilter.MaxFilter(5))
     b = clean.getbbox()
@@ -107,7 +128,7 @@ def tile(lum, row):
         return None
     lum = ImageOps.autocontrast(lum, cutoff=1, mask=mask)
     if row in STRETCH:
-        return fit(lum, mask, b)
+        return fit(lum, mask, b, height)
     if row in BODY:
         # O corpo sem as saliências finas: uma abertura larga da máscara.
         k = max((b[3] - b[1]) // 4, 3) | 1
@@ -117,7 +138,7 @@ def tile(lum, row):
             body = b
         cx, cy = (body[0] + body[2]) / 2, (body[1] + body[3]) / 2
         hw, hh = (body[2] - body[0]) / 2 * BODY_MARGIN, (body[3] - body[1]) / 2 * BODY_MARGIN
-        return fit(lum, mask, (int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)))
+        return fit(lum, mask, (int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)), height)
     cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
     half = max(b[2] - b[0], b[3] - b[1]) / 2 * 1.03
     if row in STALK:
@@ -128,11 +149,12 @@ def tile(lum, row):
         rows = [y for w, y in widths if w > 0.6 * widest]
         cy = (rows[0] + rows[-1]) / 2
         half = (widest / 2) / STALK_BODY
-    return fit(lum, mask, (int(cx - half), int(cy - half), int(cx + half), int(cy + half)))
+    return fit(lum, mask, (int(cx - half), int(cy - half), int(cx + half), int(cy + half)), height)
 
 
 def main():
     rows = {}
+    drawn = {}
     for path in sorted(glob.glob(os.path.join(SRC, "*.png"))):
         m = re.match(r"(\d+)_(.+)_(grelha|\d+)\.png", os.path.basename(path))
         if not m:
@@ -140,13 +162,31 @@ def main():
         row = int(m.group(1))
         lum = Image.open(path).convert("L")
         cells = [lum]
+        name = os.path.basename(path)
+        hpath = os.path.join(HEIGHTS, name)
+        heights = [Image.open(hpath).convert("L") if os.path.exists(hpath) else None]
         if m.group(3) == "grelha":
             w, h = lum.size
             cells = [lum.crop((c * w // 3, r * h // 3, (c + 1) * w // 3, (r + 1) * h // 3)) for r in range(3) for c in range(3)]
-        for cell in cells:
-            t = tile(cell, row)
+            whole = heights[0].resize(lum.size, Image.LANCZOS) if heights[0] is not None else None
+            heights = []
+            for k in range(9):
+                cpath = os.path.join(HEIGHTS, name.replace("_grelha.png", "_c%d.png" % k))
+                if os.path.exists(cpath):
+                    heights.append(Image.open(cpath).convert("L"))
+                elif whole is not None:
+                    r, c = divmod(k, 3)
+                    heights.append(whole.crop((c * w // 3, r * h // 3, (c + 1) * w // 3, (r + 1) * h // 3)))
+                else:
+                    heights.append(None)
+        for cell, hgt in zip(cells, heights):
+            t = tile(cell, row, hgt)
             if t is not None:
+                if hgt is not None:
+                    drawn.setdefault(row, []).append(t)
                 rows.setdefault(row, []).append(t)
+    if os.environ.get("ALTURAS_SO"):
+        rows.update(drawn)
     atlas = Image.new("RGBA", (TILE * COLS, TILE * ROWS), (0, 0, 0, 0))
     for row, tiles in rows.items():
         # Mais variantes do que colunas: continuam nas linhas seguintes.
@@ -155,7 +195,7 @@ def main():
             assert row + r < ROWS, row
             for c in range(COLS):
                 atlas.paste(part[c % len(part)], (c * TILE, (row + r) * TILE))
-    out = os.path.join(ROOT, "assets", "sprites.png")
+    out = os.environ.get("SPRITES_OUT") or os.path.join(ROOT, "assets", "sprites.png")
     atlas.save(out, optimize=True)
     print("escrito", out, atlas.size, "linhas:", {r: len(t) for r, t in sorted(rows.items())})
 

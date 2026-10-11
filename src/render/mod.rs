@@ -109,7 +109,13 @@ fn sprites_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture 
     if let Some((_, t)) = shared.iter().find(|(d, _)| d == device) {
         return t.clone();
     }
-    let mut reader = png::Decoder::new(&include_bytes!("../../assets/sprites.png")[..]).read_info().expect("assets/sprites.png");
+    // RIBO_SPRITES=ficheiro.png: outro atlas, para experiências (por omissão o
+    // que vai dentro do programa).
+    let bytes: std::borrow::Cow<[u8]> = match std::env::var("RIBO_SPRITES") {
+        Ok(path) => std::fs::read(&path).unwrap_or_else(|e| panic!("RIBO_SPRITES {path}: {e}")).into(),
+        Err(_) => include_bytes!("../../assets/sprites.png")[..].into(),
+    };
+    let mut reader = png::Decoder::new(&bytes[..]).read_info().expect("assets/sprites.png");
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).expect("assets/sprites.png");
     // R = cinzento, G = máscara, B e A = altura da forma insuflada, em 16
