@@ -1218,6 +1218,8 @@ fn tab_cycle(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
         c.slider("mutation rate", slider(&mut p.mutation_rate, 0.0..=0.05));
         c.slider("mutation from UV ×", slider(&mut p.uv_mutation, 0.0..=100.0).logarithmic(true).smallest_positive(0.1))
             .tip("the UV that reaches the parent's genome leaves lesions that the copy fixes as errors: mutation rate × (1 + this × UV light at the parent's place × the fraction its body does not absorb). Aromatic amino acids (tryptophan, tyrosine) shield, as they do against UV death, and proofreading organs divide the total. 10 = eleven times more mutations in full sun for an unprotected body, none extra in the dark. 0 = off");
+        c.slider("mutation from heat (Q10 exponent)", slider(&mut p.heat_mutation, 0.0..=2.0))
+            .tip("the reactions that damage bases and the copying errors speed up with temperature: mutation rate × Q10 ^ (this × (temperature at the parent's place − reference) / span), with the Q10, span and reference of the metabolism (Energy tab). 1 = mutations grow with heat exactly as the metabolism does (with the defaults, twice per 3 temperature units, 16 times at the core of a vent); below the reference temperature they fall. Proofreading organs divide the total. 0 = off");
         let mut aug = p.require_start != 0;
         c.check("translation starts at AUG (new births)", &mut aug);
         p.require_start = aug as u32;

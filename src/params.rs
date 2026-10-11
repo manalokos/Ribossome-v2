@@ -451,7 +451,11 @@ gpu_struct! {
         /// o corpo dele não absorve (os aromáticos protegem, como no risco de
         /// morte). 0 = a UV não muda a taxa de mutação.
         pub uv_mutation: f32,
-        pub _pad_p2: u32,
+        /// MUTAÇÃO PELO CALOR: a taxa de mutação da cópia segue a temperatura
+        /// do sítio do progenitor como o metabolismo (o mesmo Q10), elevado a
+        /// isto: 1 = cresce tanto como o metabolismo; 0 = a temperatura não
+        /// muda a taxa de mutação.
+        pub heat_mutation: f32,
     }
 }
 
@@ -649,7 +653,7 @@ impl Default for SimParams {
             pairing_energy_half: 0.5,
             pairing_min_energy: 1.0,
             uv_mutation: 0.0,
-            _pad_p2: 0,
+            heat_mutation: 0.0,
         }
     }
 }

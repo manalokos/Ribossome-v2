@@ -924,7 +924,15 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
         let pc = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
         uv_mut += params.uv_mutation * uv_light_at_cell(pc % GRID_SIZE, pc / GRID_SIZE) * uv_exposed(slot, a.body_len);
     }
-    let m = clamp(params.mutation_rate * uv_mut / (1.0 + protect), 0.0, 1.0);
+    // MUTAÇÃO PELO CALOR: as reações que estragam bases (desaminação,
+    // depurinação) e os erros da cópia aceleram com a temperatura, pela mesma
+    // lei do metabolismo (Q10), com o expoente heat_mutation.
+    var heat_mut = 1.0;
+    if (params.heat_mutation > 0.0) {
+        let t_parent = temp_in[fluid_index_at_world(vec2<f32>(a.pos_x, a.pos_y))];
+        heat_mut = clamp(pow(max(params.metabolic_q10, 1e-3), params.heat_mutation * (t_parent - params.metabolic_ref) / max(params.metabolic_span, 1e-3)), 0.05, 100.0);
+    }
+    let m = clamp(params.mutation_rate * uv_mut * heat_mut / (1.0 + protect), 0.0, 1.0);
     var g = array<u32, 16>(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
     for (var i = 0u; i < L; i++) {
         // Complemento reverso.
