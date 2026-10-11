@@ -5,8 +5,8 @@ use ribossome::life::table;
 
 fn main() {
     let text = std::env::var("GENOME").expect("GENOME=...");
-    let g: Vec<u8> = text.chars().filter_map(|c| "ACGU".find(c.to_ascii_uppercase()).map(|i| i as u8)).collect();
-    let rc: Vec<u8> = g.iter().rev().map(|b| 3 - b).collect();
+    let g: Vec<u8> = text.chars().filter_map(|c| "AUGC".find(c.to_ascii_uppercase()).map(|i| i as u8)).collect();
+    let rc = ribossome::species::reverse_complement(&g);
     let code = table::code_to_gpu(&table::load_code().0);
     let (amino, _) = table::load();
     for (name, s) in [("cadeia A", &g), ("cadeia B (complemento reverso)", &rc)] {
