@@ -255,7 +255,7 @@ pub struct World {
     pub tint_buf: wgpu::Buffer,
     /// Sementes da física ao acaso já aplicadas às tabelas da placa
     /// (condução, ângulos, resposta): ver `sync_scramble`.
-    pub applied_scramble: [u32; 3],
+    pub applied_scramble: [u32; 4],
     /// Epoch + 1 do último disparo das proteases de cada agente.
     pub fired_buf: wgpu::Buffer,
     free_buf: wgpu::Buffer,
@@ -872,7 +872,7 @@ impl World {
             life_counters_buf,
             ghosts_buf,
             tint_buf,
-            applied_scramble: [0; 3],
+            applied_scramble: [0; 4],
             fired_buf,
             free_buf,
             spawn_buf,
@@ -1080,7 +1080,7 @@ impl World {
     pub fn set_amino(&mut self, queue: &wgpu::Queue, rows: Vec<crate::life::table::AminoRow>) {
         queue.write_buffer(&self.aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&rows)));
         self.amino = rows;
-        self.applied_scramble = [0; 3];
+        self.applied_scramble = [0; 4];
         self.sync_scramble(queue);
     }
 
@@ -1090,19 +1090,21 @@ impl World {
     /// `organ_table` ficam sempre com os valores verdadeiros.
     pub fn sync_scramble(&mut self, queue: &wgpu::Queue) {
         let seeds = [self.params.scramble_conduction, self.params.scramble_angles, self.params.scramble_response];
-        if seeds == self.applied_scramble {
+        let amount = self.params.scramble_amount.clamp(0.0, 1.0);
+        let key = [seeds[0], seeds[1], seeds[2], amount.to_bits()];
+        if key == self.applied_scramble {
             return;
         }
-        let (amino, organs) = self.scrambled_tables(seeds);
+        let (amino, organs) = self.scrambled_tables(seeds, amount);
         queue.write_buffer(&self.aa_buf, 0, bytemuck::cast_slice(&crate::life::table::to_gpu(&amino)));
         queue.write_buffer(&self.organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&organs)));
-        self.applied_scramble = seeds;
+        self.applied_scramble = key;
     }
 
     /// As tabelas com cada grupo baralhado pela sua semente. As amplitudes
     /// são as do próprio grupo na tabela (o maior valor absoluto), para a
     /// física ao acaso ficar na mesma ordem de grandeza da desenhada.
-    pub fn scrambled_tables(&self, seeds: [u32; 3]) -> (Vec<crate::life::table::AminoRow>, Vec<crate::life::table::OrganRow>) {
+    pub fn scrambled_tables(&self, seeds: [u32; 3], amount: f32) -> (Vec<crate::life::table::AminoRow>, Vec<crate::life::table::OrganRow>) {
         let (mut amino, mut organs) = (self.amino.clone(), self.organ_table.clone());
         // Um gerador por grupo: mexer numa semente não muda os outros grupos.
         let stream = |seed: u32, group: u32| {
@@ -1114,41 +1116,47 @@ impl World {
                 ((state as f32 / u32::MAX as f32) * 2.0 - 1.0) * amp
             }
         };
+        // Da tabela (amount 0) ao valor sorteado (1).
+        let mix = |table: f32, random: f32| table + (random - table) * amount;
+        let mix4 = |table: Option<[f32; 4]>, random: [f32; 4]| {
+            let t = table.unwrap_or([0.0; 4]);
+            Some([mix(t[0], random[0]), mix(t[1], random[1]), mix(t[2], random[2]), mix(t[3], random[3])])
+        };
         if seeds[0] != 0 {
             let mut r = stream(seeds[0], 1);
             for a in amino.iter_mut() {
                 for v in [&mut a.cond_alfa_n, &mut a.cond_alfa_c, &mut a.cond_beta_n, &mut a.cond_beta_c, &mut a.cond_gama_n, &mut a.cond_gama_c, &mut a.cond_delta_n, &mut a.cond_delta_c] {
-                    *v = r(2.0);
+                    *v = mix(*v, r(2.0));
                 }
             }
             for o in organs.iter_mut() {
-                o.conducao = Some([r(2.0), r(2.0), r(2.0), r(2.0)]);
-                o.conducao_gd = Some([r(2.0), r(2.0), r(2.0), r(2.0)]);
+                o.conducao = mix4(o.conducao, [r(2.0), r(2.0), r(2.0), r(2.0)]);
+                o.conducao_gd = mix4(o.conducao_gd, [r(2.0), r(2.0), r(2.0), r(2.0)]);
             }
         }
         if seeds[1] != 0 {
             let mut r = stream(seeds[1], 2);
             let amp_aa = self.amino.iter().map(|a| a.angulo_repouso.abs()).fold(0.0, f32::max).max(1e-3);
             for a in amino.iter_mut() {
-                a.angulo_repouso = r(amp_aa);
+                a.angulo_repouso = mix(a.angulo_repouso, r(amp_aa));
             }
             let amp_org = self.organ_table.iter().filter_map(|o| o.angulo).map(f32::abs).fold(0.0, f32::max).max(1e-3);
             for o in organs.iter_mut().filter(|o| o.angulo.is_some()) {
-                o.angulo = Some(r(amp_org));
+                o.angulo = Some(mix(o.angulo.unwrap_or(0.0), r(amp_org)));
             }
         }
         if seeds[2] != 0 {
             let mut r = stream(seeds[2], 3);
             let amp_aa = self.amino.iter().flat_map(|a| [a.sens_alfa, a.sens_beta, a.sens_gama, a.sens_delta]).map(f32::abs).fold(0.0, f32::max).max(1e-3);
             for a in amino.iter_mut() {
-                a.sens_alfa = r(amp_aa);
-                a.sens_beta = r(amp_aa);
-                a.sens_gama = r(amp_aa);
-                a.sens_delta = r(amp_aa);
+                a.sens_alfa = mix(a.sens_alfa, r(amp_aa));
+                a.sens_beta = mix(a.sens_beta, r(amp_aa));
+                a.sens_gama = mix(a.sens_gama, r(amp_aa));
+                a.sens_delta = mix(a.sens_delta, r(amp_aa));
             }
             let amp_org = self.organ_table.iter().filter_map(|o| o.sensibilidade).flatten().map(f32::abs).fold(0.0, f32::max).max(1e-3);
             for o in organs.iter_mut().filter(|o| o.sensibilidade.is_some()) {
-                o.sensibilidade = Some([r(amp_org), r(amp_org), r(amp_org), r(amp_org)]);
+                o.sensibilidade = mix4(o.sensibilidade, [r(amp_org), r(amp_org), r(amp_org), r(amp_org)]);
             }
         }
         (amino, organs)
@@ -1159,7 +1167,7 @@ impl World {
         queue.write_buffer(&self.organ_buf, 0, bytemuck::cast_slice(&crate::life::table::organs_to_gpu(&rows)));
         queue.write_buffer(&self.variant_buf, 0, bytemuck::cast_slice(&crate::life::table::variants_to_gpu(&rows)));
         self.organ_table = rows;
-        self.applied_scramble = [0; 3];
+        self.applied_scramble = [0; 4];
         self.sync_scramble(queue);
     }
 

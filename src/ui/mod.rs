@@ -1260,6 +1260,8 @@ fn tab_body(ui: &mut egui::Ui, b: &Busca, world: &mut World) {
             seed_row(c, "signal conduction", "conduction of the 4 signal channels to both sides of the chain, between −2 and 2 (the tables go from 0 to 1): signals can grow or flip sign as they travel", &mut p.scramble_conduction);
             seed_row(c, "rest angles", "rest angle of every joint, up to the largest of the tables, to either side: the shape of every body changes", &mut p.scramble_angles);
             seed_row(c, "response to signals", "how much and which way each joint bends with each of the 4 signals, up to the largest sensitivity of the tables, with either sign", &mut p.scramble_response);
+            c.slider("random physics amount", slider(&mut p.scramble_amount, 0.0..=1.0))
+                .tip("how far the seeds take each constant from its table value: 0 = the tables, 1 = the random draw, in between a blend of the two. Same seed, same draw: this only changes how far from the designed physics the world goes");
             if !(mode < 0.5 || mode >= 3.5) {
                 c.row("random physics seed scramble", |ui| {
                     ui.small("with signal mode 1, 2 or 3 the transport and the response do not use the tables: conduction has no effect (use mode 0 or 4), and the response only counts in modes 0 and 3");

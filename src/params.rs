@@ -434,7 +434,10 @@ gpu_struct! {
         ///   resposta das juntas aos sinais (sensibilidade aos 4 canais):
         ///   até à maior da tabela, com os dois sinais.
         pub scramble_response: u32,
-        pub _pad_s4: u32,
+        /// QUANTO baralha (0..1): cada constante fica entre o valor da tabela
+        /// (0) e o valor tirado ao acaso (1). Mesma semente, mesmo sorteio:
+        /// só muda a distância a que se vai da física desenhada.
+        pub scramble_amount: f32,
     }
 }
 
@@ -628,7 +631,7 @@ impl Default for SimParams {
             scramble_conduction: 0,
             scramble_angles: 0,
             scramble_response: 0,
-            _pad_s4: 0,
+            scramble_amount: 1.0,
         }
     }
 }
