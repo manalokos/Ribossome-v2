@@ -476,7 +476,9 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         dorm *= pow(clamp(dv.p0, 0.01, 1.0), organ_gain(od) * drive);
     }
-    metab *= max(dorm, DORMANCY_FLOOR);
+    // (dorm_f à parte: a luz não segue a temperatura, mas segue a dormência.)
+    let dorm_f = max(dorm, DORMANCY_FLOOR);
+    metab *= dorm_f;
     // FUGA: o que deixa entrar também deixa sair. A manutenção (e, com
     // death_metab, o envelhecimento) escala com a absorção aberta do corpo.
     let leak = max(params.leak_base + params.mouth_leak * body_absorption(slot, a.body_len), 0.0);
@@ -651,7 +653,11 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if (rl > 1e-4) { phoretic += rc / rl * pe; }
             }
         } else if (st == 1u) {
-            if (r.x < MOTOR_P_HYDROLYSIS * sites) {
+            // O CICLO INTEIRO SEGUE O METABOLISMO: agarrar (pe, acima), digerir
+            // e largar. Antes só o agarrar abrandava: com comida a rodos quem
+            // limitava era a digestão, e um corpo dormente (ou no frio) comia
+            // quase o mesmo e pagava uma fração da manutenção.
+            if (r.x < MOTOR_P_HYDROLYSIS * sites * min(metab, 1.0)) {
                 // Canal escolhido pela afinidade × disponível.
                 var u = r.y * (w_avail.x + w_avail.y + w_avail.z + w_avail.w);
                 var b = 3u;
@@ -684,7 +690,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                     joint_state[si] = 0u;
                 }
             }
-        } else if (r.x < MOTOR_P_RELEASE * sites) {
+        } else if (r.x < MOTOR_P_RELEASE * sites * min(metab, 1.0)) {
             joint_state[si] = 0u;
         }
 
@@ -745,7 +751,9 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let share = (1.0 - exp(-AGENT_UV_ABSORB * s_abs)) / s_abs;
             let og = organ_gain(ok);
             let pv = organ_var(ok);
-            let power = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0) * harvest;
+            // (× dorm_f: um corpo dormente também fixa a luz mais devagar. A
+            // temperatura continua a não contar: captar luz é físico.)
+            let power = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0) * harvest * dorm_f;
             // Variante: p0 = fração da luz para reciclar, p1 = eficiência.
             let recycle = clamp(pv.p0, 0.0, 1.0);
             // TRANSBORDO (como o fitoplâncton que exsuda o carbono que fixa a
