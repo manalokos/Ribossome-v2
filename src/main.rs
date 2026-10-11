@@ -470,6 +470,27 @@ impl Running {
             "seed_len": self.ui.seed_len,
             "camera": { "center": self.cam.center, "zoom": self.cam.zoom },
             "autosave_every": self.ui.autosave_every,
+            "show_activated": self.ui.show_activated,
+            "show_spent": self.ui.show_spent,
+            "capture_mode": self.ui.capture_mode,
+            "microscope_on": self.ui.microscope,
+            // A câmara e a fotografia do microscópio (o enquadramento vem da
+            // câmara do mapa, que já vai acima).
+            "microscope": self.scope.as_ref().map(|s| serde_json::json!({
+                "yaw": s.orbit.yaw,
+                "pitch": s.orbit.pitch,
+                "aperture": s.orbit.aperture,
+                "focal": s.orbit.focal,
+                "focus_shift": s.orbit.focus_shift,
+                "exposure": s.exposure,
+                "shutter": s.shutter,
+                "rate": s.rate,
+                "fps_limit": s.fps_limit,
+                "colour": s.colour,
+                "molecule_r": s.molecule_r,
+                "reticle": s.reticle,
+                "smooth_motion": s.smooth_motion,
+            })),
             "estatisticas": self.ui.history.to_json(),
         })
     }
@@ -511,6 +532,36 @@ impl Running {
         }
         if let Some(n) = u("autosave_every") {
             self.ui.autosave_every = (n as u32).max(1000);
+        }
+        if let Some(b) = v["show_activated"].as_bool() {
+            self.ui.show_activated = b;
+        }
+        if let Some(b) = v["show_spent"].as_bool() {
+            self.ui.show_spent = b;
+        }
+        if let Some(n) = u("capture_mode") {
+            self.ui.capture_mode = (n as u32).min(ribossome::ui::CAPTURE_MODES.len() as u32 - 1);
+        }
+        if let Some(b) = v["microscope_on"].as_bool() {
+            self.ui.microscope = b;
+        }
+        // (Cenas antigas não trazem isto: fica o que o microscópio tinha.)
+        let m = &v["microscope"];
+        if let (Some(sc), true) = (self.scope.as_mut(), m.is_object()) {
+            let f = |k: &str, d: f32| m[k].as_f64().map_or(d, |x| x as f32);
+            sc.orbit.yaw = f("yaw", sc.orbit.yaw);
+            sc.orbit.pitch = f("pitch", sc.orbit.pitch);
+            sc.orbit.aperture = f("aperture", sc.orbit.aperture).max(0.0);
+            sc.orbit.focal = f("focal", sc.orbit.focal).clamp(0.01, 2.0);
+            sc.orbit.focus_shift = f("focus_shift", sc.orbit.focus_shift);
+            sc.exposure = f("exposure", sc.exposure).max(0.0);
+            sc.shutter = f("shutter", sc.shutter).max(0.0);
+            sc.rate = f("rate", sc.rate).max(0.0);
+            sc.fps_limit = f("fps_limit", sc.fps_limit).max(0.0);
+            sc.colour = m["colour"].as_u64().map_or(sc.colour, |n| (n as u32).min(2));
+            sc.molecule_r = f("molecule_r", sc.molecule_r).max(0.0);
+            sc.reticle = m["reticle"].as_bool().unwrap_or(sc.reticle);
+            sc.smooth_motion = m["smooth_motion"].as_bool().unwrap_or(sc.smooth_motion);
         }
 
     }
