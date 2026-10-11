@@ -212,7 +212,7 @@ const BODY_DIV: u32 = 2u;
 const BODY_SIZE: u32 = GRID_SIZE / BODY_DIV;
 
 // CHEIRO A PROTEASE de um resíduo, em oitavos: a força com que a protease
-// está aberta (variante × intensidade × abertura, como em protease_arms).
+// está aberta (variante × intensidade × abertura, como em contact_resolve).
 // Fechada não cheira: um caçador de emboscada com as proteases recolhidas
 // passa despercebido.
 fn protease_smell(slot: u32, k: u32) -> u32 {

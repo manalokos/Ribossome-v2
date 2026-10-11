@@ -207,6 +207,14 @@ fn protease_loaded_v(slot: u32) -> bool {
     let last = fired_view[slot];
     return last == 0u || view.epoch + 1u - last >= PROTEASE_RELOAD_V || view.epoch + 1u < last;
 }
+// O GOLPE: nos primeiros passos depois de disparar a protease ainda se
+// desenha aberta e acesa (na simulação fecha no próprio passo do disparo, e
+// via-se a vítima a ser mordida por proteases já fechadas).
+const PROTEASE_STRIKE_V: u32 = 8u;
+fn protease_striking_v(slot: u32) -> bool {
+    let last = fired_view[slot];
+    return last != 0u && view.epoch + 1u >= last && view.epoch + 1u - last < PROTEASE_STRIKE_V;
+}
 fn hue_color(h: f32) -> vec3<f32> {
     let k = vec3<f32>(0.0, 2.0943951, 4.1887902);
     return vec3<f32>(0.70) + 0.26 * cos(vec3<f32>(h) - k);
@@ -679,14 +687,16 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
                 var drive = 1.0;
                 if (pv.p2 >= 0.0) { drive = clamp(signals_view[base + k][u32(clamp(pv.p2, 0.0, 3.0))], 0.0, 1.0); }
                 // O mesmo limiar da simulacao (PROTEASE_MIN_DRIVE em contact.wgsl).
-                drive = select(0.0, drive, drive >= 0.25 && protease_loaded_v(slot));
+                let striking = protease_striking_v(slot);
+                if (striking) { drive = 1.0; }
+                drive = select(0.0, drive, drive >= 0.25 && (protease_loaded_v(slot) || striking));
                 spike = max(pv.p0, 0.0) * drive;
                 // Para o desenho: numero de espigoes pela FORCA (variante x
                 // intensidade) na parte inteira, abertura na fracionaria.
                 let force = max(pv.p1, 0.0) * exp2((f32(oc >> 8u) - 32.0) / 8.0);
                 phase = clamp(round(4.0 + 3.5 * force), 6.0, 24.0) + drive * 0.99;
                 // Flash: so a cor, com a forma que a protease tem no momento.
-                if (bite.z > 0.0 && glyph && drive > 0.0) { flash = BITE_ATTACK_COLOR; }
+                if ((bite.z > 0.0 || striking) && glyph && drive > 0.0) { flash = BITE_ATTACK_COLOR; }
             }
             if (organ == ORGAN_FOOD_SENSOR_DIR || organ == ORGAN_LIGHT_SENSOR_DIR) {
                 // SENSOR DE UM LADO: o lado que le (como em organs.wgsl):

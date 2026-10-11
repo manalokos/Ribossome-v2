@@ -77,6 +77,11 @@ const BITE_SCALE: f32 = 10000.0;
 // alta, os corpos pequenos desapareciam todos.)
 const PRED_SIZE_MIN: f32 = 0.4;
 const PRED_SIZE_MAX: f32 = 2.5;
+// TOQUE: distância (unidades do mundo) entre o centro de uma protease e o de
+// um resíduo da vítima a que a protease lhe chega (o raio do órgão com os
+// dentes mais a espessura do resíduo). E quantas proteases de um corpo contam.
+const PROTEASE_TOUCH: f32 = 14.0;
+const PROTEASE_SLOTS: u32 = 12u;
 // Passos de recarga das proteases de um agente depois de um disparo.
 const PROTEASE_RELOAD: u32 = 60u;
 const S_DIGEST: u32 = 13u;
@@ -143,42 +148,6 @@ const PROTEASE_FAR_FROM: f32 = 70.0;
 const REACH_EDGE: f32 = 0.5;
 fn reach_falloff(dist: f32, reach: f32) -> f32 {
     return 1.0 - (1.0 - REACH_EDGE) * clamp(dist / max(reach, 1.0), 0.0, 1.0);
-}
-
-struct ProteaseArms {
-    near: vec4<f32>,
-    mid: vec4<f32>,
-    far: vec4<f32>,
-    r_mid: f32,
-    r_far: f32,
-}
-
-fn protease_arms(slot: u32, n: u32) -> ProteaseArms {
-    var arms: ProteaseArms;
-    arms.near = vec4<f32>(0.0);
-    arms.mid = vec4<f32>(0.0);
-    arms.far = vec4<f32>(0.0);
-    arms.r_mid = 0.0;
-    arms.r_far = 0.0;
-    // (A caça entra no orçamento de captação do corpo: ver harvest_share.)
-    let harvest = harvest_share(slot, n);
-    for (var k = 0u; k < n; k++) {
-        let o = organ_get(slot, k);
-        if (organ_type(o) == ORGAN_PROTEASE) {
-            let v = organ_var(o);
-            let f = family_weights(protease_family(slot, k, n)) * max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v) * harvest;
-            if (v.p0 >= PROTEASE_FAR_FROM) {
-                arms.far += f;
-                arms.r_far = max(arms.r_far, v.p0);
-            } else if (v.p0 >= PROTEASE_MID_FROM) {
-                arms.mid += f;
-                arms.r_mid = max(arms.r_mid, v.p0);
-            } else {
-                arms.near += f;
-            }
-        }
-    }
-    return arms;
 }
 
 // CUSTO DE ESTAR ABERTA, em residuos de manutencao: forca x alcance /
@@ -298,17 +267,44 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p = vec2<f32>(a.pos_x, a.pos_y);
     let c = contact_cell_xy(p);
     var push = vec2<f32>(0.0);
-    let arms = protease_arms(slot, a.body_len);
-    let total = arms.near + arms.mid + arms.far;
-    let armed = total.x + total.y + total.z + total.w > 0.0;
-    // As células de contacto têm 120 unidades: com proteases de alcance é
-    // preciso olhar duas células em vez de uma (raios 60 + 60 + alcance).
-    let span = select(1, 2, arms.r_mid > 0.0 || arms.r_far > 0.0);
+    // DISPARO E RECARGA: ver mais abaixo. (Lido antes: só uma arma carregada
+    // precisa de saber onde estão as suas proteases.)
+    let loaded = protease_loaded(slot);
+    // ONDE ESTÃO AS PROTEASES: a mordida é do ÓRGÃO, não do corpo. Cada
+    // protease aberta guarda a sua posição no mundo, os pesos por família e o
+    // alcance; morde quem tiver um RESÍDUO a tocar-lhe (ou dentro do alcance).
+    // (Antes o teste era entre os discos dos dois corpos, no centro de massa:
+    // uma presa passava por cima de uma protease na ponta de um corpo comprido
+    // sem ser mordida, e era mordida ao tocar no disco longe de qualquer protease.)
+    var ppos: array<vec2<f32>, PROTEASE_SLOTS>;
+    var pwt: array<vec4<f32>, PROTEASE_SLOTS>;
+    var preach: array<f32, PROTEASE_SLOTS>;
+    var np = 0u;
+    if (loaded) {
+        let harvest = harvest_share(slot, a.body_len);
+        for (var k = 0u; k < a.body_len; k++) {
+            let o = organ_get(slot, k);
+            if (organ_type(o) == ORGAN_PROTEASE && np < PROTEASE_SLOTS) {
+                let v = organ_var(o);
+                let f = family_weights(protease_family(slot, k, a.body_len)) * max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v) * harvest;
+                if (f.x + f.y + f.z + f.w > 0.0) {
+                    ppos[np] = residue_world(slot, a, k);
+                    pwt[np] = f;
+                    preach[np] = select(0.0, v.p0, v.p0 >= PROTEASE_MID_FROM);
+                    np += 1u;
+                }
+            }
+        }
+    }
+    let armed = np > 0u;
+    // As células de contacto têm 120 unidades e os agentes estão lá pelo
+    // centro: quem está armado olha duas células em vez de uma, para apanhar
+    // corpos compridos cuja ponta lhe toca na protease.
+    let span = select(1, 2, armed);
     // DISPARO E RECARGA: a protease não corrói aos poucos. Com a arma
     // carregada e aberta, dispara no PRIMEIRO passo em que tem uma vítima ao
     // alcance (o dano de PROTEASE_RELOAD passos de uma vez, em todas as que lá
     // estiverem) e fica esse tempo a recarregar. Um golpe pode matar à primeira.
-    let loaded = protease_loaded(slot);
     // Energia que este agente tira a outros neste passo.
     var gained = 0.0;
     for (var dy = -span; dy <= span; dy++) {
@@ -332,13 +328,25 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         if (dist > 1e-4) { dir = d / dist; }
                         push += dir * min(overlap * CONTACT_RELAX, CONTACT_MAX_STEP);
                     }
-                    // Ataque: as proteases de contacto só a tocar; as de
-                    // alcance também a essa distância para lá do contacto.
+                    // Ataque: cada protease morde se algum resíduo da vítima
+                    // lhe toca (PROTEASE_TOUCH); as de alcance também até essa
+                    // distância para lá do toque, mais fracas (reach_falloff).
                     var sites = vec4<f32>(0.0);
-                    if (overlap > 0.0) { sites += arms.near; }
-                    if (-overlap < arms.r_mid) { sites += arms.mid * reach_falloff(-overlap, arms.r_mid); }
-                    if (-overlap < arms.r_far) { sites += arms.far * reach_falloff(-overlap, arms.r_far); }
-                    if (armed && loaded && sites.x + sites.y + sites.z + sites.w > 0.0 && b.energy > 0.0) {
+                    if (armed && b.energy > 0.0) {
+                        let nb = max(b.body_len, 1u);
+                        for (var i = 0u; i < np; i++) {
+                            var d2 = 1e12;
+                            for (var j = 0u; j < nb; j++) {
+                                var q = vec2<f32>(b.pos_x, b.pos_y);
+                                if (b.body_len > 0u) { q = residue_world(e, b, j); }
+                                let dq = q - ppos[i];
+                                d2 = min(d2, dot(dq, dq));
+                            }
+                            let gap = max(sqrt(d2) - PROTEASE_TOUCH, 0.0);
+                            if (gap <= preach[i]) { sites += pwt[i] * reach_falloff(gap, preach[i]); }
+                        }
+                    }
+                    if (sites.x + sites.y + sites.z + sites.w > 0.0) {
                         let power = dot(sites, unpack_targets(contact_disp[e].w)) * PRED_SITE_SCALE;
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * unpack_proline(contact_disp[e].w);
                         // TAMANHO: a mesma dose de protease desfaz uma fração
