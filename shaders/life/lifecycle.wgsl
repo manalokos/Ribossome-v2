@@ -1072,9 +1072,46 @@ fn tail_link(p: vec2<f32>, leader: vec2<f32>, link: f32, straight: vec2<f32>, fr
     return t;
 }
 
+// RNA NU (sem corpo): o agente É o fio. O centro fica a meio do genoma e
+// cada metade são 3 pontos que o seguem, como as caudas. Cada ponto é levado
+// pela água ONDE ESTÁ (como o centro): numa corrente uniforme o fio vai
+// inteiro com ela, e é a diferença de corrente ao longo dele que o dobra.
+const NAKED_JIGGLE: f32 = 1.2;
+fn naked_drift(p: vec2<f32>, j: vec2<f32>, fc: f32) -> vec2<f32> {
+    var q = p + j;
+    if (fc > 0.0) { q += fc * water_at(p, true); }
+    return q;
+}
+
+fn update_naked_strand(slot: u32, a: Agent) {
+    let q0 = rna_tail[slot * 4u];
+    let q2 = rna_tail[slot * 4u + 2u];
+    let q3 = rna_tail[slot * 4u + 3u];
+    let c0 = vec2<f32>(a.pos_x, a.pos_y);
+    let d = vec2<f32>(cos(a.rot), sin(a.rot));
+    let link = f32(a.gene_len) * 0.5 * TAIL_SPACING / 3.0;
+    let fresh = a.age <= 1u;
+    let fc = select(0.0, clamp(params.flow_coupling, 0.0, 1.0), params.fluid_enabled != 0u);
+    let j0 = (rng_f4(a.id, params.epoch, S_TAIL) - vec4<f32>(0.5)) * NAKED_JIGGLE;
+    let j1 = (rng_f4(a.id, params.epoch, S_TAIL + 1u) - vec4<f32>(0.5)) * NAKED_JIGGLE;
+    let j2 = (rng_f4(a.id, params.epoch, S_TAIL + 2u) - vec4<f32>(0.5)) * NAKED_JIGGLE;
+    let n1 = tail_link(naked_drift(q0.xy, j0.xy, fc), c0, link, c0 - d * link, fresh);
+    let n2 = tail_link(naked_drift(q0.zw, j0.zw, fc), n1, link, n1 - d * link, fresh);
+    let n3 = tail_link(naked_drift(q2.xy, j1.xy, fc), n2, link, n2 - d * link, fresh);
+    let c1 = tail_link(naked_drift(q2.zw, j1.zw, fc), c0, link, c0 + d * link, fresh);
+    let c2 = tail_link(naked_drift(q3.xy, j2.xy, fc), c1, link, c1 + d * link, fresh);
+    let c3 = tail_link(naked_drift(q3.zw, j2.zw, fc), c2, link, c2 + d * link, fresh);
+    rna_tail[slot * 4u] = vec4<f32>(n1, n2);
+    rna_tail[slot * 4u + 2u] = vec4<f32>(n3, c1);
+    rna_tail[slot * 4u + 3u] = vec4<f32>(c2, c3);
+}
+
 fn update_rna_tails(slot: u32, a: Agent) {
     let n = a.body_len;
-    if (n == 0u) { return; }
+    if (n == 0u) {
+        update_naked_strand(slot, a);
+        return;
+    }
     let q0 = rna_tail[slot * 4u];
     let q2 = rna_tail[slot * 4u + 2u];
     let q3 = rna_tail[slot * 4u + 3u];

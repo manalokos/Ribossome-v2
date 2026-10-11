@@ -118,7 +118,6 @@ const BITE_VICTIM_COLOR: vec3<f32> = vec3<f32>(1.0, 0.12, 0.08);
 const RNA_PER_END: u32 = 32u;
 const RNA_SPACING: f32 = 5.0;
 const RNA_RADIUS: f32 = 1.6;
-const RNA_WIGGLE: f32 = 0.35;
 
 fn base_color(b: u32) -> vec3<f32> {
     switch b {
@@ -610,7 +609,8 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
     let k = local_i % MAX_BODY_V;
     let naked = a.body_len == 0u;
     let hidden = view.focus_slot != 0xFFFFFFFFu && slot != view.focus_slot;
-    if (a.alive == 0u || hidden || (k >= a.body_len && !(naked && k == 0u))) {
+    // (Ao perto o RNA nu é só o fio; a bola cinzenta fica para os níveis de longe.)
+    if (a.alive == 0u || hidden || (k >= a.body_len && !(naked && k == 0u)) || (naked && view.lod == 0u)) {
         o.pos = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         return o;
     }
@@ -853,7 +853,7 @@ fn capsule_vertex(vi: u32, a_w: vec2<f32>, b_w: vec2<f32>, r: f32, col: vec3<f32
 
 // Base j das pontas: j < RNA_PER_END = 5' UTR (antes do AUG, a sair da
 // ponta N); senão 3' UTR (depois do stop, a sair da ponta C). RNA nu: o
-// genoma todo, a partir do centro. O fio ondula devagar com a idade.
+// genoma todo, metade para cada lado do centro, num fio mole à deriva.
 fn residue_world_v(slot: u32, a: Agent, k: u32) -> vec2<f32> {
     let lp = body_pos_view[slot * MAX_BODY_V + k];
     let cr = cos(a.rot);
@@ -980,12 +980,18 @@ fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
     let after = a.coding_span >> 16u;
     let n = a.body_len;
     var base_i = 0u;
+    var naked_cnt = 1u;
     var anchor = vec2<f32>(0.0);
     var dir = vec2<f32>(select(-1.0, 1.0, trailer), 0.0);
     if (n == 0u) {
-        // RNA nu: as duas metades do genoma, em sentidos opostos.
-        base_i = select(m, RNA_PER_END + m, trailer);
-        if (base_i >= a.gene_len) { return o; }
+        // RNA nu: o genoma todo, metade para cada lado do centro (genomas
+        // com mais bases do que troços: um troço por cada `stride` bases).
+        let stride = max((a.gene_len + 2u * RNA_PER_END - 1u) / (2u * RNA_PER_END), 1u);
+        let segs = (a.gene_len + stride - 1u) / stride;
+        let half = segs / 2u;
+        naked_cnt = select(half, segs - half, trailer);
+        if (m >= naked_cnt) { return o; }
+        base_i = select(half - 1u - m, half + m, trailer) * stride;
     } else if (!trailer) {
         if (m >= start) { return o; }
         base_i = start - 1u - m;
@@ -1003,18 +1009,30 @@ fn rna_vertex(vi: u32, slot: u32, a: Agent, j: u32) -> AgentVsOut {
     var pw = c0;
     var qw = c0;
     if (n == 0u) {
-        // RNA nu: caminha base a base, a ondular devagar.
-        var ang = atan2(dir.y, dir.x);
-        var p = anchor;
-        var prev = anchor;
-        let seed = f32(a.id % 977u) * 0.37 + select(0.0, 2.1, trailer);
-        for (var t = 0u; t <= m; t++) {
-            ang += RNA_WIGGLE * sin(f32(t) * 0.7 + f32(a.age) * 0.03 + seed);
-            prev = p;
-            p += vec2<f32>(cos(ang), sin(ang)) * RNA_SPACING;
+        // RNA NU: fio mole à deriva (ver update_naked_strand): curva suave
+        // pelo centro e pelos 3 pontos de cada metade guardados no mundo.
+        let link = f32(a.gene_len) * 0.5 * RNA_SPACING / 3.0;
+        let dw = vec2<f32>(cr, sr) * select(-1.0, 1.0, trailer);
+        let t0 = rna_tail_view[slot * 4u];
+        let t2 = rna_tail_view[slot * 4u + 2u];
+        let t3 = rna_tail_view[slot * 4u + 3u];
+        var p1 = select(t0.xy, t2.zw, trailer);
+        var p2 = select(t0.zw, t3.xy, trailer);
+        var p3 = select(t2.xy, t3.zw, trailer);
+        var other = select(t2.zw, t0.xy, trailer);
+        // Estado atrasado ou de outro agente (ou um retrato): fio a direito.
+        let lim = 2.0 * link + 1.0;
+        let bad = length(t0.xy - c0) > lim || length(t0.zw - t0.xy) > lim || length(t2.xy - t0.zw) > lim
+            || length(t2.zw - c0) > lim || length(t3.xy - t2.zw) > lim || length(t3.zw - t3.xy) > lim;
+        if (bad) {
+            p1 = c0 + dw * link;
+            p2 = p1 + dw * link;
+            p3 = p2 + dw * link;
+            other = c0 - dw * link;
         }
-        pw = c0 + vec2<f32>(cr * p.x - sr * p.y, sr * p.x + cr * p.y);
-        qw = c0 + vec2<f32>(cr * prev.x - sr * prev.y, sr * prev.x + cr * prev.y);
+        let cnt = f32(naked_cnt);
+        qw = tail_curve(c0, p1, p2, p3, c0 - other, 3.0 * f32(m) / cnt);
+        pw = tail_curve(c0, p1, p2, p3, c0 - other, 3.0 * f32(m + 1u) / cnt);
     } else {
         // FITA MOLE (ver update_rna_tails): curva suave (Catmull-Rom) pela
         // raiz e pelos 3 pontos do fio guardados no mundo.
