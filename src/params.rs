@@ -444,7 +444,8 @@ gpu_struct! {
         /// este valor: cheio copia à velocidade inteira; com f = K, a pouco
         /// mais de metade. 0 = a velocidade não depende da energia.
         pub pairing_energy_half: f32,
-        /// Energia mínima para emparelhar (abaixo disto a cópia pára).
+        /// Energia mínima para emparelhar (abaixo disto a cópia pára). 0 = não
+        /// há mínimo: só o abrandamento com a energia (pairing_energy_half).
         pub pairing_min_energy: f32,
         /// MUTAÇÃO PELA UV: a taxa de mutação da cópia multiplica-se por
         /// 1 + isto × dose, com dose = luz UV no sítio do progenitor × o que
@@ -549,7 +550,7 @@ impl Default for SimParams {
             cohesion: 0.25,
             spawn_count: 0,
             max_agents: 0,
-            death_probability: 0.006,
+            death_probability: 0.0006,
             spawn_energy: 5.0,
             food_power: 6.0,
             // Mais cara do que no v3 (0,0001): com ela a energia nunca faltava e
@@ -597,7 +598,7 @@ impl Default for SimParams {
             heat_kill: 0.27,
             flow_coupling: 0.9,
             inertia: 0.0,
-            death_energy_cap: 20.0,
+            death_energy_cap: 1.0,
             chemo_yield: 0.9,
             redox_decay: 0.02,
             thermal_activation: 0.045,
@@ -651,7 +652,7 @@ impl Default for SimParams {
             scramble_response: 0,
             scramble_amount: 1.0,
             pairing_energy_half: 0.5,
-            pairing_min_energy: 1.0,
+            pairing_min_energy: 0.0,
             uv_mutation: 0.0,
             heat_mutation: 0.0,
         }

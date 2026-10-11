@@ -1208,7 +1208,7 @@ fn tab_cycle(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
         c.slider("pairing slows with low energy (K)", slider(&mut p.pairing_energy_half, 0.0..=2.0))
             .tip("copying is a reaction that spends energy and saturates with it: bases per step × f·(1 + K)/(f + K), with f = how full the body is (energy / capacity). A full body copies at full speed; at f = K, a little over half; near empty, almost nothing. A poor agent reaches division later and fuller instead of splitting into two dying halves. 0 = speed does not depend on energy (the old rule)");
         c.slider("minimum energy to pair", slider(&mut p.pairing_min_energy, 0.0..=5.0))
-            .tip("below this energy (plus the cost of one base) copying stops altogether. 1 = the value it always had; 0 = no floor, only the slowdown above");
+            .tip("below this energy (plus the cost of one base) copying stops altogether. 0 = no floor, only the slowdown above; 1 = the old rule");
         let mut salvage = p.salvage > 0.0;
         c.check("recharge: producers copy themselves with spent monomers", &mut salvage)
             .tip("the energy that overflows from a photosystem or a chemosynthesis organ first charges a spent monomer for the copy of its own genome (building with raw material); only what is of no use for that goes on to reactivate monomers in the medium. Off = all the overflow goes to the medium (as it was)");
@@ -1225,11 +1225,12 @@ fn tab_cycle(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
         p.require_start = aug as u32;
     });
     section(ui, b, T, "Death", |c| {
-        c.slider("base mortality", slider(&mut p.death_probability, 0.0..=0.2));
+        c.slider("base mortality", slider(&mut p.death_probability, 0.0..=0.2).logarithmic(true).smallest_positive(0.0001))
+            .tip("risk of death per step of a fed agent (0.0006 = about 1700 steps of life on average, before cold, pace and UV). Below the energy of the next slider the risk grows as energy falls");
         c.slider("mortality follows the pace of life", slider(&mut p.death_metab, 0.0..=1.0))
             .tip("1 = base mortality is multiplied by the agent's pace (metabolism × leak): dormancy, closed mouths, bodies without a mouth and cold water make it live longer (cysts, spores). 0 = mortality does not depend on the pace");
         c.slider("cap on the protection by energy", slider(&mut p.death_energy_cap, 0.0..=200.0))
-            .tip("base mortality is ÷ energy only up to this value (a reserve protects, hoarding more does not); 0 = no cap (v3)");
+            .tip("energy only protects up to this value, counted in half units of energy: 1 = the risk is the base mortality for anyone with 0.5 energy or more, small or large, and grows below that (starving). Higher values make the risk fall with the reserve (20 = the old rule, where a body that cannot hold much energy always died sooner); 0 = no cap (v3)");
         c.slider("UV damage", slider(&mut p.uv_damage, 1.0..=50.0))
             .tip("risk of death per step in the light = base mortality × (this − 1) × light × 0.01, and it falls with the fraction of aromatic amino acids in the body (tryptophan, tyrosine: the sunscreen). 30 in full sun with no protection gives about 140 steps of life; 1 = no damage");
         c.slider("denaturation temperature", slider(&mut p.denature_temp, 0.0..=12.0))

@@ -72,11 +72,6 @@ const PRED_SITE_SCALE: f32 = 10.0;
 const PRED_PROLINE_DEFENSE: f32 = 0.9;
 const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 10000.0;
-// Limites do efeito do tamanho na mordida (atacante / vítima, em resíduos).
-// (Mais brando do que ×0,2 a ×5: com esses limites e a força das proteases
-// alta, os corpos pequenos desapareciam todos.)
-const PRED_SIZE_MIN: f32 = 0.4;
-const PRED_SIZE_MAX: f32 = 2.5;
 // TOQUE: distância (unidades do mundo) entre o centro de uma protease e o de
 // um resíduo da vítima a que a protease lhe chega (o raio do órgão com os
 // dentes mais a espessura do resíduo). E quantas proteases de um corpo contam.
@@ -333,13 +328,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (sites.x + sites.y + sites.z + sites.w > 0.0) {
                         let power = dot(sites, unpack_targets(contact_disp[e].w)) * PRED_SITE_SCALE;
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * unpack_proline(contact_disp[e].w);
-                        // TAMANHO: a mesma dose de protease desfaz uma fração
-                        // maior de um corpo pequeno do que de um grande. A
-                        // mordida escala com o tamanho do atacante sobre o da
-                        // vítima (resíduos): um grande devora os pequenos, e um
-                        // pequeno mal belisca um grande.
-                        let size = clamp(f32(max(a.body_len, 1u)) / f32(max(b.body_len, 1u)), PRED_SIZE_MIN, PRED_SIZE_MAX);
-                        let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist * size, b.energy);
+                        let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist, b.energy);
                         if (bite > 0.0) {
                             atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
                             gained += bite;

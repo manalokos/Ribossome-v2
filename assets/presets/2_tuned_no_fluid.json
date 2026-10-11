@@ -11,7 +11,7 @@
     "settle": 0.18,
     "fluid_decay": 0.99,
     "cohesion": 0.25,
-    "death_probability": 0.006,
+    "death_probability": 0.0006,
     "mutation_rate": 0.005,
     "uptake_rate": 0.0003,
     "thermal_kt": 0.1,

@@ -642,9 +642,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r = rng_f4(a.id, params.epoch, S_EAT + k);
         if (st == 0u) {
             // (Cheio = no limite: um corpo pequeno, com capacidade abaixo de
-            // uma refeição, come e desperdiça o excesso. O que trava a
-            // corrida para o replicador mínimo é ser presa fácil: ver o
-            // tamanho na mordida das proteases, em contact.wgsl.)
+            // uma refeição, come na mesma; o excesso transborda, ver abaixo.)
             let full = params.hunger_regulation != 0u && a.energy >= cap;
             if (r.x < pe && !full) {
                 joint_state[si] = 1u;
@@ -663,6 +661,24 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
                 }
                 if (tot > 0u && chem_spend_one(cell * 4u + b)) {
                     a.energy += params.food_power;
+                    // TRANSBORDO (como no fotossistema e na quimiossíntese): a
+                    // parte da refeição que não cabe no corpo não se perde,
+                    // reativa gastos à volta (um por cada food_power). Um
+                    // corpo pequeno, com capacidade abaixo de uma refeição,
+                    // deixa de queimar um monómero inteiro para ficar com uma
+                    // fração dele: em média só consome o que guarda.
+                    let over = a.energy - cap;
+                    if (over > 0.0) {
+                        a.energy = cap;
+                        let qo = rng_f4(a.id, params.epoch, S_EAT + 200u + k);
+                        if (qo.x < clamp(over / max(params.food_power, 1e-3), 0.0, 1.0)) {
+                            if (recharge_copy(slot, cell, a.pair_count, a.gene_len)) {
+                                a.pair_count += 1u;
+                            } else {
+                                exude_one(cell, qo);
+                            }
+                        }
+                    }
                     joint_state[si] = 2u;
                 } else {
                     joint_state[si] = 0u;
