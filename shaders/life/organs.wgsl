@@ -148,9 +148,9 @@ fn body_absorption(slot: u32, n: u32) -> f32 {
     return sum / ABSORB_MOUTH_REF;
 }
 
-// Desvio da junta k pelos sinais (rad). TODAS as juntas respondem, cada
-// aminoácido com a sua sensibilidade a α e a β; o órgão "músculo" amplifica
-// a resposta local ×(2 + parâmetro/2).
+// Desvio da junta k pelos sinais (rad). As juntas de aminoácido respondem,
+// cada uma com a sua sensibilidade; o órgão "músculo" amplifica a resposta
+// local; os outros órgãos não respondem (sensibilidade 0 na tabela).
 const MUSCLE_REACH: f32 = 2.5;
 fn signal_deflection(slot: u32, k: u32) -> f32 {
     let aa = body_get(slot, k);
@@ -170,12 +170,6 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     // 4 canais: α e β dobram (e os músculos amplificam-nos); γ e δ dobram só
     // pela sensibilidade do aminoácido (modos 0 e 3).
     var sens = vec4<f32>(pr.sens_alpha, pr.sens_beta, pr.sens_gamma, pr.sens_delta);
-    // Um órgão pode ter a sua própria dobra máxima e sensibilidade.
-    if (o != 0u) {
-        let op = organ_cost(o);
-        if (op.max_bend < 1e8) { lim = max(op.max_bend, 1e-3); }
-        if (op.sens_alpha < 1e8) { sens = vec4<f32>(op.sens_alpha, op.sens_beta, op.sens_gamma, op.sens_delta); }
-    }
     // O MÚSCULO dobra a junta para lá do que o aminoácido sozinho consegue
     // (MUSCLE_REACH vezes a dobra máxima). É o que ele tem que mais nenhuma
     // junta tem: amplificar o sinal, qualquer aminoácido sensível faz de graça.
@@ -185,6 +179,16 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
     // um relé os passar para α ou β). Modo 3: a de cada aminoácido.
     if ((params.signal_mode >= 0.5 && params.signal_mode < 2.5) || params.signal_mode >= 3.5) {
         sens = vec4<f32>(SIGNAL_UNIFORM_SENS, -SIGNAL_UNIFORM_SENS, 0.0, 0.0);
+    }
+    // Um órgão pode ter a sua própria dobra máxima e sensibilidade, e vale em
+    // todos os modos. ÓRGÃOS PASSIVOS: na tabela, todos menos o músculo têm
+    // sensibilidade 0 (a junta de um órgão não dobra com os sinais; continua a
+    // ter o seu ângulo de repouso). Pôr um órgão num corpo não lhe estraga a
+    // natação; quem quer uma junta que responda usa aminoácidos ou um músculo.
+    if (o != 0u) {
+        let op = organ_cost(o);
+        if (op.max_bend < 1e8) { lim = max(op.max_bend, 1e-3); }
+        if (op.sens_alpha < 1e8) { sens = vec4<f32>(op.sens_alpha, op.sens_beta, op.sens_gamma, op.sens_delta); }
     }
     return lim * tanh(SIGNAL_GAIN * (s.x * sens.x * amp_a + s.y * sens.y * amp_b + s.z * sens.z + s.w * sens.w) / lim);
 }
