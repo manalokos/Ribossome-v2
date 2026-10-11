@@ -1216,6 +1216,8 @@ fn tab_cycle(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
     });
     section(ui, b, T, "Mutation and translation", |c| {
         c.slider("mutation rate", slider(&mut p.mutation_rate, 0.0..=0.05));
+        c.slider("mutation from UV ×", slider(&mut p.uv_mutation, 0.0..=100.0).logarithmic(true).smallest_positive(0.1))
+            .tip("the UV that reaches the parent's genome leaves lesions that the copy fixes as errors: mutation rate × (1 + this × UV light at the parent's place × the fraction its body does not absorb). Aromatic amino acids (tryptophan, tyrosine) shield, as they do against UV death, and proofreading organs divide the total. 10 = eleven times more mutations in full sun for an unprotected body, none extra in the dark. 0 = off");
         let mut aug = p.require_start != 0;
         c.check("translation starts at AUG (new births)", &mut aug);
         p.require_start = aug as u32;

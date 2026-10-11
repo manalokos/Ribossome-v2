@@ -391,6 +391,14 @@ fn recharge_copy(slot: u32, cell: u32, pair_count: u32, gene_len: u32) -> bool {
     return done;
 }
 
+// Fração da UV que o corpo NÃO absorve (1 = tudo passa; RNA nu = 1): cai
+// com a fração de resíduos aromáticos, exp(−UV_SHIELD × fração).
+fn uv_exposed(slot: u32, n: u32) -> f32 {
+    var absorb = 0.0;
+    for (var k = 0u; k < n; k++) { absorb += max(aa_props[body_get(slot, k)].uv_absorb, 0.0); }
+    return exp(-UV_SHIELD * absorb / f32(max(n, 1u)));
+}
+
 fn energy_capacity(slot: u32, a: Agent) -> f32 {
     var vol = 0.0;
     // DEPÓSITOS JUSTAPOSTOS: órgãos de armazenamento seguidos na cadeia
@@ -808,11 +816,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // risco cai com a FRAÇÃO do corpo que absorve: exp(−UV_SHIELD × fração).
     // Viver à luz pede um corpo rico em triptofano e tirosina.
     var shield = 1.0;
-    if (light > 0.0 && a.body_len > 0u) {
-        var absorb = 0.0;
-        for (var k = 0u; k < a.body_len; k++) { absorb += max(aa_props[body_get(slot, k)].uv_absorb, 0.0); }
-        shield = exp(-UV_SHIELD * absorb / f32(a.body_len));
-    }
+    if (light > 0.0) { shield = uv_exposed(slot, a.body_len); }
     let uv_hazard = params.death_probability * (uv_mult - 1.0) * UV_HAZARD_SCALE * shield;
     // DESNATURAÇÃO: acima do limiar, o calor desfaz as proteínas (não
     // depende de estar bem alimentado); a composição do corpo protege.
@@ -912,7 +916,15 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
         let op = organ_get(slot, k);
         if (organ_type(op) == ORGAN_PROOFREAD) { protect += max(organ_var(op).p0, 0.0) * organ_gain(op); }
     }
-    let m = clamp(params.mutation_rate / (1.0 + protect), 0.0, 1.0);
+    // MUTAÇÃO PELA UV: a radiação que chega ao genoma do progenitor (a luz UV
+    // do sítio × o que o corpo não absorve) deixa lesões que a cópia fixa
+    // como erros. A revisão corrige-as como às outras.
+    var uv_mut = 1.0;
+    if (params.uv_mutation > 0.0) {
+        let pc = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
+        uv_mut += params.uv_mutation * uv_light_at_cell(pc % GRID_SIZE, pc / GRID_SIZE) * uv_exposed(slot, a.body_len);
+    }
+    let m = clamp(params.mutation_rate * uv_mut / (1.0 + protect), 0.0, 1.0);
     var g = array<u32, 16>(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
     for (var i = 0u; i < L; i++) {
         // Complemento reverso.

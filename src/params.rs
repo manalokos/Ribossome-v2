@@ -446,7 +446,11 @@ gpu_struct! {
         pub pairing_energy_half: f32,
         /// Energia mínima para emparelhar (abaixo disto a cópia pára).
         pub pairing_min_energy: f32,
-        pub _pad_p1: u32,
+        /// MUTAÇÃO PELA UV: a taxa de mutação da cópia multiplica-se por
+        /// 1 + isto × dose, com dose = luz UV no sítio do progenitor × o que
+        /// o corpo dele não absorve (os aromáticos protegem, como no risco de
+        /// morte). 0 = a UV não muda a taxa de mutação.
+        pub uv_mutation: f32,
         pub _pad_p2: u32,
     }
 }
@@ -644,7 +648,7 @@ impl Default for SimParams {
             scramble_amount: 1.0,
             pairing_energy_half: 0.5,
             pairing_min_energy: 1.0,
-            _pad_p1: 0,
+            uv_mutation: 0.0,
             _pad_p2: 0,
         }
     }
