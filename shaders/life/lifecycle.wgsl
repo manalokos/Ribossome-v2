@@ -460,8 +460,39 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // PRESA DIGERIDA: a energia da matéria de quem este agente matou no passo
     // anterior (ver prey_inbox). O que não cabe transborda: reativa gastos à
     // volta, um por cada food_power, como o excesso de qualquer refeição.
-    let prey = f32(atomicExchange(&prey_inbox[slot], 0u)) / BITE_SCALE;
+    var prey = f32(atomicExchange(&prey_inbox[slot], 0u)) / BITE_SCALE;
     if (prey > 0.0) {
+        // A PRESA VIRA CÓPIA: a matéria digerida serve primeiro para construir
+        // o filho. Com a energia de cada monómero digerido o predador carrega
+        // um monómero GASTO dos que estão à sua volta (os restos da presa
+        // ficaram lá), o que o genoma pede a seguir, e prende-o como
+        // complemento. Sem isto a caça só dava energia, e num mundo onde o
+        // que limita a reprodução é a matéria para a cópia, um predador de
+        // barriga cheia não tinha mais filhos do que os outros.
+        let fp = max(params.food_power, 1e-3);
+        let pc0 = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
+        let cx = i32(pc0 % GRID_SIZE);
+        let cy = i32(pc0 / GRID_SIZE);
+        for (var i = 0u; i < 48u; i++) {
+            if (prey >= fp && a.pair_count < a.gene_len) {
+                let comp = genome_get(slot, a.pair_count) ^ 1u;
+                var got = false;
+                for (var t = 0u; t < 9u; t++) {
+                    if (!got) {
+                        let x = clamp(cx + i32(t % 3u) - 1, 0, i32(GRID_SIZE) - 1);
+                        let y = clamp(cy + i32(t / 3u) - 1, 0, i32(GRID_SIZE) - 1);
+                        got = chem_take_state_one((u32(y) * GRID_SIZE + u32(x)) * 4u + comp, true);
+                    }
+                }
+                if (got) {
+                    a.pair_count += 1u;
+                    prey -= fp;
+                } else {
+                    // (não há esse monómero aqui: o resto fica como energia)
+                    i = 48u;
+                }
+            }
+        }
         a.energy += prey;
         let over = (a.energy - cap) / max(params.food_power, 1e-3);
         if (over > 0.0) {
