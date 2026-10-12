@@ -10,7 +10,8 @@
 //!     parecido, se estiver a menos de `BRANCH`;
 //!   - senão é uma raiz (não se sabe de onde veio; no primeiro censo são
 //!     todas raízes).
-//! Só entram espécies com pelo menos `MIN_SHARE` dos agentes.
+//! Só entram espécies com pelo menos `MIN_SHARE` dos agentes (e bastam
+//! `MIN_AGENTS` indivíduos, por grande que seja o mundo).
 
 use serde::{Deserialize, Serialize};
 
@@ -21,10 +22,14 @@ const SAME: f32 = 0.15;
 /// Distância máxima para se reconhecer o pai de um ramo novo (dois genomas
 /// ao acaso ficam a ~0,5: acima de 0,35 já não se distingue parentesco).
 const BRANCH: f32 = 0.35;
-/// Fração mínima dos agentes para uma espécie entrar no censo.
+/// Para uma espécie entrar no censo: esta fração dos agentes, mas nunca mais
+/// do que `MIN_AGENTS` indivíduos. (Só com a fração, num mundo de 90 mil
+/// agentes eram precisos 450: as linhagens minoritárias saíam dos censos e a
+/// árvore dava-as como extintas quando só estavam em minoria.)
 const MIN_SHARE: f32 = 0.005;
+const MIN_AGENTS: u32 = 20;
 /// Espécies por censo, no máximo.
-const MAX_PER_CENSUS: usize = 40;
+const MAX_PER_CENSUS: usize = 120;
 /// Um ramo que falhe mais censos seguidos do que isto está extinto.
 const GRACE: u32 = 3;
 
@@ -71,7 +76,7 @@ impl Lineages {
         if idx == 0 {
             self.first_epoch = epoch;
         }
-        let min = ((total as f32 * MIN_SHARE) as u32).max(5);
+        let min = ((total as f32 * MIN_SHARE) as u32).clamp(5, MIN_AGENTS);
         let mut taken = vec![false; self.branches.len()];
         for s in species.iter().filter(|s| s.count >= min).take(MAX_PER_CENSUS) {
             // O ramo vivo e livre mais parecido.
