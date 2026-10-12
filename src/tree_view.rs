@@ -123,10 +123,16 @@ pub fn portraits(gpu: &crate::gpu::Gpu, w: &World, l: &Lineages) -> Vec<[Vec<u8>
     t.params.uv_strength = 0.0;
     t.params.sedimentation = 0.0;
     t.params.spawn_energy = 8.0;
+    t.sync_scramble(&gpu.queue);
     const STEP: f32 = 700.0;
-    const COLS: usize = 70;
-    let place = |k: usize| [1500.0 + STEP * (k % COLS) as f32, 1500.0 + STEP * (k / COLS) as f32];
-    let n = l.branches.len().min(MAX_PORTRAITS);
+    // Os lugares têm de caber no mundo, seja qual for o tamanho dele. (Havia
+    // 70 colunas fixas, à medida do mundo de 2048 células: num mundo de 1024
+    // quase metade dos modelos caía fora, não nascia, e esses ramos ficavam
+    // com o desenho simplificado.)
+    let side = (cfg.grid_size * cfg.world_units_per_cell) as f32;
+    let cols = (((side - 3000.0) / STEP).floor() as usize + 1).max(1);
+    let place = |k: usize| [1500.0 + STEP * (k % cols) as f32, 1500.0 + STEP * (k / cols) as f32];
+    let n = l.branches.len().min(MAX_PORTRAITS).min(cols * cols / 2);
     let mut reqs = Vec::with_capacity(2 * n);
     for (i, b) in l.branches.iter().take(n).enumerate() {
         let a = place(2 * i);
@@ -155,7 +161,7 @@ pub fn portraits(gpu: &crate::gpu::Gpu, w: &World, l: &Lineages) -> Vec<[Vec<u8>
         if i < n {
             for (f, png) in pair.iter_mut().enumerate() {
                 let k = 2 * i + f;
-                if let Some(&slot) = at.get(&((k % COLS) as i64, (k / COLS) as i64)) {
+                if let Some(&slot) = at.get(&((k % cols) as i64, (k / cols) as i64)) {
                     *png = crate::report::portrait(gpu, &t, &cap, slot as u32, &agents[slot], 0.0);
                 }
             }
