@@ -463,8 +463,20 @@ gpu_struct! {
         /// pronta fica à espera; quem abre espaço (porque morreu um vizinho,
         /// ou porque o matou) é quem o ocupa. 0 = sem limite.
         pub birth_crowding: f32,
-        pub _pad_b1: u32,
-        pub _pad_b2: u32,
+        /// FOTODANO (o preço da intensidade de um fotossistema): risco de
+        /// morte por passo = isto × (luz absorvida pelo corpo)². A luz
+        /// absorvida é a mesma que dá o rendimento (luz que chega × força do
+        /// sol × fatia × intensidade × eficiência, somada pelos fotossistemas
+        /// do corpo); o rendimento cresce com ela em linha reta e o dano ao
+        /// quadrado. À sombra compensa uma antena grande; ao sol direto mata,
+        /// e ganha uma antena pequena. 0 = não há.
+        pub photo_damage: f32,
+        /// RNA NU FRÁGIL: risco de morte por passo a mais para um agente sem
+        /// corpo (genoma que não se traduz). O RNA sem proteína que o proteja
+        /// desfaz-se sozinho (hidrólise). Sem isto a fase nua é um bónus: não
+        /// paga manutenção, copia-se com a energia herdada e quase nada a
+        /// morde. 0 = o RNA nu dura tanto como um corpo.
+        pub naked_decay: f32,
         pub _pad_b3: u32,
     }
 }
@@ -665,8 +677,8 @@ impl Default for SimParams {
             uv_mutation: 0.0,
             heat_mutation: 0.0,
             birth_crowding: 80.0,
-            _pad_b1: 0,
-            _pad_b2: 0,
+            photo_damage: 0.005,
+            naked_decay: 0.005,
             _pad_b3: 0,
         }
     }

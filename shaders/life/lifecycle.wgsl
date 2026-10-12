@@ -456,6 +456,8 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // ---- SINAIS INTERNOS (sensores, relógio, relé) e custo dos músculos ----
     // Capacidade de energia: depende só dos órgãos; calcula-se uma vez.
     let cap = energy_capacity(slot, a);
+    // Luz absorvida pelos fotossistemas deste corpo neste passo (para o fotodano).
+    var photo_abs = 0.0;
     // PRESA DIGERIDA: a energia da matéria de quem este agente matou no passo
     // anterior (ver prey_inbox). O que não cabe transborda: reativa gastos à
     // volta, um por cada food_power, como o excesso de qualquer refeição.
@@ -777,7 +779,9 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let pv = organ_var(ok);
             // (× dorm_f: um corpo dormente também fixa a luz mais devagar. A
             // temperatura continua a não contar: captar luz é físico.)
-            let power = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0) * harvest * dorm_f;
+            let absorbed = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0);
+            photo_abs += absorbed;
+            let power = absorbed * harvest * dorm_f;
             // Variante: p0 = fração da luz para reciclar, p1 = eficiência.
             let recycle = clamp(pv.p0, 0.0, 1.0);
             // TRANSBORDO (como o fitoplâncton que exsuda o carbono que fixa a
@@ -887,7 +891,14 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // boca, frio) também envelhece devagar; é o que deixa existir formas de
     // resistência (cistos, esporos) que atravessam zonas sem comida.
     let pace = mix(1.0, clamp(metab * leak, 0.02, 4.0), clamp(params.death_metab, 0.0, 1.0));
-    let p_death = clamp(params.death_probability / e_eff * thermal * pace + uv_hazard + heat_hazard, 0.0, 1.0);
+    // FOTODANO: a excitação que o fotossistema capta a mais do que consegue
+    // escoar estraga o corpo (fotoinibição). Cresce com o QUADRADO da luz
+    // absorvida, e o rendimento só em linha reta: uma antena grande (muita
+    // intensidade) rende à sombra e mata ao sol; uma pequena aguenta o sol.
+    let photo_hazard = max(params.photo_damage, 0.0) * photo_abs * photo_abs;
+    // RNA NU: sem corpo que o proteja desfaz-se sozinho (ver naked_decay).
+    let naked_hazard = select(0.0, max(params.naked_decay, 0.0), a.body_len == 0u);
+    let p_death = clamp(params.death_probability / e_eff * thermal * pace + uv_hazard + heat_hazard + photo_hazard + naked_hazard, 0.0, 1.0);
     if (a.energy <= 0.0 || rng_f4(a.id, params.epoch, S_DEATH).x < p_death) {
         die(slot, a);
         return;
