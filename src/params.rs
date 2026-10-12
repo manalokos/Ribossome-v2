@@ -440,7 +440,8 @@ gpu_struct! {
         pub scramble_amount: f32,
         /// CÓPIA LIGADA À ENERGIA (cinética de enzima: polimerizar gasta
         /// energia, e com pouca abranda). As bases por passo multiplicam-se
-        /// por f·(1 + K)/(f + K), com f = energia / capacidade do corpo e K
+        /// por f·(1 + K)/(f + K), com f = energia / capacidade do corpo (sem
+        /// os depósitos) e K
         /// este valor: cheio copia à velocidade inteira; com f = K, a pouco
         /// mais de metade. 0 = a velocidade não depende da energia.
         pub pairing_energy_half: f32,

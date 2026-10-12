@@ -913,7 +913,10 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pair_floor = max(params.pairing_min_energy, 0.0) + params.pairing_cost;
     if (a.pair_count < a.gene_len && a.energy > pair_floor) {
         let rr = rng_f4(a.id, params.epoch, S_PAIR);
-        let fill = clamp(a.energy / max(cap, 1e-6), 0.0, 1.0);
+        // (Quão cheio está o CORPO, sem contar os depósitos: com eles na
+        // conta, um depósito por encher fazia o agente copiar mais devagar do
+        // que se não o tivesse, e ninguém os queria.)
+        let fill = clamp(a.energy / max(body_capacity(slot, a.body_len), 1e-6), 0.0, 1.0);
         let half = max(params.pairing_energy_half, 0.0);
         let pr = params.pairing_rate * metab * fill * (1.0 + half) / max(fill + half, 1e-6);
         var attempts = u32(pr);
