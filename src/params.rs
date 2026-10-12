@@ -477,7 +477,10 @@ gpu_struct! {
         /// paga manutenção, copia-se com a energia herdada e quase nada a
         /// morde. 0 = o RNA nu dura tanto como um corpo.
         pub naked_decay: f32,
-        pub _pad_b3: u32,
+        /// PERDA DOS DEPÓSITOS: fração por passo da energia guardada ACIMA da
+        /// capacidade do corpo que se perde sozinha (0,0001 = metade em ~7000
+        /// passos, mais do que uma noite). 0 = os depósitos não perdem nada.
+        pub store_loss: f32,
     }
 }
 
@@ -679,7 +682,7 @@ impl Default for SimParams {
             birth_crowding: 80.0,
             photo_damage: 0.005,
             naked_decay: 0.005,
-            _pad_b3: 0,
+            store_loss: 0.0001,
         }
     }
 }

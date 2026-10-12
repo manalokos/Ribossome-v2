@@ -439,12 +439,10 @@ fn body_capacity(slot: u32, n: u32) -> f32 {
     return max(BODY_CAPACITY * vol / CAP_VOLUME_REF, 1.0);
 }
 
-// PERDA DOS DEPÓSITOS: a energia guardada acima da capacidade do corpo
-// descarrega sozinha, esta fração por passo (0,0005 = metade em ~1400
-// passos). Guardar tem sempre perdas, e quanto mais se guarda mais se perde.
-// Não passa pela "fuga" do corpo (que deixava a manutenção de um depósito
-// quase grátis a quem não tem boca): atinge todos por igual.
-const STORE_LOSS: f32 = 0.0005;
+// PERDA DOS DEPÓSITOS (params.store_loss): a energia guardada acima da
+// capacidade do corpo descarrega sozinha, essa fração por passo. Guardar tem
+// perdas, e quanto mais se guarda mais se perde. Não passa pela "fuga" do
+// corpo: atinge todos por igual.
 
 @compute @workgroup_size(64)
 fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -808,7 +806,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     a.energy = clamp(a.energy, 0.0, cap) - params.maintenance_cost * metab * leak * (f32(a.body_len) + organ_upkeep(slot, a.body_len));
-    a.energy -= STORE_LOSS * max(a.energy - body_capacity(slot, a.body_len), 0.0);
+    a.energy -= max(params.store_loss, 0.0) * max(a.energy - body_capacity(slot, a.body_len), 0.0);
     // PROTEASES ABERTAS: a manutenção dos espigões (só as de alcance; ver
     // protease_active em contact.wgsl). Não passa pela fuga das bocas.
     a.energy -= params.maintenance_cost * metab * protease_active(slot, a.body_len);
