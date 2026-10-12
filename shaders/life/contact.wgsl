@@ -75,10 +75,12 @@ const PRED_SITE_SCALE: f32 = 1.0;
 const PRED_PROLINE_DEFENSE: f32 = 0.9;
 const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 10000.0;
+// (Era 14: medido com predadores semeados num mundo cheio, com 30 matam dez
+// vezes mais e a linhagem aguenta o dobro; com 50 passam a matar os seus.)
 // TOQUE: distância (unidades do mundo) entre o centro de uma protease e o de
 // um resíduo da vítima a que a protease lhe chega (o raio do órgão com os
 // dentes mais a espessura do resíduo). E quantas proteases de um corpo contam.
-const PROTEASE_TOUCH: f32 = 14.0;
+const PROTEASE_TOUCH: f32 = 28.0;
 const PROTEASE_SLOTS: u32 = 12u;
 const S_DIGEST: u32 = 13u;
 const S_SPILL: u32 = 15u;
@@ -385,7 +387,14 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     // dos vizinhos e os puxões das ligações quase não o movem (divididos por
     // 1 + força com que agarra; o terreno fica com a diferença).
     let pinned = 1.0 / (1.0 + holdfast_held(slot, a));
-    let np = clamp(vec2<f32>(a.pos_x, a.pos_y) + (contact_disp[slot].xy + bd.xy) * pinned, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
+    // A PROTEASE AGARRA: enquanto uma protease de CONTACTO está a morder, o
+    // predador e a presa não se empurram um ao outro (a enzima fica presa ao
+    // substrato). Sem isto os corpos afastavam-se ao fim de dois ou três
+    // passos e quase nenhum encontro acabava em morte. A presa ainda se
+    // solta se nadar, se a corrente os separar ou pela agitação térmica.
+    let held = contact_disp[slot].z > 0.0 || atomicLoad(&bitten[slot]) > atomicLoad(&bitten_free[slot]);
+    let shove = contact_disp[slot].xy * select(1.0, 0.0, held);
+    let np = clamp(vec2<f32>(a.pos_x, a.pos_y) + (shove + bd.xy) * pinned, vec2<f32>(0.0), vec2<f32>(SIM_SIZE - 0.01));
     if (gamma_count(world_to_cell(np)) < GAMMA_SOLID_THRESHOLD) {
         a.pos_x = np.x;
         a.pos_y = np.y;
