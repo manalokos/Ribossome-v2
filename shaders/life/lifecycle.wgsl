@@ -983,9 +983,18 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         attempts = min(attempts, PAIRING_MAX_PER_STEP);
         for (var t = 0u; t < attempts && a.pair_count < a.gene_len; t++) {
             let q = rng_f4(a.id, params.epoch, (S_PAIR << 16u) + t);
+            // ONDE SE EMPARELHA: no sítio do corpo que corresponde à base que
+            // se está a copiar. O genoma acompanha a cadeia (a zona traduzida
+            // de uma ponta à outra do corpo), e cada base apanha o seu
+            // complemento junto do resíduo que ela codifica, até
+            // PAIRING_REACH dali. (Antes era junto de um resíduo qualquer, ao
+            // acaso: o corpo todo servia de rede para qualquer base.)
             var site = p;
             if (a.body_len > 0u) {
-                site = residue_world(slot, a, min(u32(q.x * f32(a.body_len)), a.body_len - 1u));
+                let g0 = a.coding_span & 0xFFFFu;
+                let g1 = max(a.coding_span >> 16u, g0 + 1u);
+                let along = clamp((f32(a.pair_count) - f32(g0)) / f32(g1 - g0), 0.0, 0.9999);
+                site = residue_world(slot, a, min(u32(along * f32(a.body_len)), a.body_len - 1u));
             }
             let ang = q.y * 6.2831853;
             site += vec2<f32>(cos(ang), sin(ang)) * q.z * PAIRING_REACH;
