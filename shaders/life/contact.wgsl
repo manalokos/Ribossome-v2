@@ -44,6 +44,7 @@ fn contact_insert(@builtin(global_invocation_id) gid: vec3<u32>) {
     // passo e empacotado em contact_disp.w (4 × 6 bits, exato num f32).
     contact_disp[slot] = vec4<f32>(0.0, 0.0, 0.0, pack_defence(slot, agents[slot].body_len));
     atomicStore(&matter_claim[slot], BOND_NONE);
+    atomicStore(&prey_killer[slot], NO_ENTRY);
 }
 
 // PROTEASE (predação química): um órgão. Cada variante tem uma FAMÍLIA, que
@@ -331,6 +332,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist, b.energy);
                         if (bite > 0.0) {
                             atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
+                            atomicMin(&prey_killer[e], slot);
                             gained += bite;
                         }
                     }
@@ -418,10 +420,24 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Sem energia: morre aqui, e conta como morte por protease.
         if (a.energy <= 0.0) {
             atomicAdd(&life_counters[LC_BITES], 1u);
-            // DIGESTÃO: parte da matéria do corpo sai já ativada (ver
-            // lysis_matter). Só conta o genoma: os complementos já
-            // capturados saem sempre ativados.
-            die_release(slot, a, u32(f32(a.gene_len) * clamp(params.lysis_matter, 0.0, 1.0)));
+            // O PREDADOR COME O CORPO: a energia que a presa trazia no bolso
+            // é pouca; o grosso do que ela vale é a matéria (o genoma e os
+            // complementos que já tinha capturado, cada monómero com a
+            // energia de uma refeição). Quem a matou digere a fração
+            // protease_direct dessa matéria: recebe a energia (no passo
+            // seguinte, por prey_inbox) e esses monómeros saem GASTOS.
+            // Do resto, como antes: os complementos saem ativados e
+            // lysis_matter do genoma também.
+            let killer = atomicLoad(&prey_killer[slot]);
+            let paired = min(a.pair_count, a.gene_len);
+            var eat_genome = 0u;
+            var eat_paired = 0u;
+            if (killer != NO_ENTRY && killer < params.max_agents) {
+                eat_genome = min(u32(f32(a.gene_len) * direct), a.gene_len);
+                eat_paired = min(u32(f32(paired) * direct), paired);
+                atomicAdd(&prey_inbox[killer], u32(f32(eat_genome + eat_paired) * max(params.food_power, 0.0) * BITE_SCALE));
+            }
+            die_release(slot, a, u32(f32(a.gene_len - eat_genome) * clamp(params.lysis_matter, 0.0, 1.0)), eat_paired);
             contact_disp[slot] = vec4<f32>(0.0);
             return;
         }

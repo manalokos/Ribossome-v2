@@ -92,6 +92,14 @@ const GHOST_VIEW_MAX: f32 = 12000.0;
 // TOM DA ESPÉCIE (só para o desenho): um ângulo de cor por agente, tirado da
 // composição do genoma (ver species_hue em drawlist.wgsl).
 @group(3) @binding(35) var<storage, read_write> tint_out: array<f32>;
+// DIGESTÃO DA PRESA: quem a matou fica com a energia da matéria dela.
+// prey_killer[vítima] = o atacante que lhe mordeu neste passo (o de slot mais
+// baixo, se forem vários: só um fica com o corpo); posto a "ninguém" em
+// contact_insert. prey_inbox[atacante] = energia (× BITE_SCALE) à espera de
+// ser recebida no passo seguinte (agents_step), para a ordem dos fios da
+// placa não mudar o resultado.
+@group(3) @binding(36) var<storage, read_write> prey_killer: array<atomic<u32>>;
+@group(3) @binding(37) var<storage, read_write> prey_inbox: array<atomic<u32>>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

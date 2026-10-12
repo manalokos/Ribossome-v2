@@ -124,6 +124,8 @@ fn take_around(cell: u32, ch: u32) -> bool {
 }
 
 fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, generation: u32, parent: u32) {
+    // (Um slot reutilizado não herda a presa por receber de quem lá esteve.)
+    atomicStore(&prey_inbox[slot], 0u);
     var a: Agent;
     a.pos_x = pos.x;
     a.pos_y = pos.y;
@@ -311,18 +313,20 @@ fn die(slot: u32, a_in: Agent) {
     let left = max(a_in.energy, 0.0) * clamp(params.lysis_yield, 0.0, 1.0) / max(params.food_power, 1e-3);
     // (Arredondamento ao acaso, para a parte fracionária não se perder.)
     let r = rng_f4(a_in.id, params.epoch, S_EAT + 97u);
-    die_release(slot, a_in, min(u32(left) + select(0u, 1u, r.y < fract(left)), 256u));
+    die_release(slot, a_in, min(u32(left) + select(0u, 1u, r.y < fract(left)), 256u), 0u);
 }
 
 // Morte em que `budget` monómeros dos restos saem ATIVADOS além dos
 // complementos (LISE por protease: a energia que a vítima tinha fica nos
 // pedaços). Primeiro os do próprio agente; o que sobrar do orçamento
 // reativa gastos das células onde o corpo estava.
-fn die_release(slot: u32, a_in: Agent, budget_in: u32) {
+fn die_release(slot: u32, a_in: Agent, budget_in: u32, digested_in: u32) {
     ghost_record(slot, a_in);
     var a = a_in;
     var m_act = vec4<u32>(0u);
-    for (var i = 0u; i < min(a.pair_count, a.gene_len); i++) { m_act[genome_get(slot, i) ^ 1u] += 1u; }
+    // (Os primeiros `digested_in` complementos foram digeridos por quem
+    // matou: saem gastos, com o resto da matéria.)
+    for (var i = min(digested_in, a.gene_len); i < min(a.pair_count, a.gene_len); i++) { m_act[genome_get(slot, i) ^ 1u] += 1u; }
     var m_spent = agent_matter(slot) - m_act;
     var budget = budget_in;
     for (var i = 0u; i < 512u; i++) {
@@ -451,6 +455,25 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // ---- SINAIS INTERNOS (sensores, relógio, relé) e custo dos músculos ----
     // Capacidade de energia: depende só dos órgãos; calcula-se uma vez.
     let cap = energy_capacity(slot, a);
+    // PRESA DIGERIDA: a energia da matéria de quem este agente matou no passo
+    // anterior (ver prey_inbox). O que não cabe transborda: reativa gastos à
+    // volta, um por cada food_power, como o excesso de qualquer refeição.
+    let prey = f32(atomicExchange(&prey_inbox[slot], 0u)) / BITE_SCALE;
+    if (prey > 0.0) {
+        a.energy += prey;
+        let over = (a.energy - cap) / max(params.food_power, 1e-3);
+        if (over > 0.0) {
+            a.energy = cap;
+            let pc = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
+            var left = min(u32(over), 24u);
+            for (var i = 0u; i < 24u; i++) {
+                if (left > 0u) {
+                    exude_one(pc, rng_f4(a.id, params.epoch, S_EAT + 300u + i));
+                    left -= 1u;
+                }
+            }
+        }
+    }
     a.energy -= signals_step(slot, a, cap);
 
     // ---- JUNTAS: dobragem ao nascer, depois agitação térmica e músculos ----
