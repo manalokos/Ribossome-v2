@@ -964,9 +964,10 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // abaixo) é quão cheio está o corpo, a energia a dividir pelo que o
     // próprio corpo consegue guardar (cresce com o número de resíduos). Um
     // corpo pequeno cheio vale o mesmo que um grande cheio; meio vazio, o
-    // risco duplica. A energia dos DEPÓSITOS conta: um corpo com reservas
-    // passa de 1 e fica mais protegido, até death_energy_cap vezes a
-    // capacidade do corpo (0 = sem teto).
+    // risco duplica. O teto é death_energy_cap (por omissão 1 = cheio): as
+    // reservas dos DEPÓSITOS não dão proteção a mais, só mantêm o corpo
+    // cheio durante mais tempo quando o rendimento falha (a noite, a fome).
+    // Acima de 1 passariam a proteger; 0 = sem teto.
     var e_eff = max(a.energy / max(body_capacity(slot, a.body_len), 1e-6), 0.01);
     if (params.death_energy_cap > 0.0) { e_eff = min(e_eff, params.death_energy_cap); }
     // RITMO DE VIDA: quem gasta devagar (dormência, bocas fechadas ou sem
@@ -997,10 +998,10 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (a.pair_count < a.gene_len && a.energy > pair_floor) {
         let rr = rng_f4(a.id, params.epoch, S_PAIR);
         // ENERGIA POR PEÇA DE CORPO, a mesma medida da morte: a energia a
-        // dividir pelo que o corpo guarda. Com reservas nos depósitos passa
-        // de 1 e a cópia anda mais depressa do que a de um corpo só cheio
-        // (a curva satura: no máximo 1 + K vezes).
-        let fill = max(a.energy / max(body_capacity(slot, a.body_len), 1e-6), 0.0);
+        // dividir pelo que o corpo guarda, até 1 (cheio). As reservas dos
+        // depósitos não aceleram a cópia: só mantêm o corpo cheio, e a
+        // copiar ao ritmo normal, quando o rendimento falha.
+        let fill = clamp(a.energy / max(body_capacity(slot, a.body_len), 1e-6), 0.0, 1.0);
         let half = max(params.pairing_energy_half, 0.0);
         // CÓPIA EM PARALELO: todas as posições do genoma emparelham ao mesmo
         // tempo, cada uma por conta própria e no sítio do corpo que lhe
