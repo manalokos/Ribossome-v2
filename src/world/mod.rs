@@ -25,6 +25,8 @@ const LEDGER_WORDS: u64 = 12;
 pub const MAX_SPAWN_REQUESTS: usize = 32768;
 /// Palavras por slot nos buffers de genoma e de corpo.
 const SLOT_WORDS: u64 = 16;
+/// Palavras por agente da máscara da cópia (um bit por base, 256 bases).
+pub const PAIR_MASK_WORDS: u64 = 8;
 /// vec4<u32> por slot no buffer das ligações (MAX_BONDS + a proposta;
 /// shaders/life/bonds.wgsl).
 pub const BOND_STRIDE: u64 = 5;
@@ -256,6 +258,9 @@ pub struct World {
     /// Epoch até ao qual as proteases de cada agente estão em trégua (para a
     /// vista as desenhar fechadas).
     pub truce_buf: wgpu::Buffer,
+    /// Que posições do genoma de cada agente já têm complemento (pair_mask
+    /// em bindings.wgsl): 8 palavras por agente.
+    pub pair_mask_buf: wgpu::Buffer,
     /// Sementes da física ao acaso já aplicadas às tabelas da placa
     /// (condução, ângulos, resposta): ver `sync_scramble`.
     pub applied_scramble: [u32; 4],
@@ -545,6 +550,7 @@ impl World {
         let prey_inbox_buf = storage_buffer(device, "prey inbox", max_agents * 4);
         let bitten_free_buf = storage_buffer(device, "bitten free", max_agents * 4);
         let truce_buf = storage_buffer(device, "protease truce", max_agents * 4);
+        let pair_mask_buf = storage_buffer(device, "pair mask", max_agents * PAIR_MASK_WORDS * 4);
         let ghosts_buf = storage_buffer(device, "ghosts", (GHOST_HEAD + GHOST_MAX * GHOST_WORDS) * 4);
         gpu.queue.write_buffer(&life_counters_buf, 0, bytemuck::cast_slice(&[cfg.max_agents, 0, 0, 0, 0, 0, 0, 0u32]));
         let spawn_buf =
@@ -577,7 +583,7 @@ impl World {
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
         let life_entries: Vec<_> =
-            (0..40).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
+            (0..41).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -741,6 +747,7 @@ impl World {
                 &prey_inbox_buf,
                 &bitten_free_buf,
                 &truce_buf,
+                &pair_mask_buf,
             ],
         );
 
@@ -879,6 +886,7 @@ impl World {
             ghosts_buf,
             tint_buf,
             truce_buf,
+            pair_mask_buf,
             applied_scramble: [0; 4],
             free_buf,
             spawn_buf,
@@ -1032,6 +1040,7 @@ impl World {
     fn clear_agents(&mut self, gpu: &Gpu) {
         let max = self.cfg.max_agents;
         gpu.queue.write_buffer(&self.agents_buf, 0, &vec![0u8; max as usize * size_of::<Agent>()]);
+        gpu.queue.write_buffer(&self.pair_mask_buf, 0, &vec![0u8; (max as u64 * PAIR_MASK_WORDS * 4) as usize]);
         let free_slots: Vec<u32> = (0..max).rev().collect();
         gpu.queue.write_buffer(&self.free_buf, 0, bytemuck::cast_slice(&free_slots));
         gpu.queue.write_buffer(&self.life_counters_buf, 0, bytemuck::cast_slice(&[max, 0, 0, 0, 0, 0, 0, 0u32]));

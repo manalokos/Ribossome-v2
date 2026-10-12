@@ -107,6 +107,59 @@ const GHOST_VIEW_MAX: f32 = 12000.0;
 // fechadas (ver PROTEASE_TRUCE em contact.wgsl). Escrito no nascimento, para
 // o progenitor e para o filho.
 @group(3) @binding(39) var<storage, read_write> truce_until: array<u32>;
+// CÓPIA EM PARALELO: que posições do genoma de cada agente já têm o seu
+// complemento preso (um bit por base, PAIR_WORDS palavras por agente).
+// `pair_count` do agente é sempre o número de bits ligados. Cada posição
+// emparelha por conta própria, no sítio do corpo que lhe corresponde: já não
+// há "a base seguinte".
+@group(3) @binding(40) var<storage, read_write> pair_mask: array<u32>;
+const PAIR_WORDS: u32 = 8u;
+
+fn pair_get(slot: u32, i: u32) -> bool {
+    return ((pair_mask[slot * PAIR_WORDS + (i >> 5u)] >> (i & 31u)) & 1u) != 0u;
+}
+
+fn pair_set(slot: u32, i: u32) {
+    let w = slot * PAIR_WORDS + (i >> 5u);
+    pair_mask[w] = pair_mask[w] | (1u << (i & 31u));
+}
+
+fn pair_unset(slot: u32, i: u32) {
+    let w = slot * PAIR_WORDS + (i >> 5u);
+    pair_mask[w] = pair_mask[w] & ~(1u << (i & 31u));
+}
+
+fn pair_clear(slot: u32) {
+    for (var w = 0u; w < PAIR_WORDS; w++) { pair_mask[slot * PAIR_WORDS + w] = 0u; }
+}
+
+// Primeira posição ainda sem complemento (n se estão todas). (Sem saídas
+// dentro do ciclo: é chamada a partir de agents_step.)
+fn pair_first_free(slot: u32, n: u32) -> u32 {
+    var r = n;
+    for (var w = 0u; w < PAIR_WORDS; w++) {
+        let free = ~pair_mask[slot * PAIR_WORDS + w];
+        if (r == n && free != 0u) {
+            let c = w * 32u + firstTrailingBit(free);
+            if (c < n) { r = c; }
+        }
+    }
+    return r;
+}
+
+// Última posição com complemento (n se não há nenhuma).
+fn pair_last_set(slot: u32, n: u32) -> u32 {
+    var r = n;
+    for (var k = 0u; k < PAIR_WORDS; k++) {
+        let w = PAIR_WORDS - 1u - k;
+        let m = pair_mask[slot * PAIR_WORDS + w];
+        if (r == n && m != 0u) {
+            let c = w * 32u + firstLeadingBit(m);
+            if (c < n) { r = c; }
+        }
+    }
+    return r;
+}
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

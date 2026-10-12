@@ -232,6 +232,8 @@ impl World {
             // Ligações entre agentes por âncoras ("bonds2": o formato de
             // antes, por cargas, é ignorado; ver load_scene).
             per_slot("bonds2", &self.bonds_buf, super::BOND_STRIDE * 4),
+            // Que posições da cópia já têm complemento (cópia em paralelo).
+            per_slot("pair_mask", &self.pair_mask_buf, super::PAIR_MASK_WORDS),
         ]
     }
 
@@ -481,6 +483,18 @@ impl World {
         for b in self.slot_bufs() {
             if b.name == "bonds2" && !scene.blocks.contains_key("bonds2") {
                 notes.push("scene without anchor bonds (saved before they existed): agents are unbonded".into());
+                continue;
+            }
+            if b.name == "pair_mask" && !scene.blocks.contains_key("pair_mask") {
+                // Cena de quando a cópia era base a base: os complementos que
+                // cada agente já tinha eram os das PRIMEIRAS pair_count bases.
+                let mut mask = vec![0u32; (self.cfg.max_agents as u64 * super::PAIR_MASK_WORDS) as usize];
+                for (a, &s) in agents.iter().zip(&slots) {
+                    for k in 0..a.pair_count.min(a.gene_len).min(256) as usize {
+                        mask[s as usize * super::PAIR_MASK_WORDS as usize + k / 32] |= 1 << (k % 32);
+                    }
+                }
+                q.write_buffer(&self.pair_mask_buf, 0, bytemuck::cast_slice(&mask));
                 continue;
             }
             if b.name == "rna_tails4" && !scene.blocks.contains_key("rna_tails4") {

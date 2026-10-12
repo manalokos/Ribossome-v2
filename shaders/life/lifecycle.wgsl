@@ -17,7 +17,12 @@ const S_MUT: u32 = 4u << 16u;       // + índice da base
 const SPAWN_GATHER_RADIUS: i32 = 16;
 // Emparelhamento (v3): no máximo 8 tentativas por passo; alcance 2,5 (na
 // prática "a célula debaixo do resíduo").
-const PAIRING_MAX_PER_STEP: u32 = 8u;
+const PAIRING_MAX_PER_STEP: u32 = 64u;
+// Bases de genoma por cada `pairing_rate` tentativas por passo (com 3 e
+// pairing_rate 3 cada posição livre tenta uma vez por passo, e um genoma de
+// 10 bases copia-se mais ou menos ao ritmo de
+// quando a cópia era base a base).
+const PAIR_BASES_REF: f32 = 3.0;
 // Alcance da captura à volta do resíduo (mundo): ~1 célula (30 unidades).
 // (Era 2,5: na prática só a célula do próprio resíduo.)
 const PAIRING_REACH: f32 = 30.0;
@@ -138,6 +143,7 @@ fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, ge
     a.alive = 1u;
     a.gene_len = gene_len;
     a.pair_count = 0u;
+    pair_clear(slot);
     a.generation = generation;
     a.age = 0u;
     a.parent = parent;
@@ -241,14 +247,14 @@ fn spawn_seeds(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 
 // Matéria presa num agente, por canal: genoma + complementos capturados
-// (complemento de Watson-Crick das primeiras pair_count bases).
+// (complemento de Watson-Crick das bases que já o têm: ver pair_mask).
 fn agent_matter(slot: u32) -> vec4<u32> {
     var m = vec4<u32>(0u);
     let a = agents[slot];
     for (var i = 0u; i < a.gene_len; i++) {
         let b = genome_get(slot, i);
         m[b] += 1u;
-        if (i < a.pair_count) { m[b ^ 1u] += 1u; }
+        if (pair_get(slot, i)) { m[b ^ 1u] += 1u; }
     }
     return m;
 }
@@ -328,7 +334,16 @@ fn die_release(slot: u32, a_in: Agent, budget_in: u32, digested_in: u32) {
     var m_act = vec4<u32>(0u);
     // (Os primeiros `digested_in` complementos foram digeridos por quem
     // matou: saem gastos, com o resto da matéria.)
-    for (var i = min(digested_in, a.gene_len); i < min(a.pair_count, a.gene_len); i++) { m_act[genome_get(slot, i) ^ 1u] += 1u; }
+    var skipped = 0u;
+    for (var i = 0u; i < a.gene_len; i++) {
+        if (pair_get(slot, i)) {
+            if (skipped < digested_in) {
+                skipped += 1u;
+            } else {
+                m_act[genome_get(slot, i) ^ 1u] += 1u;
+            }
+        }
+    }
     var m_spent = agent_matter(slot) - m_act;
     var budget = budget_in;
     for (var i = 0u; i < 512u; i++) {
@@ -392,7 +407,11 @@ const CAP_VOLUME_REF: f32 = 141.26;
 fn recharge_copy(slot: u32, cell: u32, pair_count: u32, gene_len: u32) -> bool {
     var done = false;
     if (params.salvage > 0.0 && pair_count < gene_len) {
-        done = chem_take_state_one(cell * 4u + (genome_get(slot, pair_count) ^ 1u), true);
+        let at = pair_first_free(slot, gene_len);
+        if (at < gene_len) {
+            done = chem_take_state_one(cell * 4u + (genome_get(slot, at) ^ 1u), true);
+            if (done) { pair_set(slot, at); }
+        }
     }
     return done;
 }
@@ -402,9 +421,12 @@ fn recharge_copy(slot: u32, cell: u32, pair_count: u32, gene_len: u32) -> bool {
 const PREY_TO_COPY: f32 = 0.5;
 
 // Carrega um monómero GASTO da vizinhança (3 × 3 células) como o complemento
-// número `at` da cópia deste agente. Devolve true se o encontrou e prendeu.
-// (Sem saídas dentro do ciclo: é chamado a partir de agents_step.)
-fn charge_copy_near(slot: u32, cell: u32, at: u32) -> bool {
+// da primeira posição da cópia deste agente que ainda não o tem. Devolve true
+// se o encontrou e prendeu. (Sem saídas dentro do ciclo: é chamado a partir de
+// agents_step.)
+fn charge_copy_near(slot: u32, cell: u32, gene_len: u32) -> bool {
+    let at = pair_first_free(slot, gene_len);
+    if (at >= gene_len) { return false; }
     let comp = genome_get(slot, at) ^ 1u;
     let cx = i32(cell % GRID_SIZE);
     let cy = i32(cell / GRID_SIZE);
@@ -416,6 +438,7 @@ fn charge_copy_near(slot: u32, cell: u32, at: u32) -> bool {
             got = chem_take_state_one((u32(y) * GRID_SIZE + u32(x)) * 4u + comp, true);
         }
     }
+    if (got) { pair_set(slot, at); }
     return got;
 }
 
@@ -501,7 +524,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // 1. cópia com a sua metade
         for (var i = 0u; i < 32u; i++) {
             if (build >= fp && a.pair_count < a.gene_len) {
-                if (charge_copy_near(slot, pc0, a.pair_count)) {
+                if (charge_copy_near(slot, pc0, a.gene_len)) {
                     a.pair_count += 1u;
                     build -= fp;
                 } else {
@@ -517,7 +540,7 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             // 3. o que não cabe volta a tentar a cópia...
             for (var i = 0u; i < 32u; i++) {
                 if (over >= fp && a.pair_count < a.gene_len) {
-                    if (charge_copy_near(slot, pc0, a.pair_count)) {
+                    if (charge_copy_near(slot, pc0, a.gene_len)) {
                         a.pair_count += 1u;
                         over -= fp;
                     } else {
@@ -977,34 +1000,40 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // que se não o tivesse, e ninguém os queria.)
         let fill = clamp(a.energy / max(body_capacity(slot, a.body_len), 1e-6), 0.0, 1.0);
         let half = max(params.pairing_energy_half, 0.0);
-        let pr = params.pairing_rate * metab * fill * (1.0 + half) / max(fill + half, 1e-6);
+        // CÓPIA EM PARALELO: todas as posições do genoma emparelham ao mesmo
+        // tempo, cada uma por conta própria e no sítio do corpo que lhe
+        // corresponde (o genoma acompanha a cadeia: a zona traduzida vai de
+        // uma ponta à outra do corpo). As tentativas por passo crescem com o
+        // comprimento do genoma (pairing_rate por cada PAIR_BASES_REF bases):
+        // o ritmo POR BASE é igual para todos, e um genoma comprido já não
+        // espera pela base que falta. Cada tentativa escolhe uma posição ao
+        // acaso; se já tem complemento, perde-se (as últimas custam mais).
+        let pr = params.pairing_rate * metab * fill * (1.0 + half) / max(fill + half, 1e-6) * f32(a.gene_len) / PAIR_BASES_REF;
         var attempts = u32(pr);
         if (rr.x < fract(pr)) { attempts += 1u; }
         attempts = min(attempts, PAIRING_MAX_PER_STEP);
-        for (var t = 0u; t < attempts && a.pair_count < a.gene_len; t++) {
-            let q = rng_f4(a.id, params.epoch, (S_PAIR << 16u) + t);
-            // ONDE SE EMPARELHA: no sítio do corpo que corresponde à base que
-            // se está a copiar. O genoma acompanha a cadeia (a zona traduzida
-            // de uma ponta à outra do corpo), e cada base apanha o seu
-            // complemento junto do resíduo que ela codifica, até
-            // PAIRING_REACH dali. (Antes era junto de um resíduo qualquer, ao
-            // acaso: o corpo todo servia de rede para qualquer base.)
-            var site = p;
-            if (a.body_len > 0u) {
-                let g0 = a.coding_span & 0xFFFFu;
-                let g1 = max(a.coding_span >> 16u, g0 + 1u);
-                let along = clamp((f32(a.pair_count) - f32(g0)) / f32(g1 - g0), 0.0, 0.9999);
-                site = residue_world(slot, a, min(u32(along * f32(a.body_len)), a.body_len - 1u));
+        let g0 = a.coding_span & 0xFFFFu;
+        let g1 = max(a.coding_span >> 16u, g0 + 1u);
+        for (var t = 0u; t < attempts; t++) {
+            if (a.pair_count < a.gene_len && a.energy >= pair_floor) {
+                let q = rng_f4(a.id, params.epoch, (S_PAIR << 16u) + t);
+                let at = min(u32(q.x * f32(a.gene_len)), a.gene_len - 1u);
+                if (!pair_get(slot, at)) {
+                    var site = p;
+                    if (a.body_len > 0u) {
+                        let along = clamp((f32(at) - f32(g0)) / f32(g1 - g0), 0.0, 0.9999);
+                        site = residue_world(slot, a, min(u32(along * f32(a.body_len)), a.body_len - 1u));
+                    }
+                    let ang = q.y * 6.2831853;
+                    site += vec2<f32>(cos(ang), sin(ang)) * q.z * PAIRING_REACH;
+                    let comp = genome_get(slot, at) ^ 1u;
+                    if (chem_take_state_one(world_to_cell(site) * 4u + comp, false)) {
+                        pair_set(slot, at);
+                        a.pair_count += 1u;
+                        a.energy -= params.pairing_cost;
+                    }
+                }
             }
-            let ang = q.y * 6.2831853;
-            site += vec2<f32>(cos(ang), sin(ang)) * q.z * PAIRING_REACH;
-            let comp = genome_get(slot, a.pair_count) ^ 1u;
-            if (a.energy < pair_floor) { break; }
-            // Tentativas independentes: uma falha (não havia o complemento
-            // ali) não impede as outras deste passo, noutros sítios.
-            if (!chem_take_state_one(world_to_cell(site) * 4u + comp, false)) { continue; }
-            a.pair_count += 1u;
-            a.energy -= params.pairing_cost;
         }
     }
     agents[slot] = a;
@@ -1162,6 +1191,7 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
         // População cheia: a cópia volta ao meio, exatamente.
         for (var i = 0u; i < n; i++) { chem_add_state(cell, gget(&g, i), 1u, true); }
         a.pair_count = 0u;
+        pair_clear(slot);
         agents[slot] = a;
         return;
     }
@@ -1201,6 +1231,7 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     birth_bond(slot, a, child, bk);
     a.energy -= share;
     a.pair_count = 0u;
+    pair_clear(slot);
     agents[slot] = a;
     atomicAdd(&life_counters[LC_BIRTHS], 1u);
 }

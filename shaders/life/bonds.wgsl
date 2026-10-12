@@ -181,9 +181,16 @@ fn bond_maintain(@builtin(global_invocation_id) gid: vec3<u32>) {
                 // do genoma, e continua a tê-la depois de dar: nivela sem
                 // andar para trás e para a frente) e o seu último
                 // complemento é o que falta aqui?
+                // (Com a cópia em paralelo: o complemento da ÚLTIMA posição
+                // que o parceiro tem, se for a base da PRIMEIRA que falta aqui.)
+                var give = false;
                 if (want_matter && o.pair_count > 0u && o.pair_count <= o.gene_len
-                    && f32(o.pair_count - 1u) * f32(a.gene_len) >= f32(a.pair_count + 1u) * f32(o.gene_len)
-                    && genome_get(b.x, o.pair_count - 1u) == genome_get(slot, a.pair_count)) {
+                    && f32(o.pair_count - 1u) * f32(a.gene_len) >= f32(a.pair_count + 1u) * f32(o.gene_len)) {
+                    let from_at = pair_last_set(b.x, o.gene_len);
+                    let to_at = pair_first_free(slot, a.gene_len);
+                    give = from_at < o.gene_len && to_at < a.gene_len && genome_get(b.x, from_at) == genome_get(slot, to_at);
+                }
+                if (give) {
                     if (!locked) {
                         locked = atomicCompareExchangeWeak(&matter_claim[slot], BOND_NONE, MATTER_LOCK).exchanged;
                         // Já foi escolhido como dador por outro: não recebe.

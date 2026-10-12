@@ -397,9 +397,17 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     // canal a canal.
     let mc = atomicLoad(&matter_claim[slot]);
     if (mc == MATTER_RECEIVED) {
-        a.pair_count += 1u;
+        let at = pair_first_free(slot, a.gene_len);
+        if (at < a.gene_len) {
+            pair_set(slot, at);
+            a.pair_count += 1u;
+        }
     } else if (mc != BOND_NONE && mc != MATTER_LOCK && a.pair_count > 0u) {
-        a.pair_count -= 1u;
+        let at = pair_last_set(slot, a.gene_len);
+        if (at < a.gene_len) {
+            pair_unset(slot, at);
+            a.pair_count -= 1u;
+        }
     }
     // Fica limpo já aqui: um slot que morra e renasça a meio de um passo
     // não pode herdar a reserva do morto.
