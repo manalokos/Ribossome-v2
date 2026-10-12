@@ -111,6 +111,9 @@ fn sem_color(tint: vec3<f32>, lum: f32) -> vec3<f32> {
 // FLASH DAS PROTEASES: quem está a atacar fica com as proteases ligadas
 // amarelo-claras (só a cor, a forma é a do momento); a vítima fica vermelha.
 const BITE_ATTACK_COLOR: vec3<f32> = vec3<f32>(1.0, 0.95, 0.45);
+// Protease LÍTICA (as variantes de alcance: enzima largada na água, que mata
+// sem alimentar quem a larga). A de contacto fica a vermelho.
+const PROTEASE_LYTIC_COLOR: vec3<f32> = vec3<f32>(0.78, 0.16, 0.62);
 const BITE_VICTIM_COLOR: vec3<f32> = vec3<f32>(1.0, 0.12, 0.08);
 
 // Fios de RNA nas pontas (as zonas não traduzidas): bases desenhadas por
@@ -252,7 +255,8 @@ fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
         case ORGAN_CLOCK: { return vec3<f32>(0.85, 0.9, 1.0); }
         case ORGAN_RELAY: { return vec3<f32>(0.6, 0.9, 1.0); }
         case ORGAN_PHOTOSYSTEM: { return vec3<f32>(0.35, 0.95, 0.35); }
-        case ORGAN_PROTEASE: { return vec3<f32>(0.9, 0.2, 0.2); }
+        // (de contacto a vermelho; LÍTICA, a de alcance, a cor de vinho)
+        case ORGAN_PROTEASE: { return select(vec3<f32>(0.9, 0.2, 0.2), PROTEASE_LYTIC_COLOR, v0 >= 10.0); }
         case ORGAN_ANCHOR: { return select(vec3<f32>(0.25, 0.5, 1.0), vec3<f32>(0.15, 0.9, 0.8), v0 >= 0.0); }
         case ORGAN_BIAS, ORGAN_AGE_BIAS: { return select(vec3<f32>(1.0, 0.55, 0.15), vec3<f32>(0.35, 0.95, 0.35), v0 >= 0.5); }
         case ORGAN_CHEMO: { return vec3<f32>(0.9, 0.78, 0.15); }
@@ -668,6 +672,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
                 // na medida em que a protease está ligada (sempre, ou pelo
                 // sinal do seu canal); recolhidos ficam os dentes curtos.
                 let pv = organ_variants_view[ORGAN_PROTEASE * ORGAN_VARIANTS + min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u)];
+                if (pv.p0 >= 10.0) { col = PROTEASE_LYTIC_COLOR; }
                 var drive = 1.0;
                 if (pv.p2 >= 0.0) { drive = clamp(signals_view[base + k][u32(clamp(pv.p2, 0.0, 3.0))], 0.0, 1.0); }
                 // O mesmo limiar da simulacao (PROTEASE_MIN_DRIVE em contact.wgsl).
