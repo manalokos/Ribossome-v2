@@ -960,13 +960,14 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         stab = clamp(stab / f32(max(a.body_len, 1u)), 0.0, 1.0);
         heat_hazard = params.heat_kill * (wt - params.denature_temp) / 10.0 * (1.0 - stab);
     }
-    // A reserva de energia protege até death_energy_cap (0 = sem teto, v3).
-    // (÷ BODY_CAPACITY: a capacidade do corpo passou a metade quando voltou
-    // o órgão de armazenamento; sem isto a mesma criatura cheia ficava com
-    // metade da proteção e morria ao dobro do ritmo, e só quem tinha
-    // depósito durava. O teto death_energy_cap continua a limitar o que um
-    // depósito grande pode proteger.)
-    var e_eff = max(a.energy / BODY_CAPACITY, 0.01);
+    // ENERGIA POR PEÇA DE CORPO: o que conta para morrer (e para copiar, mais
+    // abaixo) é quão cheio está o corpo, a energia a dividir pelo que o
+    // próprio corpo consegue guardar (cresce com o número de resíduos). Um
+    // corpo pequeno cheio vale o mesmo que um grande cheio; meio vazio, o
+    // risco duplica. A energia dos DEPÓSITOS conta: um corpo com reservas
+    // passa de 1 e fica mais protegido, até death_energy_cap vezes a
+    // capacidade do corpo (0 = sem teto).
+    var e_eff = max(a.energy / max(body_capacity(slot, a.body_len), 1e-6), 0.01);
     if (params.death_energy_cap > 0.0) { e_eff = min(e_eff, params.death_energy_cap); }
     // RITMO DE VIDA: quem gasta devagar (dormência, bocas fechadas ou sem
     // boca, frio) também envelhece devagar; é o que deixa existir formas de
@@ -995,10 +996,11 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pair_floor = max(params.pairing_min_energy, 0.0) + params.pairing_cost;
     if (a.pair_count < a.gene_len && a.energy > pair_floor) {
         let rr = rng_f4(a.id, params.epoch, S_PAIR);
-        // (Quão cheio está o CORPO, sem contar os depósitos: com eles na
-        // conta, um depósito por encher fazia o agente copiar mais devagar do
-        // que se não o tivesse, e ninguém os queria.)
-        let fill = clamp(a.energy / max(body_capacity(slot, a.body_len), 1e-6), 0.0, 1.0);
+        // ENERGIA POR PEÇA DE CORPO, a mesma medida da morte: a energia a
+        // dividir pelo que o corpo guarda. Com reservas nos depósitos passa
+        // de 1 e a cópia anda mais depressa do que a de um corpo só cheio
+        // (a curva satura: no máximo 1 + K vezes).
+        let fill = max(a.energy / max(body_capacity(slot, a.body_len), 1e-6), 0.0);
         let half = max(params.pairing_energy_half, 0.0);
         // CÓPIA EM PARALELO: todas as posições do genoma emparelham ao mesmo
         // tempo, cada uma por conta própria e no sítio do corpo que lhe

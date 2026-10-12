@@ -623,7 +623,7 @@ impl Default for SimParams {
             heat_kill: 0.27,
             flow_coupling: 0.9,
             inertia: 0.0,
-            death_energy_cap: 1.0,
+            death_energy_cap: 3.0,
             chemo_yield: 0.9,
             redox_decay: 0.02,
             thermal_activation: 0.045,
