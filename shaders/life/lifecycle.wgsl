@@ -397,6 +397,28 @@ fn recharge_copy(slot: u32, cell: u32, pair_count: u32, gene_len: u32) -> bool {
     return done;
 }
 
+// Que parte da matéria digerida de uma presa vai para a cópia do predador (o
+// resto vai para a energia).
+const PREY_TO_COPY: f32 = 0.5;
+
+// Carrega um monómero GASTO da vizinhança (3 × 3 células) como o complemento
+// número `at` da cópia deste agente. Devolve true se o encontrou e prendeu.
+// (Sem saídas dentro do ciclo: é chamado a partir de agents_step.)
+fn charge_copy_near(slot: u32, cell: u32, at: u32) -> bool {
+    let comp = genome_get(slot, at) ^ 1u;
+    let cx = i32(cell % GRID_SIZE);
+    let cy = i32(cell / GRID_SIZE);
+    var got = false;
+    for (var t = 0u; t < 9u; t++) {
+        if (!got) {
+            let x = clamp(cx + i32(t % 3u) - 1, 0, i32(GRID_SIZE) - 1);
+            let y = clamp(cy + i32(t / 3u) - 1, 0, i32(GRID_SIZE) - 1);
+            got = chem_take_state_one((u32(y) * GRID_SIZE + u32(x)) * 4u + comp, true);
+        }
+    }
+    return got;
+}
+
 // Fração da UV que o corpo NÃO absorve (1 = tudo passa; RNA nu = 1): cai
 // com a fração de resíduos aromáticos, exp(−UV_SHIELD × fração).
 fn uv_exposed(slot: u32, n: u32) -> f32 {
@@ -460,48 +482,54 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // PRESA DIGERIDA: a energia da matéria de quem este agente matou no passo
     // anterior (ver prey_inbox). O que não cabe transborda: reativa gastos à
     // volta, um por cada food_power, como o excesso de qualquer refeição.
-    var prey = f32(atomicExchange(&prey_inbox[slot], 0u)) / BITE_SCALE;
+    let prey = f32(atomicExchange(&prey_inbox[slot], 0u)) / BITE_SCALE;
     if (prey > 0.0) {
-        // A PRESA VIRA CÓPIA: a matéria digerida serve primeiro para construir
-        // o filho. Com a energia de cada monómero digerido o predador carrega
-        // um monómero GASTO dos que estão à sua volta (os restos da presa
-        // ficaram lá), o que o genoma pede a seguir, e prende-o como
-        // complemento. Sem isto a caça só dava energia, e num mundo onde o
-        // que limita a reprodução é a matéria para a cópia, um predador de
-        // barriga cheia não tinha mais filhos do que os outros.
+        // A PRESA REPARTE-SE PELA ENERGIA E PELA CÓPIA (metade para cada,
+        // PREY_TO_COPY). A parte da cópia: com a energia de cada monómero
+        // digerido o predador carrega um monómero GASTO dos que tem à volta
+        // (os restos da presa ficaram lá), o que o genoma pede a seguir, e
+        // prende-o como complemento. O que uma das partes não conseguir usar
+        // (a cópia já está completa ou não há ali o monómero certo; o corpo
+        // já está cheio) passa para a outra; só o que sobrar das duas
+        // transborda e reativa gastos à volta. (Só com energia, num mundo onde
+        // o que limita a reprodução é a matéria para a cópia, um predador de
+        // barriga cheia não tinha mais filhos do que os outros.)
         let fp = max(params.food_power, 1e-3);
         let pc0 = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
-        let cx = i32(pc0 % GRID_SIZE);
-        let cy = i32(pc0 / GRID_SIZE);
-        for (var i = 0u; i < 48u; i++) {
-            if (prey >= fp && a.pair_count < a.gene_len) {
-                let comp = genome_get(slot, a.pair_count) ^ 1u;
-                var got = false;
-                for (var t = 0u; t < 9u; t++) {
-                    if (!got) {
-                        let x = clamp(cx + i32(t % 3u) - 1, 0, i32(GRID_SIZE) - 1);
-                        let y = clamp(cy + i32(t / 3u) - 1, 0, i32(GRID_SIZE) - 1);
-                        got = chem_take_state_one((u32(y) * GRID_SIZE + u32(x)) * 4u + comp, true);
-                    }
-                }
-                if (got) {
+        var build = prey * PREY_TO_COPY;
+        var fuel = prey - build;
+        // 1. cópia com a sua metade
+        for (var i = 0u; i < 32u; i++) {
+            if (build >= fp && a.pair_count < a.gene_len) {
+                if (charge_copy_near(slot, pc0, a.pair_count)) {
                     a.pair_count += 1u;
-                    prey -= fp;
+                    build -= fp;
                 } else {
-                    // (não há esse monómero aqui: o resto fica como energia)
-                    i = 48u;
+                    i = 32u;
                 }
             }
         }
-        a.energy += prey;
-        let over = (a.energy - cap) / max(params.food_power, 1e-3);
+        // 2. energia com a outra metade e com o que a cópia não usou
+        a.energy += fuel + build;
+        var over = a.energy - cap;
         if (over > 0.0) {
             a.energy = cap;
-            let pc = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
-            var left = min(u32(over), 24u);
+            // 3. o que não cabe volta a tentar a cópia...
+            for (var i = 0u; i < 32u; i++) {
+                if (over >= fp && a.pair_count < a.gene_len) {
+                    if (charge_copy_near(slot, pc0, a.pair_count)) {
+                        a.pair_count += 1u;
+                        over -= fp;
+                    } else {
+                        i = 32u;
+                    }
+                }
+            }
+            // ...e o resto transborda.
+            var left = min(u32(over / fp), 24u);
             for (var i = 0u; i < 24u; i++) {
                 if (left > 0u) {
-                    exude_one(pc, rng_f4(a.id, params.epoch, S_EAT + 300u + i));
+                    exude_one(pc0, rng_f4(a.id, params.epoch, S_EAT + 300u + i));
                     left -= 1u;
                 }
             }
