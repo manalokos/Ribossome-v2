@@ -457,6 +457,15 @@ gpu_struct! {
         /// isto: 1 = cresce tanto como o metabolismo; 0 = a temperatura não
         /// muda a taxa de mutação.
         pub heat_mutation: f32,
+        /// ESPAÇO PARA NASCER: um filho só nasce se à volta do progenitor
+        /// (3 × 3 células da grelha dos corpos, ~180 unidades de lado) houver
+        /// menos resíduos de agentes do que isto. Com tudo cheio a cópia
+        /// pronta fica à espera; quem abre espaço (porque morreu um vizinho,
+        /// ou porque o matou) é quem o ocupa. 0 = sem limite.
+        pub birth_crowding: f32,
+        pub _pad_b1: u32,
+        pub _pad_b2: u32,
+        pub _pad_b3: u32,
     }
 }
 
@@ -655,6 +664,10 @@ impl Default for SimParams {
             pairing_min_energy: 0.0,
             uv_mutation: 0.0,
             heat_mutation: 0.0,
+            birth_crowding: 80.0,
+            _pad_b1: 0,
+            _pad_b2: 0,
+            _pad_b3: 0,
         }
     }
 }

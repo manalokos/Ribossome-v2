@@ -1207,6 +1207,8 @@ fn tab_cycle(ui: &mut egui::Ui, b: &Busca, st: &mut UiState, world: &mut World) 
         c.slider("pairing (bases/step)", slider(&mut p.pairing_rate, 0.0..=8.0));
         c.slider("pairing slows with low energy (K)", slider(&mut p.pairing_energy_half, 0.0..=2.0))
             .tip("copying is a reaction that spends energy and saturates with it: bases per step × f·(1 + K)/(f + K), with f = how full the body is (energy / capacity). A full body copies at full speed; at f = K, a little over half; near empty, almost nothing. A poor agent reaches division later and fuller instead of splitting into two dying halves. 0 = speed does not depend on energy (the old rule)");
+        c.slider("room to be born (residues around)", slider(&mut p.birth_crowding, 0.0..=400.0))
+            .tip("a child is only born if there are fewer agent residues than this around the parent (a square of about 180 world units, not counting the parent's own body). When the neighbourhood is full the finished copy waits; whoever opens room, because a neighbour died or because it killed one, is the one who fills it. A tightly packed layer of bodies is about 350; 80 = roughly a quarter of that. 0 = no limit (then only the maximum number of agents stops the population)");
         c.slider("minimum energy to pair", slider(&mut p.pairing_min_energy, 0.0..=5.0))
             .tip("below this energy (plus the cost of one base) copying stops altogether. 0 = no floor, only the slowdown above; 1 = the old rule");
         let mut salvage = p.salvage > 0.0;

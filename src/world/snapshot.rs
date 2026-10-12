@@ -369,8 +369,16 @@ impl World {
     /// Devolve o estado da interface gravado e avisos (para o log).
     pub fn load_scene(&mut self, gpu: &Gpu, scene: &Scene) -> Result<(Value, Vec<String>), String> {
         let h = &scene.header;
-        if h["cfg"] != cfg_json(&self.cfg) {
-            return Err(format!("the scene is from another world size ({} ≠ {})", h["cfg"], cfg_json(&self.cfg)));
+        // (O número máximo de agentes pode ser MENOR na cena: os vivos ficam
+        // nos mesmos lugares e os lugares a mais ficam livres. Assim uma cena
+        // gravada com um teto mais baixo abre num mundo com o teto mais alto.)
+        let mut scene_cfg = h["cfg"].clone();
+        let mine = cfg_json(&self.cfg);
+        if scene_cfg["max_agents"].as_u64().is_some_and(|m| m <= self.cfg.max_agents as u64) {
+            scene_cfg["max_agents"] = mine["max_agents"].clone();
+        }
+        if scene_cfg != mine {
+            return Err(format!("the scene is from another world size ({} ≠ {})", h["cfg"], mine));
         }
         let mut notes = Vec::new();
         // Verifica os blocos antes de mudar o que quer que seja.

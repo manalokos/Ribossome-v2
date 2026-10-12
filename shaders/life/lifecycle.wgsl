@@ -954,6 +954,23 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (slot >= params.max_agents) { return; }
     var a = agents[slot];
     if (a.alive == 0u || a.gene_len == 0u || a.pair_count < a.gene_len) { return; }
+    // ESPAÇO PARA NASCER (ver birth_crowding): com a vizinhança cheia de
+    // corpos a cópia fica pronta à espera, sem se perder nada.
+    if (params.birth_crowding > 0.0) {
+        let pc = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
+        let bx = i32((pc % GRID_SIZE) / BODY_DIV);
+        let by = i32((pc / GRID_SIZE) / BODY_DIV);
+        var crowd = 0u;
+        for (var dy = -1; dy <= 1; dy++) {
+            for (var dx = -1; dx <= 1; dx++) {
+                let x = clamp(bx + dx, 0, i32(BODY_SIZE) - 1);
+                let y = clamp(by + dy, 0, i32(BODY_SIZE) - 1);
+                crowd += atomicLoad(&body_grid[2u * (u32(y) * BODY_SIZE + u32(x))]);
+            }
+        }
+        // (Os resíduos do próprio não contam: um corpo grande sozinho não se trava a si.)
+        if (f32(crowd) - f32(max(a.body_len, 1u)) >= params.birth_crowding) { return; }
+    }
 
     let L = a.gene_len;
     let cell = chem_open_cell(world_to_cell(vec2<f32>(a.pos_x, a.pos_y)));

@@ -228,8 +228,11 @@ fn world_config_from_env() -> WorldConfig {
     if let Some(g) = chosen.and_then(|v| v.trim().parse::<u32>().ok()).filter(|g| g.is_power_of_two() && (64..=4096).contains(g) && *g != WorldConfig::DEFAULT.grid_size) {
         cfg.grid_size = g;
         cfg.fluid_size = (g / 2).max(16);
-        // A capacidade de agentes escala com a área (400 000 a 2048²).
-        cfg.max_agents = ((400_000u64 * g as u64 * g as u64) / (2048 * 2048)).max(1024) as u32;
+        // A capacidade de agentes escala com a área, até 400 000 (que é o
+        // que o mundo de 2048² tem): 1024² -> 400 000, 512² -> 100 000. (Era
+        // um quarto disto: um mundo de 1024² enchia aos 100 000 e passava a
+        // ser o número de lugares, e não a comida, a limitar a população.)
+        cfg.max_agents = ((1_600_000u64 * g as u64 * g as u64) / (2048 * 2048)).clamp(1024, 400_000) as u32;
     }
     if let Some(f) = std::env::var("RIBO_FLUID").ok().and_then(|v| v.parse::<u32>().ok()) {
         cfg.fluid_size = f;
