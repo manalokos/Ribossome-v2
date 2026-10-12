@@ -166,7 +166,7 @@ fn reach_falloff(dist: f32, reach: f32) -> f32 {
 // num volume grande de agua e caro; uns picos compridos e fracos a espera de
 // presa custam pouco (como os de um heliozoario), e as de contacto nada. O
 // resto do custo dos espigoes e peso e arrasto (tabela).
-const PROTEASE_ACTIVE_COST: f32 = 1.0;
+const PROTEASE_ACTIVE_COST: f32 = 0.25;
 const PROTEASE_REACH_REF: f32 = 40.0;
 fn protease_active(slot: u32, n: u32) -> f32 {
     var c = 0.0;
