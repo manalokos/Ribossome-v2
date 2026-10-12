@@ -120,7 +120,8 @@ fn harvest_share(slot: u32, n: u32) -> f32 {
         if (t == ORGAN_MOUTH) { kinds.x = 1.0; }
         if (t == ORGAN_PHOTOSYSTEM) { kinds.y = 1.0; }
         if (t == ORGAN_CHEMO) { kinds.z = 1.0; }
-        if (t == ORGAN_PROTEASE) { kinds.w = 1.0; }
+        // (Só a protease de contacto capta; a lítica deixa tudo no meio.)
+        if (t == ORGAN_PROTEASE && organ_var(organ_get(slot, k)).p0 < PROTEASE_MID_FROM) { kinds.w = 1.0; }
     }
     return 1.0 / max(kinds.x + kinds.y + kinds.z + kinds.w, 1.0);
 }

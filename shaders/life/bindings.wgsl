@@ -100,6 +100,9 @@ const GHOST_VIEW_MAX: f32 = 12000.0;
 // placa não mudar o resultado.
 @group(3) @binding(36) var<storage, read_write> prey_killer: array<atomic<u32>>;
 @group(3) @binding(37) var<storage, read_write> prey_inbox: array<atomic<u32>>;
+// A parte das mordidas a cada vítima que NINGUÉM recebe diretamente (as das
+// proteases líticas, × BITE_SCALE): fica toda no meio, à volta da vítima.
+@group(3) @binding(38) var<storage, read_write> bitten_free: array<atomic<u32>>;
 
 const LC_FREE_TOP: u32 = 0u;
 const LC_NEXT_ID: u32 = 1u;

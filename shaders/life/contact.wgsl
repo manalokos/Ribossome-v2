@@ -119,6 +119,15 @@ fn protease_drive(slot: u32, k: u32, v: OrganVariant) -> f32 {
     return select(0.0, drive, drive >= PROTEASE_MIN_DRIVE);
 }
 
+// DOIS MODOS DE CAÇAR, pela variante:
+//  - de CONTACTO (alcance 0): a protease está encostada à presa e o que
+//    digere entra no corpo do atacante (a energia tirada, × protease_direct,
+//    e a matéria da presa quando ela morre);
+//  - LÍTICA (as de alcance): é enzima largada na água. Desfaz a presa cá
+//    fora e o atacante não recebe nada diretamente: a energia e a matéria da
+//    presa ficam no meio, como monómeros ativados, para quem os comer (ele,
+//    se tiver boca, os parentes e os oportunistas). Não é uma maneira de
+//    captar: não entra no orçamento de captação (ver harvest_share).
 // ALCANCE: a variante (p0) diz a que distância ALÉM do contacto a protease
 // chega (0 = só a tocar; as de alcance são proteases segregadas para a água
 // à volta). Três escalões: contacto, médio e longo, com a força ativa de
@@ -267,7 +276,8 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
             let o = organ_get(slot, k);
             if (organ_type(o) == ORGAN_PROTEASE && np < PROTEASE_SLOTS) {
                 let v = organ_var(o);
-                let f = family_weights(protease_family(slot, k, a.body_len)) * max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v) * harvest;
+                // (Só as de contacto repartem o orçamento de captação.)
+                let f = family_weights(protease_family(slot, k, a.body_len)) * max(v.p1, 0.0) * organ_gain(o) * protease_drive(slot, k, v) * select(harvest, 1.0, v.p0 >= PROTEASE_MID_FROM);
                 if (f.x + f.y + f.z + f.w > 0.0) {
                     ppos[np] = residue_world(slot, a, k);
                     pwt[np] = f;
@@ -312,6 +322,8 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     // lhe toca (PROTEASE_TOUCH); as de alcance também até essa
                     // distância para lá do toque, mais fracas (reach_falloff).
                     var sites = vec4<f32>(0.0);
+                    // (o mesmo, só das proteases líticas)
+                    var lytic = vec4<f32>(0.0);
                     if (armed && b.energy > 0.0) {
                         let nb = max(b.body_len, 1u);
                         for (var i = 0u; i < np; i++) {
@@ -323,7 +335,11 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                                 d2 = min(d2, dot(dq, dq));
                             }
                             let gap = max(sqrt(d2) - PROTEASE_TOUCH, 0.0);
-                            if (gap <= preach[i]) { sites += pwt[i] * reach_falloff(gap, preach[i]); }
+                            if (gap <= preach[i]) {
+                                let hit = pwt[i] * reach_falloff(gap, preach[i]);
+                                sites += hit;
+                                if (preach[i] > 0.0) { lytic += hit; }
+                            }
                         }
                     }
                     if (sites.x + sites.y + sites.z + sites.w > 0.0) {
@@ -331,9 +347,15 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * unpack_proline(contact_disp[e].w);
                         let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist, b.energy);
                         if (bite > 0.0) {
+                            // A parte lítica da mordida não é de ninguém: fica
+                            // no meio (bitten_free). Só a de contacto alimenta
+                            // o atacante e lhe dá direito ao corpo da presa.
+                            let targets = unpack_targets(contact_disp[e].w);
+                            let part = clamp(dot(lytic, targets) / max(dot(sites, targets), 1e-9), 0.0, 1.0);
                             atomicAdd(&bitten[e], u32(bite * BITE_SCALE));
-                            atomicMin(&prey_killer[e], slot);
-                            gained += bite;
+                            atomicAdd(&bitten_free[e], u32(bite * part * BITE_SCALE));
+                            if (part < 1.0) { atomicMin(&prey_killer[e], slot); }
+                            gained += bite * (1.0 - part);
                         }
                     }
                 }
@@ -403,15 +425,20 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     // O que lhe tiraram: sai da energia; a parte que não foi direta para os
     // atacantes reativa gastos da célula onde está (× lysis_yield, um por
     // cada food_power, arredondamento ao acaso). Sem gastos ali, perde-se.
-    let lost = min(f32(atomicExchange(&bitten[slot], 0u)) / BITE_SCALE, max(a.energy, 0.0));
+    let bit_all = f32(atomicExchange(&bitten[slot], 0u)) / BITE_SCALE;
+    let bit_free = f32(atomicExchange(&bitten_free[slot], 0u)) / BITE_SCALE;
+    let lost = min(bit_all, max(a.energy, 0.0));
     if (lost > 0.0) {
         let q = rng_f4(a.id, params.epoch, S_DIGEST);
-        let want = lost * (1.0 - direct) * clamp(params.lysis_yield, 0.0, 1.0) / max(params.food_power, 1e-3);
+        // (As mordidas líticas ficam inteiras no meio; das outras, só a parte
+        // que não foi direta para os atacantes.)
+        let free = lost * clamp(bit_free / max(bit_all, 1e-9), 0.0, 1.0);
+        let want = (free + (lost - free) * (1.0 - direct)) * clamp(params.lysis_yield, 0.0, 1.0) / max(params.food_power, 1e-3);
         var count = u32(want);
         if (q.x < fract(want)) { count += 1u; }
         let cell = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
         let ch0 = min(u32(q.y * 4.0), 3u);
-        for (var i = 0u; i < min(count, 8u); i++) {
+        for (var i = 0u; i < min(count, 24u); i++) {
             for (var t = 0u; t < 4u; t++) {
                 if (chem_activate_one(cell * 4u + (ch0 + i + t) % 4u)) { break; }
             }
