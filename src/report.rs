@@ -110,16 +110,11 @@ fn protease_force(body: &[Residue], w: &World) -> [f32; 4] {
 fn defence(body: &[Residue], w: &World) -> ([f32; 4], f32) {
     let n = body.len().max(1) as f32;
     // O quarto "alvo" são todos os resíduos (o que a generalista corta).
-    let mut t = [0.0, 0.0, 0.0, 1.0];
+    // Sem proteção, qualquer protease corta o corpo todo (como em contact.wgsl).
+    let mut t = [1.0, 1.0, 1.0, 1.0];
     let mut pro = 0.0;
     let mut own = [0.0f32; 4];
     for (k, r) in body.iter().enumerate() {
-        let m = w.amino.get(r.aa as usize).map_or(0, |a| (a.protease_alvo.max(0.0) + 0.5) as u32);
-        for (f, v) in t.iter_mut().take(3).enumerate() {
-            if m & (1 << f) != 0 {
-                *v += 1.0 / n;
-            }
-        }
         if r.aa == PROLINE {
             pro += 1.0 / n;
         }
@@ -138,11 +133,11 @@ fn defence(body: &[Residue], w: &World) -> ([f32; 4], f32) {
 }
 
 /// Energia que o atacante tira à vítima por passo de contacto (as constantes
-/// de contact.wgsl: PRED_DRAIN 0,2 × 10 × (1 − 0,9·prolina)).
+/// de contact.wgsl: PRED_DRAIN 0,2 × (1 − 0,9·prolina)).
 fn drain(att: &[Residue], vic: &[Residue], w: &World) -> f32 {
     let f = protease_force(att, w);
     let (t, pro) = defence(vic, w);
-    0.2 * w.params.protease_power * (f[0] * t[0] + f[1] * t[1] + f[2] * t[2] + f[3] * t[3]) * 10.0 * (1.0 - 0.9 * pro)
+    0.2 * w.params.protease_power * (f[0] * t[0] + f[1] * t[1] + f[2] * t[2] + f[3] * t[3]) * (1.0 - 0.9 * pro)
 }
 
 /// Retrato de um agente sozinho, enquadrado pelo corpo.

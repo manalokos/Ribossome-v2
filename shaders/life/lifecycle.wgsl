@@ -127,6 +127,7 @@ fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, ge
     // (Um slot reutilizado não herda a presa por receber de quem lá esteve.)
     atomicStore(&prey_inbox[slot], 0u);
     atomicStore(&bitten_free[slot], 0u);
+    truce_until[slot] = 0u;
     var a: Agent;
     a.pos_x = pos.x;
     a.pos_y = pos.y;
@@ -1117,6 +1118,9 @@ fn agents_birth(@builtin(global_invocation_id) gid: vec3<u32>) {
     // capacidade do filho. O filho nasce primeiro com 0 para se saber a sua.
     // Orientação ao acaso.
     new_agent(child, cp, mr.w * 6.2831853, 0.0, n, a.generation + 1u, a.id);
+    // Trégua: as proteases dos dois ficam fechadas uns passos (ver PROTEASE_TRUCE).
+    truce_until[slot] = params.epoch + PROTEASE_TRUCE;
+    truce_until[child] = params.epoch + PROTEASE_TRUCE;
     var born = agents[child];
     let cap_child = energy_capacity(child, born);
     let cap_parent = energy_capacity(slot, a);

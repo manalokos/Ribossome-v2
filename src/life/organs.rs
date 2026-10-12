@@ -335,7 +335,7 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             }
         ),
         11 => format!(
-            "protease [toothed disc; spikes if it has reach]: takes energy from {}, strength ×{:.2}, {}. Cuts according to the next amino acid (D/E -> lysine and arginine; K/R -> aspartate and asparagine; F/L/W/Y/I/V -> aromatics and leucine; other -> all three at one third). It spends energy while it is on; whoever has a protease of one family resists that family; proline protects",
+            "protease [toothed disc; spikes if it has reach]: takes energy from {}, strength ×{:.2}, {}. Cuts any body that has no protection, at full strength. The next amino acid in the chain gives it a family, which only decides which inhibitor blocks it (D/E -> family 1; K/R -> family 2; F/L/W/Y/I/V -> family 3; other -> generalist: one third of the strength, but no inhibitor stops it). It spends energy while it is on; whoever has a protease of one family resists that family; proline protects",
             match v("alcance") {
                 r if r < 10.0 => "whoever touches it (contact: what it digests feeds this body, and it eats the prey it kills)".to_string(),
                 r => format!("whoever is closer than {r:.0} units (lytic: enzyme released into the water; this body gets nothing directly, the prey's energy and matter stay around it as food for whoever eats them)"),

@@ -202,6 +202,13 @@ fn energy_tone(a: Agent) -> f32 {
 // (species_hue em drawlist.wgsl; o mesmo para as duas formas da linhagem e
 // quase igual entre parentes próximos). Aqui passa a uma cor suave.
 @group(0) @binding(18) var<storage, read> tint_view: array<f32>;
+// Trégua da reprodução (truce_until em bindings.wgsl): até esse epoch as
+// proteases do agente estão fechadas, e desenham-se fechadas.
+@group(0) @binding(19) var<storage, read> truce_view: array<u32>;
+fn in_truce_v(slot: u32) -> bool {
+    let t = truce_view[slot];
+    return t > view.epoch && t - view.epoch <= 15u;
+}
 fn hue_color(h: f32) -> vec3<f32> {
     let k = vec3<f32>(0.0, 2.0943951, 4.1887902);
     return vec3<f32>(0.70) + 0.26 * cos(vec3<f32>(h) - k);
@@ -676,7 +683,7 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
                 var drive = 1.0;
                 if (pv.p2 >= 0.0) { drive = clamp(signals_view[base + k][u32(clamp(pv.p2, 0.0, 3.0))], 0.0, 1.0); }
                 // O mesmo limiar da simulacao (PROTEASE_MIN_DRIVE em contact.wgsl).
-                drive = select(0.0, drive, drive >= 0.25);
+                drive = select(0.0, drive, drive >= 0.25 && !in_truce_v(slot));
                 spike = max(pv.p0, 0.0) * drive;
                 // Para o desenho: numero de espigoes pela FORCA (variante x
                 // intensidade) na parte inteira, abertura na fracionaria.

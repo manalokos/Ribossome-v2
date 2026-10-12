@@ -47,29 +47,31 @@ fn contact_insert(@builtin(global_invocation_id) gid: vec3<u32>) {
     atomicStore(&prey_killer[slot], NO_ENTRY);
 }
 
-// PROTEASE (predação química): um órgão. Cada variante tem uma FAMÍLIA, que
-// decide o que corta na vítima:
-//   família 1 (tipo tripsina):            lisina, arginina
-//   família 2 (tipo caspase / legumaína): aspartato, asparagina
-//   família 3 (tipo pepsina):             fenilalanina, tirosina, triptofano, leucina
-// e pode estar sempre ativa ou só com um sinal interno (γ ou δ) positivo: a
-// criatura pode evoluir "abrir a boca" só quando interessa.
-// (as classes vêm da tabela dos aminoácidos). Em cada passo de contacto, as
-// proteases ativas de um atacante TIRAM à vítima uma quantidade certa de
-// energia: PRED_DRAIN × força das proteases × fração de resíduos da vítima
-// que a família corta × (1 − defesa da prolina) × params.protease_power. É
-// determinista e acumula: contactos curtos repetidos somam. Quando a energia
-// chega a zero a vítima morre (os complementos que tinha capturado saem
-// ativados, como em qualquer morte).
-// A regra é cega (nenhum genoma é comparado): quem não tem os
-// aminoácidos-alvo é imune, e os parentes, com a mesma composição, poupam-se
-// uns aos outros por isso. Não há autodigestão: uma protease só corta OUTROS.
+// PROTEASE (predação química): um órgão. Em cada passo de contacto, as
+// proteases abertas de um atacante TIRAM à vítima uma quantidade certa de
+// energia: PRED_DRAIN × força das proteases × o que a vítima tem EXPOSTO
+// × (1 − defesa da prolina) × params.protease_power. É determinista e
+// acumula. Quando a energia chega a zero a vítima morre.
+// QUEM É VULNERÁVEL: toda a gente. Um corpo sem nenhum mecanismo de proteção
+// é cortado por QUALQUER protease, com a força inteira. (Antes cada família
+// só cortava certos aminoácidos, e um corpo pequeno sem esses aminoácidos era
+// imune por composição: o replicador mínimo escapava a tudo.) As defesas são
+// duas: o órgão INIBIDOR, que bloqueia uma FAMÍLIA de proteases, e a prolina.
+// A FAMÍLIA de uma protease (decidida pelo aminoácido seguinte na cadeia, o
+// bolso) já não diz o que ela corta: diz que inibidor a trava.
+//   família 1: vizinho ácido (D, E);   família 2: vizinho básico (K, R);
+//   família 3: vizinho hidrofóbico (F, L, W, Y, I, V);
+//   sem um vizinho desses é GENERALISTA: um terço da força, mas nenhum
+//   inibidor a trava.
+// A regra é cega (nenhum genoma é comparado) e não há autodigestão: uma
+// protease só corta OUTROS; os parentes só se poupam se tiverem o inibidor.
 // Para onde vai a energia tirada: params.protease_direct vai direta para o
 // atacante; do resto, params.lysis_yield reativa monómeros gastos na célula
 // da vítima (um por cada food_power), que qualquer boca pode comer.
 const PRED_DRAIN: f32 = 0.2;
-// Força 1 contra uma vítima com 10% de resíduos-alvo = PRED_DRAIN por passo.
-const PRED_SITE_SCALE: f32 = 10.0;
+// Força 1 contra uma vítima sem proteção = PRED_DRAIN por passo. (Era 10,
+// quando só contava a fração de resíduos-alvo, tipicamente uns 10%.)
+const PRED_SITE_SCALE: f32 = 1.0;
 const PRED_PROLINE_DEFENSE: f32 = 0.9;
 const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 10000.0;
@@ -113,7 +115,21 @@ fn family_weights(f: u32) -> vec4<f32> {
 // zimogenio: a enzima so e ativada a partir de um certo estimulo.) O desenho
 // usa o mesmo limiar (agents_view.wgsl).
 const PROTEASE_MIN_DRIVE: f32 = 0.25;
+// TRÉGUA DA REPRODUÇÃO: quando um agente dá à luz, as proteases dele e as do
+// filho ficam fechadas PROTEASE_TRUCE passos. O filho nasce encostado ao
+// progenitor e é a outra forma da linhagem: sem isto, o progenitor com
+// protease comia o filho ao nascer (ou o filho o progenitor), e uma linhagem
+// de predadores desfazia-se a cada geração. É o tempo de os dois se
+// afastarem. (Como as proteases reais, que se fabricam inativas.)
+const PROTEASE_TRUCE: u32 = 15u;
+fn in_truce(slot: u32) -> bool {
+    let t = truce_until[slot];
+    // (Um valor muito à frente é lixo de outra corrida: não conta.)
+    return t > params.epoch && t - params.epoch <= PROTEASE_TRUCE;
+}
+
 fn protease_drive(slot: u32, k: u32, v: OrganVariant) -> f32 {
+    if (in_truce(slot)) { return 0.0; }
     var drive = 1.0;
     if (v.p2 >= 0.0) { drive = clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p2, 0.0, 3.0))], 0.0, 1.0); }
     return select(0.0, drive, drive >= PROTEASE_MIN_DRIVE);
@@ -202,19 +218,6 @@ fn protease_exposed(slot: u32, n: u32) -> vec4<f32> {
     return vec4<f32>(1.0) - PROTEASE_IMMUNITY * own;
 }
 
-// Fração dos resíduos do corpo que cada família corta.
-fn protease_targets(slot: u32, n: u32) -> vec3<f32> {
-    var t = vec3<f32>(0.0);
-    if (n == 0u) { return t; }
-    for (var k = 0u; k < n; k++) {
-        let m = u32(max(aa_props[body_get(slot, k)].protease_target, 0.0) + 0.5);
-        if ((m & 1u) != 0u) { t.x += 1.0; }
-        if ((m & 2u) != 0u) { t.y += 1.0; }
-        if ((m & 4u) != 0u) { t.z += 1.0; }
-    }
-    return t / f32(n);
-}
-
 // DEFESA de um corpo, num só número (cabe exato num f32): alvo exposto das
 // famílias 1, 2 e 3 e fração de prolina, cada um 0..1 em 5 bits, e no bit 20
 // se tem uma protease generalista (fica imune às generalistas dos outros).
@@ -223,7 +226,8 @@ fn pack_defence(slot: u32, n: u32) -> f32 {
     // tréguas. Um filho (a outra forma da linhagem) só está a salvo das
     // proteases do pai e dos parentes se o seu corpo também tiver o inibidor.
     let ex = protease_exposed(slot, n);
-    let t = protease_targets(slot, n) * ex.xyz;
+    // (O que fica exposto a cada família: tudo, menos o que o inibidor dela bloqueia.)
+    let t = ex.xyz;
     let q = vec4<u32>(round(clamp(vec4<f32>(t, proline_fraction(slot, n)), vec4<f32>(0.0), vec4<f32>(1.0)) * 31.0));
     // (A imunidade às generalistas em 4 bits, proporcional como as outras:
     // num só bit, o inibidor mais fraco dava imunidade total.)

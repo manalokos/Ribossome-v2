@@ -253,6 +253,9 @@ pub struct World {
     pub ghosts_buf: wgpu::Buffer,
     /// Tom da espécie por agente (só para o desenho).
     pub tint_buf: wgpu::Buffer,
+    /// Epoch até ao qual as proteases de cada agente estão em trégua (para a
+    /// vista as desenhar fechadas).
+    pub truce_buf: wgpu::Buffer,
     /// Sementes da física ao acaso já aplicadas às tabelas da placa
     /// (condução, ângulos, resposta): ver `sync_scramble`.
     pub applied_scramble: [u32; 4],
@@ -541,6 +544,7 @@ impl World {
         let prey_killer_buf = storage_buffer(device, "prey killer", max_agents * 4);
         let prey_inbox_buf = storage_buffer(device, "prey inbox", max_agents * 4);
         let bitten_free_buf = storage_buffer(device, "bitten free", max_agents * 4);
+        let truce_buf = storage_buffer(device, "protease truce", max_agents * 4);
         let ghosts_buf = storage_buffer(device, "ghosts", (GHOST_HEAD + GHOST_MAX * GHOST_WORDS) * 4);
         gpu.queue.write_buffer(&life_counters_buf, 0, bytemuck::cast_slice(&[cfg.max_agents, 0, 0, 0, 0, 0, 0, 0u32]));
         let spawn_buf =
@@ -573,7 +577,7 @@ impl World {
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
         let life_entries: Vec<_> =
-            (0..39).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
+            (0..40).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -736,6 +740,7 @@ impl World {
                 &prey_killer_buf,
                 &prey_inbox_buf,
                 &bitten_free_buf,
+                &truce_buf,
             ],
         );
 
@@ -873,6 +878,7 @@ impl World {
             life_counters_buf,
             ghosts_buf,
             tint_buf,
+            truce_buf,
             applied_scramble: [0; 4],
             free_buf,
             spawn_buf,
