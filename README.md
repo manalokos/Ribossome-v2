@@ -40,9 +40,9 @@ folds according to the angles of each amino acid.
 
 - **Organs.** Certain pairs of amino acids in a row (promoter + modifier,
   plus an intensity codon) make an organ instead of two residues: mouth,
-  muscle, sensors (food, light, energy, other bodies; all-round or
+  sensors (food, light, energy, other bodies, predators; all-round or
   one-sided), clock, relay, photosystem, chemosynthesis, protease, anchor,
-  holdfast, storage, dormancy, proofreading, chiral, bias. The tables live in
+  holdfast, storage, float, inhibitor, dormancy, proofreading, chiral, bias. The tables live in
   `assets/` and can be edited while the simulation runs.
 - **Signals.** Four internal channels travel along the chain. Two (α, β)
   bend the joints; two (γ, δ) switch organs on and off.
