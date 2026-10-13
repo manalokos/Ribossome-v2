@@ -154,31 +154,18 @@ fn body_absorption(slot: u32, n: u32) -> f32 {
 }
 
 // Desvio da junta k pelos sinais (rad). As juntas de aminoácido respondem,
-// cada uma com a sua sensibilidade; o órgão "músculo" amplifica a resposta
-// local; os outros órgãos não respondem (sensibilidade 0 na tabela).
-const MUSCLE_REACH: f32 = 2.5;
+// cada uma com a sua sensibilidade; os órgãos não respondem (sensibilidade 0
+// na tabela). (Havia um órgão "músculo" que amplificava a resposta local;
+// saiu: todos os aminoácidos já são músculos.)
 fn signal_deflection(slot: u32, k: u32) -> f32 {
     let aa = body_get(slot, k);
     let s = signals[slot * MAX_BODY + k];
     let o = organ_get(slot, k);
-    // Músculo: amplifica o canal escolhido pela variante (0 α, 1 β, 2 ambos).
-    var amp_a = 1.0;
-    var amp_b = 1.0;
-    if (organ_type(o) == ORGAN_MUSCLE) {
-        let mv = organ_var(o);
-        let amp = mv.p0 * organ_gain(o);
-        if (mv.p1 < 0.5 || mv.p1 > 1.5) { amp_a = amp; }
-        if (mv.p1 > 0.5) { amp_b = amp; }
-    }
     let pr = aa_props[aa];
     var lim = max(pr.max_bend, 1e-3);
     // 4 canais: α e β dobram (e os músculos amplificam-nos); γ e δ dobram só
     // pela sensibilidade do aminoácido (modos 0 e 3).
     var sens = vec4<f32>(pr.sens_alpha, pr.sens_beta, pr.sens_gamma, pr.sens_delta);
-    // O MÚSCULO dobra a junta para lá do que o aminoácido sozinho consegue
-    // (MUSCLE_REACH vezes a dobra máxima). É o que ele tem que mais nenhuma
-    // junta tem: amplificar o sinal, qualquer aminoácido sensível faz de graça.
-    if (organ_type(o) == ORGAN_MUSCLE) { lim *= MUSCLE_REACH; }
     // Modos 1 e 2: resposta igual em todas as juntas (α para um lado, β para
     // o outro; γ e δ são mensageiros internos, não dobram: só agem depois de
     // um relé os passar para α ou β). Modo 3: a de cada aminoácido.
@@ -195,7 +182,7 @@ fn signal_deflection(slot: u32, k: u32) -> f32 {
         if (op.max_bend < 1e8) { lim = max(op.max_bend, 1e-3); }
         if (op.sens_alpha < 1e8) { sens = vec4<f32>(op.sens_alpha, op.sens_beta, op.sens_gamma, op.sens_delta); }
     }
-    return lim * tanh(SIGNAL_GAIN * (s.x * sens.x * amp_a + s.y * sens.y * amp_b + s.z * sens.z + s.w * sens.w) / lim);
+    return lim * tanh(SIGNAL_GAIN * (s.x * sens.x + s.y * sens.y + s.z * sens.z + s.w * sens.w) / lim);
 }
 
 // BOLSO DE ESPECIFICIDADE: o aminoácido vizinho de um sensor de corpos ou
@@ -561,6 +548,19 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 } else {
                     sensed = sense_sample(here, perp, what, dir, a.id, k, sensor_affinity(slot, k, n));
                 }
+            }
+            case ORGAN_PREDATOR_SENSOR: {
+                // SENSOR DE PREDADORES: o cheiro das proteases ABERTAS dos
+                // outros no disco à volta (sem as do próprio corpo), com a
+                // mesma saturação dos sensores de corpos. Variante p4 = 1:
+                // lê só um lado da cadeia (pela paridade da intensidade,
+                // como os sensores de um lado; troca depois de um quiral).
+                let here = residue_world(slot, a, k);
+                let dir = organ_var(o).p4 >= 0.5;
+                var perp = chain_normal(slot, a, k);
+                if (dir) { perp *= chir * select(1.0, -1.0, ((o >> 8u) & 1u) == 1u); }
+                let raw = sense_disc(here, perp, 3u, dir, FAM_PROTEASE) - own_body_in_disc(slot, a, here, perp, dir, FAM_PROTEASE);
+                sensed = raw / (abs(raw) + sense_k(3u));
             }
             case ORGAN_ENERGY_SENSOR: {
                 sensed = clamp(a.energy / max(cap, 1e-3), 0.0, 1.0) * 2.0;

@@ -123,7 +123,7 @@ fn tools() -> Value {
                 "span": { "type": "number", "description": "largura do enquadramento em células do ambiente (ex.: 40 para ver monómeros de perto)" },
                 "coc": { "type": "number", "description": "círculo de confusão dos monómeros em células (por omissão o do ecrã; 0 = quadrados)" },
                 "brightness": { "type": "number", "description": "brilho dos monómeros (por omissão 0.5)" },
-                "mark_organ": { "type": "integer", "description": "marca com uma bola ciano os agentes com este tipo de órgão (0 boca, 1 músculo, 2 sensor de comida, 3 sensor físico, 4 sensor de energia, 5 relógio, 6 relé, 7 armazenamento, 8 sensor de comida direcional, 9 sensor físico direcional, 10 fotossistema, 11 protease, 12 âncora, 13 bias, 14 quimiossíntese)" }
+                "mark_organ": { "type": "integer", "description": "marca com uma bola ciano os agentes com este tipo de órgão (0 boca, 1 sensor de predadores, 2 sensor de comida, 3 sensor físico, 4 sensor de energia, 5 relógio, 6 relé, 7 armazenamento, 8 sensor de comida direcional, 9 sensor físico direcional, 10 fotossistema, 11 protease, 12 âncora, 13 bias, 14 quimiossíntese)" }
             }), &[]),
         },
         {

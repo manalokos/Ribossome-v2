@@ -70,7 +70,7 @@ pub enum Organ {
 /// aminoácido); o "músculo" é um amplificador dessa resposta local.
 pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "boca",
-    "músculo (amplificador)",
+    "sensor de predadores",
     "sensor de comida",
     "sensor de luz",
     "sensor de energia",
@@ -98,7 +98,7 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
 /// estatísticas ("% com <nome>"): não trocar um pelo outro.
 pub const ORGAN_NAMES_EN: [&str; ORGAN_TYPES] = [
     "mouth",
-    "muscle (amplifier)",
+    "predator sensor",
     "food sensor",
     "light sensor",
     "energy sensor",
@@ -122,7 +122,7 @@ pub const ORGAN_NAMES_EN: [&str; ORGAN_TYPES] = [
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'μ', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q', '~', 'ι'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'ω', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q', '~', 'ι'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -146,6 +146,17 @@ const SENSOR_PROPS: &[PropDef] = &[
     pd("ganho", "multiplies what it senses (negative inverts). The sensor already returns the receptor occupancy (0..1); the directional one reads only one side of the chain"),
     pd("modo", "0 = by the LEVEL, 1 = by the CHANGE (chemotaxis)"),
     pd("memoria", "0..1: fraction of the sensor's charge that remains on each step (discharge = 1 − this; ~1/(1 − this) steps). For the level it is the reading itself; for the change it is the slow reference"),
+];
+
+/// SENSOR DE PREDADORES: cheira as proteases ABERTAS dos outros à sua volta
+/// (o mesmo "cheiro" que um sensor de corpos com prolina a seguir já lia, mas
+/// sem depender do vizinho). Tomou o lugar do músculo, que saiu.
+const PREDATOR_SENSOR_PROPS: &[PropDef] = &[
+    pd("canal", "0 = emits on α, 1 = on β"),
+    pd("ganho", "multiplies what it senses (negative inverts): the strength of the open proteases of OTHER bodies within its radius; closed proteases have no smell"),
+    pd("modo", "0 = by the LEVEL, 1 = by the CHANGE"),
+    pd("memoria", "0..1: fraction of the sensor's charge that remains on each step"),
+    pd("direcional", "0 = the whole disc around it; 1 = only one side of the chain (left or right by the parity of the intensity, as in the one-sided sensors)"),
 ];
 
 /// Sensores "de luz" (físicos): as mesmas propriedades e o que sentem.
@@ -173,7 +184,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
         pd("vies_AU", "-1..1: prefers A/U (+) or G/C (−)"),
         pd("fecha", "−1 = always open; 2 = closes with a positive γ signal; 3 = closes with a positive δ signal (closed, it neither eats nor lets energy leak)"),
     ],
-    &[pd("amplificacao", "multiplies the bending of the joint by the signals"), pd("canal", "0 = α only, 1 = β only, 2 = both")],
+    PREDATOR_SENSOR_PROPS,
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
     SENSOR_PROPS,
@@ -278,9 +289,9 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             }
         ),
         1 => format!(
-            "muscle [striped ellipse]: bend ×{:.2} with {}, and the joint bends up to 2.5 times further than the amino acid alone",
-            v("amplificacao") * g,
-            ["α", "β", "α and β"][(v("canal").round().clamp(0.0, 2.0)) as usize]
+            "{}{}",
+            sensor("predator sensor: smells the OPEN proteases of other bodies around it (closed ones have no smell)", "striped ellipse"),
+            if v("direcional") >= 0.5 { " · reads one side of the chain only" } else { "" }
         ),
         2 => format!("{} · senses {}", sensor("TOTAL food sensor", "crown of green antennae"), alvo()),
         3 => format!("{} · senses {}", sensor("TOTAL physical sensor", "crown of yellow antennae"), alvo_fisico()),
@@ -466,7 +477,7 @@ pub fn wgsl() -> String {
     let mut s = String::from("// ---- órgãos (gerado de src/life/organs.rs) ----\n");
     let names = [
         "MOUTH",
-        "MUSCLE",
+        "PREDATOR_SENSOR",
         "FOOD_SENSOR",
         "LIGHT_SENSOR",
         "ENERGY_SENSOR",

@@ -255,7 +255,7 @@ fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
     let v0 = organ_variants_view[organ * ORGAN_VARIANTS + p].p0;
     switch organ {
         case ORGAN_MOUTH: { return mix(base, vec3<f32>(1.0), 0.3); }
-        case ORGAN_MUSCLE: { return mix(base, vec3<f32>(0.85, 0.25, 0.25), 0.55); }
+        case ORGAN_PREDATOR_SENSOR: { return vec3<f32>(1.0, 0.42, 0.25); }
         case ORGAN_FOOD_SENSOR, ORGAN_FOOD_SENSOR_DIR: { return vec3<f32>(0.45, 1.0, 0.45); }
         case ORGAN_LIGHT_SENSOR, ORGAN_LIGHT_SENSOR_DIR: { return vec3<f32>(1.0, 0.95, 0.4); }
         case ORGAN_ENERGY_SENSOR: { return vec3<f32>(1.0, 0.85, 0.2); }
@@ -340,7 +340,7 @@ fn organ_extent(t: u32) -> f32 {
         case ORGAN_FOOD_SENSOR: { return 2.0; }
         case ORGAN_LIGHT_SENSOR: { return 1.6; }
         case ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: { return 1.2 / SPRITE_STALK_BODY; }
-        case ORGAN_MUSCLE: { return 1.6; }
+        case ORGAN_PREDATOR_SENSOR: { return 1.6; }
         case ORGAN_STORAGE: { return 1.9; }
         case ORGAN_PHOTOSYSTEM: { return 1.45; }
         case ORGAN_HOLDFAST: { return 1.4; }
@@ -1282,11 +1282,11 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             if (v > 0.15 * core && abs(u) < v * 0.9) { return vec4<f32>(0.05, 0.02, 0.02, 1.0); }
             return vec4<f32>(mix(in.color, white, rim_mix), 1.0);
         }
-        case ORGAN_MUSCLE: {
+        case ORGAN_PREDATOR_SENSOR: {
             let e = (u / (core * 1.5)) * (u / (core * 1.5)) + (v / (core * 0.85)) * (v / (core * 0.85));
             if (e > 1.0) { discard; }
             let stripe = step(0.0, sin(u / core * 12.0));
-            let red = mix(in.color, vec3<f32>(0.85, 0.25, 0.25), 0.55);
+            let red = vec3<f32>(1.0, 0.42, 0.25);
             return vec4<f32>(mix(red, red * 0.6, stripe) * mix(1.0, 0.7, smoothstep(0.7, 1.0, e)), 1.0);
         }
         case ORGAN_ENERGY_SENSOR: {
