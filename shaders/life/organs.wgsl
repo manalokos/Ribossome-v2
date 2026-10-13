@@ -654,7 +654,11 @@ fn signals_step(slot: u32, a: Agent, cap: f32) -> f32 {
                 // p0 canal, p1 período, p2/p3: o relógio acelera com α/β (um
                 // oscilador controlado). A fase vive em sensor_mem.
                 let mi = base + k;
-                let rate = max(0.05, 1.0 + ov.p2 * s.x + ov.p3 * s.y);
+                // (RELÓGIO LENTO: os períodos são da escala do dia, 1000 a
+                // 24 000 passos, e os sinais só o aceleram até ao dobro. Serve
+                // para antecipar o dia e a noite, não para bater a cauda: com
+                // períodos de 70 passos fazia de motor de natação.)
+                let rate = clamp(1.0 + ov.p2 * s.x + ov.p3 * s.y, 0.05, 2.0);
                 var phase = sensor_mem[mi] + 6.2831853 * rate / max(ov.p1, 2.0);
                 phase = phase - 6.2831853 * floor(phase / 6.2831853);
                 sensor_mem[mi] = phase;
