@@ -24,18 +24,21 @@ const UV_SWEEP_THREADS: u32 = 256u;
 // metade de light_grid, light_next e shade_grid: índice + banda × LIGHT_CELLS):
 //  0 = a luz de CIMA (a de sempre, o "vermelho" do mar): absorvem-na a água,
 //      os monómeros, os aromáticos dos corpos e os fotossistemas dela;
-//  1 = a luz FUNDA (o "azul"): a água e os monómeros só lhe tiram a fração
-//      DEEP_LIGHT_DEPTH do que tiram à outra, os aromáticos não a absorvem,
-//      e só os fotossistemas DELA lhe fazem sombra. O terreno tapa as duas.
+//  1 = a luz FUNDA (o "azul"): a ÁGUA quase não a absorve (DEEP_WATER_DEPTH
+//      do que tira à outra: no mar o vermelho perde-se umas 30 vezes mais
+//      depressa do que o azul), os monómeros tiram-lhe DEEP_LIGHT_DEPTH do
+//      que tiram à outra, os aromáticos não a absorvem, e só os
+//      fotossistemas DELA lhe fazem sombra. O terreno tapa as duas.
 // Quem absorve uma cor faz sombra nessa cor e deixa passar a outra. A funda
 // rende DEEP_LIGHT_YIELD da outra por unidade de luz (lifecycle.wgsl).
 const LIGHT_CELLS: u32 = LIGHT_SIZE * LIGHT_SIZE;
 const LIGHT_BANDS: u32 = 2u;
 const DEEP_LIGHT_DEPTH: f32 = 0.35;
+const DEEP_WATER_DEPTH: f32 = 0.03;
 const DEEP_LIGHT_YIELD: f32 = 0.4;
 // Atenuação pela água numa linha da luz, para cada banda.
 fn row_water_of(band: u32) -> f32 {
-    return exp(-max(params.uv_depth, 0.0) * select(1.0, DEEP_LIGHT_DEPTH, band == 1u) * f32(LIGHT_DIV) / f32(GRID_SIZE));
+    return exp(-max(params.uv_depth, 0.0) * select(1.0, DEEP_WATER_DEPTH, band == 1u) * f32(LIGHT_DIV) / f32(GRID_SIZE));
 }
 
 fn uv_light_at_cell(x: u32, y: u32) -> f32 {
