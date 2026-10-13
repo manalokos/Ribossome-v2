@@ -163,26 +163,28 @@ fn reach_falloff(dist: f32, reach: f32) -> f32 {
     return 1.0 - (1.0 - REACH_EDGE) * clamp(dist / max(reach, 1.0), 0.0, 1.0);
 }
 
-// CUSTO DE ESTAR ABERTA, em residuos de manutencao: forca x alcance /
-// PROTEASE_REACH_REF x PROTEASE_ACTIVE_COST x abertura. Largar enzima forte
-// num volume grande de agua e caro; uns picos compridos e fracos a espera de
-// presa custam pouco (como os de um heliozoario), e as de contacto nada. O
-// resto do custo dos espigoes e peso e arrasto (tabela).
-const PROTEASE_ACTIVE_COST: f32 = 0.25;
-const PROTEASE_REACH_REF: f32 = 40.0;
+// CUSTO DE ESTAR ABERTA, em resíduos de manutenção: força × intensidade ×
+// abertura × o custo do modo.
+//  - de CONTACTO: é enzima ativa exposta na superfície, a gastar-se e a ser
+//    reposta enquanto está aberta. Paga PROTEASE_CONTACT_COST por unidade de
+//    força. Quem a fecha por sinal quando não há presa (variantes com canal)
+//    só paga enquanto caça.
+//  - LÍTICA (as de alcance, os espigões): custa muito menos,
+//    PROTEASE_LYTIC_COST, seja qual for o alcance. Um ouriço não paga por ter
+//    os espinhos de fora; o que lhe custa é fazê-los (a manutenção do órgão,
+//    o peso e o arrasto, na tabela).
+const PROTEASE_CONTACT_COST: f32 = 2.0;
+const PROTEASE_LYTIC_COST: f32 = 0.2;
 fn protease_active(slot: u32, n: u32) -> f32 {
     var c = 0.0;
     for (var k = 0u; k < n; k++) {
         let o = organ_get(slot, k);
         if (organ_type(o) == ORGAN_PROTEASE) {
             let v = organ_var(o);
-            // força × alcance: a de contacto não gasta; picos compridos e fracos
-            // gastam pouco; só "longe E forte" sai caro (alcance 100, força 3 =
-            // 7,5 resíduos de manutenção).
-            c += protease_drive(slot, k, v) * max(v.p1, 0.0) * organ_gain(o) * max(v.p0, 0.0) / PROTEASE_REACH_REF;
+            c += protease_drive(slot, k, v) * max(v.p1, 0.0) * organ_gain(o) * select(PROTEASE_CONTACT_COST, PROTEASE_LYTIC_COST, v.p0 >= PROTEASE_MID_FROM);
         }
     }
-    return c * PROTEASE_ACTIVE_COST;
+    return c;
 }
 
 // IMUNIDADE às próprias proteases: quem tem uma protease de uma família

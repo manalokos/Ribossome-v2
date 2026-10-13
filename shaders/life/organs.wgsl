@@ -110,7 +110,11 @@ fn organ_upkeep(slot: u32, n: u32) -> f32 {
 // ORÇAMENTO DE CAPTAÇÃO: um corpo tem maquinaria limitada para ir buscar
 // energia, e reparte-a por igual pelas MANEIRAS diferentes de o fazer que
 // tiver: comer (boca), luz (fotossistema), redutor (quimiossíntese) e caçar
-// (protease). Uma só maneira rende 100%; duas, 50% cada; as quatro, 25%.
+// (protease). Uma só maneira rende 100%; duas, 71% cada; três, 58%; as
+// quatro, 50% (um sobre a raiz do número de maneiras: partilhar a maquinaria
+// tira eficiência a cada uma, mas duas juntas ainda rendem mais do que uma
+// sozinha; com 50% cada, um herbívoro que ganhasse outro órgão de captação
+// perdia logo metade da comida, e o caminho gradual ficava fechado).
 // Conta a categoria, não o número de órgãos: duas bocas não se penalizam uma
 // à outra. É o que faz um especialista render mais do que um omnívoro.
 fn harvest_share(slot: u32, n: u32) -> f32 {
@@ -123,7 +127,7 @@ fn harvest_share(slot: u32, n: u32) -> f32 {
         // (Só a protease de contacto capta; a lítica deixa tudo no meio.)
         if (t == ORGAN_PROTEASE && organ_var(organ_get(slot, k)).p0 < PROTEASE_MID_FROM) { kinds.w = 1.0; }
     }
-    return 1.0 / max(kinds.x + kinds.y + kinds.z + kinds.w, 1.0);
+    return inverseSqrt(max(kinds.x + kinds.y + kinds.z + kinds.w, 1.0));
 }
 
 fn organ_catalysis_mult(slot: u32, k: u32) -> f32 {
