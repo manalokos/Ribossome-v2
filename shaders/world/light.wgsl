@@ -35,6 +35,8 @@ const LIGHT_CELLS: u32 = LIGHT_SIZE * LIGHT_SIZE;
 const LIGHT_BANDS: u32 = 2u;
 const DEEP_LIGHT_DEPTH: f32 = 0.35;
 const DEEP_WATER_DEPTH: f32 = 0.03;
+// Fotoinibição dos fotossistemas de luz funda pela luz de cima (lifecycle.wgsl).
+const DEEP_PHOTOINHIBITION: f32 = 2.0;
 const DEEP_LIGHT_YIELD: f32 = 0.4;
 // Atenuação pela água numa linha da luz, para cada banda.
 fn row_water_of(band: u32) -> f32 {

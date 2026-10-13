@@ -872,6 +872,17 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             // temperatura continua a não contar: captar luz é físico.)
             let absorbed = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0);
             photo_abs += absorbed;
+            // FOTOINIBIÇÃO: um fotossistema de luz FUNDA é feito para pouca
+            // luz; a luz de CIMA que lhe bate (a forte) não lhe rende nada e
+            // estraga-o. Conta para o fotodano DEEP_PHOTOINHIBITION vezes o
+            // que um fotossistema de luz de cima sozinho absorveria ali. À
+            // superfície é pesado; onde a luz de cima já quase não chega (por
+            // profundidade ou por estar à sombra de outros) não custa nada.
+            if (band == 1u) {
+                var strong = params.sun_now;
+                if (ly + 1u < LIGHT_SIZE) { strong = light_above(lx, ly + 1u, 0u); }
+                photo_abs += DEEP_PHOTOINHIBITION * max(strong, 0.0) * max(params.uv_strength, 0.0) * (1.0 - exp(-AGENT_UV_ABSORB)) * og * max(pv.p1, 0.0);
+            }
             let power = absorbed * harvest * dorm_f;
             // Variante: p0 = fração da luz para reciclar, p1 = eficiência,
             // p2 = a luz que capta (0 de cima, 1 funda).

@@ -207,7 +207,7 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     &[
         pd("reciclar", "0..1: fraction of the light used to reactivate spent monomers (the rest gives energy)"),
         pd("eficiencia", "multiplies the yield"),
-        pd("luz", "0 = the SHALLOW light (full yield; water, monomers, aromatic residues and other shallow photosystems take it away); 1 = the DEEP light (40% of the yield; water hardly absorbs it (3% of what it takes from the other), monomers about a third as much, and only other deep photosystems shade it). Each kind shades only its own light"),
+        pd("luz", "0 = the SHALLOW light (full yield; water, monomers, aromatic residues and other shallow photosystems take it away); 1 = the DEEP light (40% of the yield; water hardly absorbs it (3% of what it takes from the other), monomers about a third as much, and only other deep photosystems shade it). Each kind shades only its own light; a deep-light photosystem is DAMAGED by the shallow light that hits it (photodamage), so it suits the depths or the shade of others"),
     ],
     &[
         pd("alcance", "how far BEYOND contact it reaches (world units): 0 = touching only; ~40 = medium; ~100 = long. More reach = more drag, more mass and more expense while it is on"),
