@@ -354,7 +354,8 @@ fn organ_extent(t: u32) -> f32 {
         case ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: { return 1.2 / SPRITE_STALK_BODY; }
         case ORGAN_PREDATOR_SENSOR: { return 1.6; }
         case ORGAN_STORAGE: { return 1.9; }
-        case ORGAN_PHOTOSYSTEM: { return 1.45; }
+        // (uma antena de luz: maior do que os outros órgãos; só o desenho)
+        case ORGAN_PHOTOSYSTEM: { return 2.0; }
         case ORGAN_HOLDFAST: { return 1.4; }
         case ORGAN_PROTEASE: { return 2.8; }
         case ORGAN_ANCHOR: { return 1.4; }

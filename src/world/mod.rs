@@ -432,8 +432,10 @@ impl World {
         let gamma_buf = storage_buffer(device, "gamma grid", cells * 4);
         let light_buf = storage_buffer(device, "uv light", cells * 4);
         let lcells = (cfg.grid_size / shaders::LIGHT_DIV) as u64 * (cfg.grid_size / shaders::LIGHT_DIV) as u64;
-        let shade_buf = storage_buffer(device, "agent shade", lcells * 4);
-        let light_tmp = storage_buffer(device, "uv light next", lcells * 4);
+        // (Duas bandas de luz: a de cima e a funda, uma a seguir à outra em
+        // cada um; light_buf já tem espaço, LIGHT_BANDS em light.wgsl.)
+        let shade_buf = storage_buffer(device, "agent shade", lcells * 8);
+        let light_tmp = storage_buffer(device, "uv light next", lcells * 8);
         let slope_buf = storage_buffer(device, "gamma slope", cells * 8);
         let agg_act = storage_buffer(device, "aggregation counts", cells * 4);
         let agg_nb = storage_buffer(device, "aggregation neighbours", cells * 4);

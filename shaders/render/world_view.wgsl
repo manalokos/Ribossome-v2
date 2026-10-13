@@ -136,7 +136,19 @@ const MONOMER_GAMMA: f32 = 0.5;     // alpha_gamma_adjust do v3
 const DYE_VIS_GAIN: f32 = 2.0;
 const WATER: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
 // Brilho dourado da luz UV (somado na vista normal).
-const LIGHT_GOLD: vec3<f32> = vec3<f32>(0.30, 0.22, 0.06);
+const LIGHT_GOLD: vec3<f32> = vec3<f32>(0.30, 0.24, 0.18);
+// A COR DA LUZ, como no mar: primeiro perdem-se os vermelhos, depois os
+// verdes, e os azuis são os últimos. O vermelho é a luz de CIMA da simulação
+// e o azul a luz FUNDA (os dois campos de light.wgsl, tal e qual); o verde
+// não tem campo: fica entre os dois (média geométrica, mais perto do azul).
+// Como quem absorve uma banda só faz sombra nela, por baixo de um tapete de
+// fotossistemas de luz de cima a luz fica azulada, e por baixo de um de luz
+// funda fica avermelhada. √ no fim, para se ver o fundo (como antes).
+fn sea_light(lidx: u32) -> vec3<f32> {
+    let r = clamp(light_view[lidx], 0.0, 1.0);
+    let b = clamp(light_view[LIGHT_SIZE * LIGHT_SIZE + lidx], 0.0, 1.0);
+    return sqrt(vec3<f32>(r, pow(r, 0.4) * pow(b, 0.6), b));
+}
 
 // Teclas 1–4 (só ativados): A vermelho, U amarelo, G verde, C azul.
 fn channel_color(ch: u32) -> vec3<f32> {
@@ -540,7 +552,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     let ly = u32(cell_f.y) / LIGHT_DIV;
     let lidx = ly * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV;
     let light_here = light_view[lidx];
-    let glow = LIGHT_GOLD * sqrt(clamp(light_here, 0.0, 1.0));
+    let glow = LIGHT_GOLD * sea_light(lidx);
     let water = WATER;
     // Contagens em unidades de 3 quanta, com tone map de Reinhard (como no v3).
     let act_lin = act / 3.0 * DYE_VIS_GAIN;
@@ -563,10 +575,9 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
         if (abs(t - 2.0) < 0.12) { c = vec3<f32>(0.95); }
         return vec4<f32>(c, 1.0);
     }
-    // 8: luz UV (raiz quadrada, para ver o fundo).
+    // 8: a luz, com a cor que lhe resta a cada profundidade (sea_light).
     if (view.view_mode == 8u) {
-        let l = sqrt(clamp(light_here, 0.0, 1.0));
-        return vec4<f32>(vec3<f32>(0.75, 0.6, 1.0) * l, 1.0);
+        return vec4<f32>(sea_light(lidx), 1.0);
     }
     // 9: velocidade do fluido (|v| em células/s; escala 0..50) e direção no tom.
     if (view.view_mode == 9u) {
@@ -671,7 +682,7 @@ fn fs_world(in: VsOut) -> @location(0) vec4<f32> {
     // superfície fica dourada, o interior não.
     let ly_up = min(ly + 1u, LIGHT_SIZE - 1u);
     let light_up = light_view[ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV];
-    let rock_col = rock + LIGHT_GOLD * sqrt(clamp(light_up, 0.0, 1.0));
+    let rock_col = rock + LIGHT_GOLD * sea_light(ly_up * LIGHT_SIZE + u32(cell_f.x) / LIGHT_DIV);
     let rubble = vec3<f32>(0.22, 0.20, 0.18) * (0.75 + 0.3 * tone) * rubble_tex;
     let back = mix(water, rubble, rubble_m) * ground_shadow;
 

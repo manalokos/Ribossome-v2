@@ -843,11 +843,12 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // (produtor primário). Modo 1: usa-a para REATIVAR os gastos da
         // célula (recicla comida para si e para os outros). Mais luz também
         // é mais dano UV: há um compromisso.
-        // DUAS LUZES (variante p2): 0 = a luz de CIMA (a banda que os
-        // nucleótidos e os aromáticos absorvem: rende muito, mas a sopa e os
-        // corpos de cima tiram-na aos de baixo); 1 = a luz FUNDA (a banda
-        // que quase ninguém absorve: atravessa a sopa, chega mais longe, e
-        // rende DEEP_LIGHT_YIELD do que a outra rende à superfície).
+        // DUAS LUZES (variante p2; os dois campos estão em light.wgsl): 0 = a
+        // luz de CIMA (a banda que os nucleótidos e os aromáticos absorvem:
+        // rende muito, mas a sopa e os corpos de cima tiram-na aos de baixo);
+        // 1 = a luz FUNDA (a banda que quase ninguém absorve: chega mais
+        // longe e rende DEEP_LIGHT_YIELD da outra). Cada fotossistema só faz
+        // sombra, e só divide a luz, com os da sua banda.
         let ok = organ_get(slot, k);
         if (organ_type(ok) == ORGAN_PHOTOSYSTEM) {
             // LUZ CONSERVADA: os fotossistemas de uma célula da luz absorvem,
@@ -858,15 +859,17 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             // pelo sol, o que dá a capacidade de carga dos produtores.
             let lx = (cell % GRID_SIZE) / LIGHT_DIV;
             let ly = (cell / GRID_SIZE) / LIGHT_DIV;
-            var incoming = params.sun_now;
-            if (ly + 1u < LIGHT_SIZE) { incoming = light_above(lx, ly + 1u); }
-            let s_abs = max(f32(atomicLoad(&shade_grid[ly * LIGHT_SIZE + lx])) / f32(SHADE_ONE), 1.0);
-            let share = (1.0 - exp(-AGENT_UV_ABSORB * s_abs)) / s_abs;
             let og = organ_gain(ok);
             let pv = organ_var(ok);
+            // A banda que este capta (p2): a luz e a concorrência são as dela.
+            let band = select(0u, 1u, pv.p2 >= 0.5);
+            var incoming = params.sun_now;
+            if (ly + 1u < LIGHT_SIZE) { incoming = light_above(lx, ly + 1u, band); }
+            if (band == 1u) { incoming *= DEEP_LIGHT_YIELD; }
+            let s_abs = max(f32(atomicLoad(&shade_grid[band * LIGHT_CELLS + ly * LIGHT_SIZE + lx])) / f32(SHADE_ONE), 1.0);
+            let share = (1.0 - exp(-AGENT_UV_ABSORB * s_abs)) / s_abs;
             // (× dorm_f: um corpo dormente também fixa a luz mais devagar. A
             // temperatura continua a não contar: captar luz é físico.)
-            if (pv.p2 >= 0.5) { incoming = deep_light(incoming); }
             let absorbed = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0);
             photo_abs += absorbed;
             let power = absorbed * harvest * dorm_f;

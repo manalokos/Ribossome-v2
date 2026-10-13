@@ -210,12 +210,19 @@ fn agents_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Só absorvem UV os aromáticos (absortividade a 280 nm relativa ao
         // triptofano: W 1, Y 0,27, F 0,04) e os fotossistemas (captam luz).
         // (absorcao_uv da tabela dos aminoácidos.)
+        // Cada fotossistema faz sombra na banda que capta (a luz de cima ou
+        // a funda) e deixa passar a outra; os aromáticos só na de cima.
         var w = u32(max(aa_props[body_get(slot, k)].uv_absorb, 0.0) * f32(SHADE_ONE) + 0.5);
-        if (organ_type(organ_get(slot, k)) == ORGAN_PHOTOSYSTEM) { w = max(w, SHADE_ONE); }
-        if (w == 0u) { continue; }
+        var deep = 0u;
+        let o = organ_get(slot, k);
+        if (organ_type(o) == ORGAN_PHOTOSYSTEM) {
+            if (organ_var(o).p2 >= 0.5) { deep = SHADE_ONE; } else { w = max(w, SHADE_ONE); }
+        }
+        if (w + deep == 0u) { continue; }
         let p = residue_world(slot, a, k);
         let c = clamp(vec2<i32>(floor(p / lw)), vec2<i32>(0), vec2<i32>(i32(LIGHT_SIZE) - 1));
-        atomicAdd(&shade_grid[u32(c.y) * LIGHT_SIZE + u32(c.x)], w);
+        if (w > 0u) { atomicAdd(&shade_grid[u32(c.y) * LIGHT_SIZE + u32(c.x)], w); }
+        if (deep > 0u) { atomicAdd(&shade_grid[LIGHT_CELLS + u32(c.y) * LIGHT_SIZE + u32(c.x)], deep); }
     }
 }
 
