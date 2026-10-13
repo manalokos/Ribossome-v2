@@ -125,7 +125,8 @@ gpu_struct! {
         pub spawn_count: u32,
         /// Capacidade de agentes (slots).
         pub max_agents: u32,
-        /// Mortalidade base por passo (÷ energia, como no v3; "death_probability").
+        /// Mortalidade de quem tem FOME, por passo: × (1 ÷ o quão cheio está − 1);
+        /// um corpo cheio não corre risco (ninguém morre de velho).
         pub death_probability: f32,
         /// Energia inicial de uma semente.
         pub spawn_energy: f32,

@@ -1006,7 +1006,14 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     let photo_hazard = max(params.photo_damage, 0.0) * photo_abs * photo_abs;
     // RNA NU: sem corpo que o proteja desfaz-se sozinho (ver naked_decay).
     let naked_hazard = select(0.0, max(params.naked_decay, 0.0), a.body_len == 0u);
-    let p_death = clamp(params.death_probability / e_eff * thermal * pace + uv_hazard + heat_hazard + photo_hazard + naked_hazard, 0.0, 1.0);
+    // NINGUÉM MORRE DE VELHO: a mortalidade base só conta para quem tem FOME.
+    // Um corpo cheio (energia ≥ a capacidade do corpo) não corre risco
+    // nenhum por existir; a esvaziar, o risco sobe como antes (meio vazio =
+    // 1× a base; quase vazio, até 99×). Um risco constante matava também os
+    // bem alimentados e desfazia as colónias. O que mata um agente cheio é o
+    // que o estraga: proteases, UV, calor, fotodano.
+    let hunger = max(1.0 / e_eff - 1.0, 0.0);
+    let p_death = clamp(params.death_probability * hunger * thermal * pace + uv_hazard + heat_hazard + photo_hazard + naked_hazard, 0.0, 1.0);
     if (a.energy <= 0.0 || rng_f4(a.id, params.epoch, S_DEATH).x < p_death) {
         die(slot, a);
         return;
