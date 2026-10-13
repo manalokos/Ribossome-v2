@@ -250,6 +250,16 @@ fn detail_fat() -> f32 {
 }
 
 // Cor de um órgão visto de longe: a cor dominante do seu desenho de perto.
+// FOTOSSISTEMAS PELO TIPO: produtor da luz de cima a verde (a clorofila);
+// reciclador da luz de cima a azul-turquesa; os da luz FUNDA a violeta (as
+// bactérias púrpura), o reciclador a lilás claro.
+fn photo_color(recycle: f32, deep: f32) -> vec3<f32> {
+    let r = clamp(recycle, 0.0, 1.0);
+    let top = mix(vec3<f32>(0.35, 0.95, 0.35), vec3<f32>(0.2, 0.8, 1.0), r);
+    let low = mix(vec3<f32>(0.6, 0.35, 1.0), vec3<f32>(0.9, 0.7, 1.0), r);
+    return select(top, low, deep >= 0.5);
+}
+
 fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
     let p = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
     let v0 = organ_variants_view[organ * ORGAN_VARIANTS + p].p0;
@@ -261,7 +271,9 @@ fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
         case ORGAN_ENERGY_SENSOR: { return vec3<f32>(1.0, 0.85, 0.2); }
         case ORGAN_CLOCK: { return vec3<f32>(0.85, 0.9, 1.0); }
         case ORGAN_RELAY: { return vec3<f32>(0.6, 0.9, 1.0); }
-        case ORGAN_PHOTOSYSTEM: { return vec3<f32>(0.35, 0.95, 0.35); }
+        // (o que capta e o que faz com isso: luz de cima a verde, luz funda
+        // a violeta; os que reciclam, mais claros e azulados: ver photo_color)
+        case ORGAN_PHOTOSYSTEM: { return photo_color(v0, organ_variants_view[organ * ORGAN_VARIANTS + p].p2); }
         // (de contacto a vermelho; LÍTICA, a de alcance, a cor de vinho)
         case ORGAN_PROTEASE: { return select(vec3<f32>(0.9, 0.2, 0.2), PROTEASE_LYTIC_COLOR, v0 >= 10.0); }
         case ORGAN_ANCHOR: { return select(vec3<f32>(0.25, 0.5, 1.0), vec3<f32>(0.15, 0.9, 0.8), v0 >= 0.0); }

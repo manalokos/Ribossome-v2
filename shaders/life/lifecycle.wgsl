@@ -843,6 +843,11 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
         // (produtor primário). Modo 1: usa-a para REATIVAR os gastos da
         // célula (recicla comida para si e para os outros). Mais luz também
         // é mais dano UV: há um compromisso.
+        // DUAS LUZES (variante p2): 0 = a luz de CIMA (a banda que os
+        // nucleótidos e os aromáticos absorvem: rende muito, mas a sopa e os
+        // corpos de cima tiram-na aos de baixo); 1 = a luz FUNDA (a banda
+        // que quase ninguém absorve: atravessa a sopa, chega mais longe, e
+        // rende DEEP_LIGHT_YIELD do que a outra rende à superfície).
         let ok = organ_get(slot, k);
         if (organ_type(ok) == ORGAN_PHOTOSYSTEM) {
             // LUZ CONSERVADA: os fotossistemas de uma célula da luz absorvem,
@@ -861,10 +866,12 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
             let pv = organ_var(ok);
             // (× dorm_f: um corpo dormente também fixa a luz mais devagar. A
             // temperatura continua a não contar: captar luz é físico.)
+            if (pv.p2 >= 0.5) { incoming = deep_light(incoming); }
             let absorbed = max(incoming, 0.0) * max(params.uv_strength, 0.0) * share * og * max(pv.p1, 0.0);
             photo_abs += absorbed;
             let power = absorbed * harvest * dorm_f;
-            // Variante: p0 = fração da luz para reciclar, p1 = eficiência.
+            // Variante: p0 = fração da luz para reciclar, p1 = eficiência,
+            // p2 = a luz que capta (0 de cima, 1 funda).
             let recycle = clamp(pv.p0, 0.0, 1.0);
             // TRANSBORDO (como o fitoplâncton que exsuda o carbono que fixa a
             // mais): a energia que já não cabe no agente cheio não se perde,

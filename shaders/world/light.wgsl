@@ -77,6 +77,21 @@ fn light_above(x: u32, row: u32) -> f32 {
     return s / f32(LIGHT_TAPS) * inside;
 }
 
+// A LUZ FUNDA, a partir da luz de cima que chega a um sítio. Não há um
+// segundo campo de luz: a banda funda atravessa os MESMOS obstáculos com a
+// fração DEEP_LIGHT_DEPTH da profundidade ótica (transmissão elevada a esse
+// expoente), e à superfície vale DEEP_LIGHT_YIELD da outra. Com 0,35 e 0,4:
+// à superfície rende 40%; onde a luz de cima já só tem 22% do sol, as duas
+// rendem o mesmo; abaixo disso ganha a funda (a 1% do sol: 8% contra 1%).
+// (Aproximação: o terreno também fica mais transparente para ela, o que não
+// é físico; uma rocha que tapa 99% da luz de cima tapa-lhe 80%.)
+const DEEP_LIGHT_DEPTH: f32 = 0.35;
+const DEEP_LIGHT_YIELD: f32 = 0.4;
+fn deep_light(shallow: f32) -> f32 {
+    let sun = max(params.sun_now, 1e-6);
+    return DEEP_LIGHT_YIELD * sun * pow(clamp(shallow / sun, 0.0, 1.0), DEEP_LIGHT_DEPTH);
+}
+
 @compute @workgroup_size(256)
 fn clear_shade(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.y * 65535u * 256u + gid.x;

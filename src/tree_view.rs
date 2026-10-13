@@ -232,6 +232,14 @@ fn form_json(genome: &[u8], w: &World, code: &[u32]) -> String {
         // Como em body.wgsl / fold.wgsl: a posição é guardada ANTES de virar.
         let rad = 0.9 + 3.0 * (row.map_or(100.0, |a| a.volume) / 130.0).powf(1.4);
         let col = match organ {
+            // (fotossistemas pelo tipo, como photo_color em agents_view.wgsl)
+            Some((10, o)) => {
+                let v = r.organ.and_then(|(_, v, _)| o.variantes.get(v as usize));
+                let get = |k: &str| v.and_then(|m| m.get(k)).copied().unwrap_or(0.0);
+                let rec = get("reciclar").clamp(0.0, 1.0);
+                let (a, b) = if get("luz") >= 0.5 { ([0.6, 0.35, 1.0], [0.9, 0.7, 1.0]) } else { ([0.35, 0.95, 0.35], [0.2, 0.8, 1.0]) };
+                [a[0] + (b[0] - a[0]) * rec, a[1] + (b[1] - a[1]) * rec, a[2] + (b[2] - a[2]) * rec]
+            }
             Some((t, _)) => organ_color(t),
             None => class_color(r.aa),
         };

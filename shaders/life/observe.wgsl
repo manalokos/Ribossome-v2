@@ -17,6 +17,10 @@ const ST_GEN_SUM: u32 = 5u;
 const ST_BONDED: u32 = 6u;     // agentes com pelo menos uma ligação
 const ST_ORGANS: u32 = 7u;     // Σ órgãos
 const ST_HAS_ORGAN: u32 = 8u;  // + tipo: agentes com pelo menos um órgão desse tipo
+// Depois dos órgãos, os fotossistemas pelo tipo (agentes com pelo menos um):
+const ST_PHOTO_PRODUCER: u32 = 8u + ORGAN_TYPES;        // dá energia (reciclar < 0,5)
+const ST_PHOTO_RECYCLER: u32 = 9u + ORGAN_TYPES;        // reativa gastos (reciclar ≥ 0,5)
+const ST_PHOTO_DEEP: u32 = 10u + ORGAN_TYPES;           // capta a luz funda
 
 @compute @workgroup_size(64)
 fn stats_reduce(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -32,14 +36,23 @@ fn stats_reduce(@builtin(global_invocation_id) gid: vec3<u32>) {
     atomicAdd(&stats_out[ST_GEN_SUM], a.generation);
     var has = 0u;
     var count = 0u;
+    var photo = 0u;
     for (var k = 0u; k < a.body_len; k++) {
-        let t = organ_type(organ_get(slot, k));
+        let o = organ_get(slot, k);
+        let t = organ_type(o);
         if (t != 0xFFu) {
             has |= 1u << t;
             count += 1u;
         }
+        if (t == ORGAN_PHOTOSYSTEM) {
+            let pv = organ_var(o);
+            photo |= select(1u, 2u, pv.p0 >= 0.5) | select(0u, 4u, pv.p2 >= 0.5);
+        }
     }
     atomicAdd(&stats_out[ST_ORGANS], count);
+    if ((photo & 1u) != 0u) { atomicAdd(&stats_out[ST_PHOTO_PRODUCER], 1u); }
+    if ((photo & 2u) != 0u) { atomicAdd(&stats_out[ST_PHOTO_RECYCLER], 1u); }
+    if ((photo & 4u) != 0u) { atomicAdd(&stats_out[ST_PHOTO_DEEP], 1u); }
     for (var t = 0u; t < ORGAN_TYPES; t++) {
         if ((has & (1u << t)) != 0u) { atomicAdd(&stats_out[ST_HAS_ORGAN + t], 1u); }
     }

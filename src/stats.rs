@@ -12,7 +12,7 @@ use crate::life::organs::{ORGAN_NAMES, ORGAN_NAMES_EN, ORGAN_TYPES};
 use crate::world::{Ledger, LifeCounters};
 
 /// Palavras do buffer de estatísticas (a ordem de observe.wgsl).
-pub const STAT_WORDS: usize = 8 + ORGAN_TYPES;
+pub const STAT_WORDS: usize = 8 + ORGAN_TYPES + EXTRA.len();
 /// Amostras no histórico em memória (~110 MB no limite; a 2000 epochs por
 /// amostra só se chega lá ao fim de 2 mil milhões de epochs).
 const MAX_POINTS: usize = 1_000_000;
@@ -39,9 +39,15 @@ const BASE: [&str; 13] = [
     "mortes por protease / 1000 epochs",
 ];
 
+/// Depois das dos órgãos: os fotossistemas pelo tipo (a ordem de
+/// ST_PHOTO_* em observe.wgsl). Um agente pode contar em mais de uma.
+const EXTRA: [&str; 3] = ["% com fotossistema produtor", "% com fotossistema reciclador", "% com fotossistema de luz funda"];
+const EXTRA_EN: [&str; 3] = ["% with producer photosystem", "% with recycler photosystem", "% with deep-light photosystem"];
+
 pub fn series_names() -> Vec<String> {
     let mut v: Vec<String> = BASE.iter().map(|s| s.to_string()).collect();
     v.extend(ORGAN_NAMES.iter().map(|n| format!("% com {n}")));
+    v.extend(EXTRA.iter().map(|s| s.to_string()));
     v
 }
 
@@ -67,6 +73,9 @@ const BASE_EN: [&str; 13] = [
 pub fn display_name(stored: &str) -> String {
     if let Some(i) = BASE.iter().position(|b| *b == stored) {
         return BASE_EN[i].to_string();
+    }
+    if let Some(i) = EXTRA.iter().position(|b| *b == stored) {
+        return EXTRA_EN[i].to_string();
     }
     if let Some(i) = stored.strip_prefix("% com ").and_then(|o| ORGAN_NAMES.iter().position(|n| *n == o)) {
         return format!("% with {}", ORGAN_NAMES_EN[i]);
@@ -158,7 +167,7 @@ impl History {
             held,
             bites,
         ];
-        v.extend((0..ORGAN_TYPES).map(|t| 100.0 * per(w[8 + t])));
+        v.extend((0..ORGAN_TYPES + EXTRA.len()).map(|t| 100.0 * per(w[8 + t])));
         self.write_csv(epoch, &v);
         self.seen += 1;
         if !self.seen.is_multiple_of(self.stride) {
@@ -279,6 +288,7 @@ fn groups() -> Vec<(&'static str, Vec<usize>)> {
         ("Population", vec![0]),
         ("Births and deaths", vec![1, 2]),
         ("Organs (agents with each one)", (BASE.len()..BASE.len() + ORGAN_TYPES).collect()),
+        ("Photosystems by kind", (BASE.len() + ORGAN_TYPES..BASE.len() + ORGAN_TYPES + EXTRA.len()).collect()),
         ("Predation", vec![12]),
         ("Body and genome", vec![4, 5, 9]),
         ("Energy, generations and bonds", vec![3, 6, 7, 8]),
@@ -334,7 +344,7 @@ pub fn draw(ui: &mut egui::Ui, h: &mut History, sel: &mut ChartSel) {
     // cada órgão; em % todas as linhas sobem e descem juntas quando um grupo
     // grande cresce ou encolhe (o ciclo do dia punha tudo às ondas). O
     // número de agentes (% × vivos) de um órgão não depende dos outros.
-    let organs = BASE.len()..BASE.len() + ORGAN_TYPES;
+    let organs = BASE.len()..BASE.len() + ORGAN_TYPES + EXTRA.len();
     // (O valor deste frame; a caixa de seleção só conta no seguinte.)
     let by_count = sel.organ_counts;
     let as_count = |i: usize| by_count && organs.contains(&i);

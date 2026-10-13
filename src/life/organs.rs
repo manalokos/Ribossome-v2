@@ -204,7 +204,11 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     &[pd("capacidade", "energy this organ adds to the body's capacity (the intensity does not count); the body alone stores 0.5 per residue of average volume")],
     FOOD_SENSOR_PROPS,
     LIGHT_SENSOR_PROPS,
-    &[pd("reciclar", "0..1: fraction of the light used to reactivate spent monomers (the rest gives energy)"), pd("eficiencia", "multiplies the yield")],
+    &[
+        pd("reciclar", "0..1: fraction of the light used to reactivate spent monomers (the rest gives energy)"),
+        pd("eficiencia", "multiplies the yield"),
+        pd("luz", "0 = the SHALLOW light (full yield, but the soup and the bodies above take it away); 1 = the DEEP light (40% of the yield at the surface, but it crosses the soup and the bodies: it wins where less than about a fifth of the sunlight arrives)"),
+    ],
     &[
         pd("alcance", "how far BEYOND contact it reaches (world units): 0 = touching only; ~40 = medium; ~100 = long. More reach = more drag, more mass and more expense while it is on"),
         pd("forca", "multiplies the risk of lysis it causes (× intensity)"),
