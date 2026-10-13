@@ -112,6 +112,11 @@ const GHOST_VIEW_MAX: f32 = 12000.0;
 // `pair_count` do agente é sempre o número de bits ligados. Cada posição
 // emparelha por conta própria, no sítio do corpo que lhe corresponde: já não
 // há "a base seguinte".
+// FERIDA: quanto do corpo de cada agente as proteases já desfizeram (nas
+// unidades da capacidade do corpo: quando chega a ela, o agente morre). Sara
+// devagar. Uma protease digere o CORPO; a energia e as reservas da presa são
+// o que o predador come, não o que a protege.
+@group(3) @binding(41) var<storage, read_write> wound: array<f32>;
 @group(3) @binding(40) var<storage, read_write> pair_mask: array<u32>;
 const PAIR_WORDS: u32 = 8u;
 

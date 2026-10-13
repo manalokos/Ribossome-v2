@@ -73,6 +73,8 @@ const PRED_DRAIN: f32 = 0.2;
 // quando só contava a fração de resíduos-alvo, tipicamente uns 10%.)
 const PRED_SITE_SCALE: f32 = 1.0;
 const PRED_PROLINE_DEFENSE: f32 = 0.9;
+// Fração do corpo que uma ferida sara por passo (quando ninguém o morde).
+const WOUND_HEAL: f32 = 0.01;
 const AA_PROLINE: u32 = 12u;
 const BITE_SCALE: f32 = 10000.0;
 // (Era 14: medido com predadores semeados num mundo cheio, com 30 matam dez
@@ -330,7 +332,7 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     var sites = vec4<f32>(0.0);
                     // (o mesmo, só das proteases líticas)
                     var lytic = vec4<f32>(0.0);
-                    if (armed && b.energy > 0.0) {
+                    if (armed) {
                         let nb = max(b.body_len, 1u);
                         for (var i = 0u; i < np; i++) {
                             var d2 = 1e12;
@@ -351,7 +353,9 @@ fn contact_resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (sites.x + sites.y + sites.z + sites.w > 0.0) {
                         let power = dot(sites, unpack_targets(contact_disp[e].w)) * PRED_SITE_SCALE;
                         let resist = 1.0 - PRED_PROLINE_DEFENSE * unpack_proline(contact_disp[e].w);
-                        let bite = min(PRED_DRAIN * max(params.protease_power, 0.0) * power * resist, b.energy);
+                        // (A mordida é DANO ao corpo da presa, não um levantamento
+                        // da energia dela: não é limitada pelo que a presa tem.)
+                        let bite = PRED_DRAIN * max(params.protease_power, 0.0) * power * resist;
                         if (bite > 0.0) {
                             // A parte lítica da mordida não é de ninguém: fica
                             // no meio (bitten_free). Só a de contacto alimenta
@@ -421,66 +425,68 @@ fn contact_apply(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Fica limpo já aqui: um slot que morra e renasça a meio de um passo
     // não pode herdar a reserva do morto.
     atomicStore(&matter_claim[slot], BOND_NONE);
-    // O que este agente tirou a outros: a parte direta entra-lhe na energia.
+    // (O que este agente tira a outros já não entra aqui: chega no passo
+    // seguinte por prey_inbox, entregue pela própria presa: ver abaixo.)
     let direct = clamp(params.protease_direct, 0.0, 1.0);
     let cap_a = energy_capacity(slot, a);
-    let fed = max(a.energy + contact_disp[slot].z * direct + bd.w, 0.0);
+    let fed = max(a.energy + bd.w, 0.0);
     a.energy = min(fed, cap_a);
-    // O que um predador de barriga cheia ganha A MAIS não se perde: reativa
-    // gastos na célula onde está (um por cada food_power), como o excesso de
-    // um fotossistema. É assim que a energia das presas vira monómeros para
-    // a cópia dele, ali mesmo, onde ficaram os restos.
-    let spill = min(fed - a.energy, max(contact_disp[slot].z * direct, 0.0)) / max(params.food_power, 1e-3);
-    if (spill > 0.0) {
-        let qs = rng_f4(a.id, params.epoch, S_SPILL);
-        var ns = u32(spill);
-        if (qs.x < fract(spill)) { ns += 1u; }
-        let cell_a = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
-        let c0 = min(u32(qs.y * 4.0), 3u);
-        for (var i = 0u; i < min(ns, 8u); i++) {
-            for (var t = 0u; t < 4u; t++) {
-                if (chem_activate_one(cell_a * 4u + (c0 + i + t) % 4u)) { break; }
-            }
-        }
+    // A PROTEASE DIGERE O CORPO. O dano das mordidas deste passo soma-se à
+    // FERIDA do agente; quando a ferida chega ao tamanho do corpo (a sua
+    // capacidade, que cresce com os resíduos), ele morre. A energia da presa
+    // não a protege: é o que o predador come. Em cada passo sai-lhe a mesma
+    // fração da energia que a mordida desfez do corpo que restava; na morte
+    // sai tudo. Uma presa com depósitos cheios morre tão depressa como uma
+    // magra e rende muito mais. Para onde vai a energia tirada: a das
+    // mordidas de contacto, × protease_direct, para quem mordeu (um só, o de
+    // slot mais baixo, e no passo seguinte: prey_inbox); o resto, e a das
+    // mordidas líticas, reativa gastos na célula da presa (× lysis_yield).
+    let dmg_all = f32(atomicExchange(&bitten[slot], 0u)) / BITE_SCALE;
+    let dmg_free = f32(atomicExchange(&bitten_free[slot], 0u)) / BITE_SCALE;
+    let strength = body_capacity(slot, a.body_len);
+    let w0 = wound[slot];
+    if (dmg_all <= 0.0 && w0 > 0.0) {
+        // Sara: WOUND_HEAL do corpo por passo, quando ninguém o morde.
+        wound[slot] = max(w0 - strength * WOUND_HEAL, 0.0);
     }
-    // O que lhe tiraram: sai da energia; a parte que não foi direta para os
-    // atacantes reativa gastos da célula onde está (× lysis_yield, um por
-    // cada food_power, arredondamento ao acaso). Sem gastos ali, perde-se.
-    let bit_all = f32(atomicExchange(&bitten[slot], 0u)) / BITE_SCALE;
-    let bit_free = f32(atomicExchange(&bitten_free[slot], 0u)) / BITE_SCALE;
-    let lost = min(bit_all, max(a.energy, 0.0));
-    if (lost > 0.0) {
+    let lost = dmg_all;
+    if (dmg_all > 0.0) {
         let q = rng_f4(a.id, params.epoch, S_DIGEST);
-        // (As mordidas líticas ficam inteiras no meio; das outras, só a parte
-        // que não foi direta para os atacantes.)
-        let free = lost * clamp(bit_free / max(bit_all, 1e-9), 0.0, 1.0);
-        let want = (free + (lost - free) * (1.0 - direct)) * clamp(params.lysis_yield, 0.0, 1.0) / max(params.food_power, 1e-3);
+        let frac = clamp(dmg_all / max(strength - w0, 1e-6), 0.0, 1.0);
+        let took = frac * max(a.energy, 0.0);
+        wound[slot] = w0 + dmg_all;
+        let killer = atomicLoad(&prey_killer[slot]);
+        let has_killer = killer != NO_ENTRY && killer < params.max_agents;
+        var free = took * clamp(dmg_free / max(dmg_all, 1e-9), 0.0, 1.0);
+        if (!has_killer) { free = took; }
+        if (has_killer) {
+            atomicAdd(&prey_inbox[killer], u32((took - free) * direct * BITE_SCALE));
+        }
+        let want = (free + (took - free) * (1.0 - direct)) * clamp(params.lysis_yield, 0.0, 1.0) / max(params.food_power, 1e-3);
         var count = u32(want);
         if (q.x < fract(want)) { count += 1u; }
         let cell = world_to_cell(vec2<f32>(a.pos_x, a.pos_y));
         let ch0 = min(u32(q.y * 4.0), 3u);
-        for (var i = 0u; i < min(count, 24u); i++) {
+        for (var i = 0u; i < min(count, 48u); i++) {
             for (var t = 0u; t < 4u; t++) {
                 if (chem_activate_one(cell * 4u + (ch0 + i + t) % 4u)) { break; }
             }
         }
-        a.energy -= lost;
-        // Sem energia: morre aqui, e conta como morte por protease.
-        if (a.energy <= 0.0) {
+        a.energy -= took;
+        // O corpo desfeito: morre aqui, e conta como morte por protease.
+        if (frac >= 1.0) {
             atomicAdd(&life_counters[LC_BITES], 1u);
-            // O PREDADOR COME O CORPO: a energia que a presa trazia no bolso
-            // é pouca; o grosso do que ela vale é a matéria (o genoma e os
-            // complementos que já tinha capturado, cada monómero com a
-            // energia de uma refeição). Quem a matou digere a fração
-            // protease_direct dessa matéria: recebe a energia (no passo
-            // seguinte, por prey_inbox) e esses monómeros saem GASTOS.
-            // Do resto, como antes: os complementos saem ativados e
-            // lysis_matter do genoma também.
-            let killer = atomicLoad(&prey_killer[slot]);
+            // O PREDADOR COME O CORPO: além da energia, a matéria (o genoma e
+            // os complementos que a presa já tinha capturado, cada monómero
+            // com a energia de uma refeição). Quem a matou digere a fração
+            // protease_direct dessa matéria: recebe a energia (prey_inbox) e
+            // esses monómeros saem GASTOS. Do resto, como em qualquer morte
+            // por protease: os complementos saem ativados e lysis_matter do
+            // genoma também.
             let paired = min(a.pair_count, a.gene_len);
             var eat_genome = 0u;
             var eat_paired = 0u;
-            if (killer != NO_ENTRY && killer < params.max_agents) {
+            if (has_killer) {
                 eat_genome = min(u32(f32(a.gene_len) * direct), a.gene_len);
                 eat_paired = min(u32(f32(paired) * direct), paired);
                 atomicAdd(&prey_inbox[killer], u32(f32(eat_genome + eat_paired) * max(params.food_power, 0.0) * BITE_SCALE));

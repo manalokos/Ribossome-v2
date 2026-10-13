@@ -133,6 +133,7 @@ fn new_agent(slot: u32, pos: vec2<f32>, rot: f32, energy: f32, gene_len: u32, ge
     atomicStore(&prey_inbox[slot], 0u);
     atomicStore(&bitten_free[slot], 0u);
     truce_until[slot] = 0u;
+    wound[slot] = 0.0;
     var a: Agent;
     a.pos_x = pos.x;
     a.pos_y = pos.y;

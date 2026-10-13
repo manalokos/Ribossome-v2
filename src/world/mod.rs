@@ -551,6 +551,9 @@ impl World {
         let bitten_free_buf = storage_buffer(device, "bitten free", max_agents * 4);
         let truce_buf = storage_buffer(device, "protease truce", max_agents * 4);
         let pair_mask_buf = storage_buffer(device, "pair mask", max_agents * PAIR_MASK_WORDS * 4);
+        // Feridas das proteases (wound em bindings.wgsl). Não vai para as
+        // cenas: ao abrir uma, toda a gente está inteira.
+        let wound_buf = storage_buffer(device, "wounds", max_agents * 4);
         let ghosts_buf = storage_buffer(device, "ghosts", (GHOST_HEAD + GHOST_MAX * GHOST_WORDS) * 4);
         gpu.queue.write_buffer(&life_counters_buf, 0, bytemuck::cast_slice(&[cfg.max_agents, 0, 0, 0, 0, 0, 0, 0u32]));
         let spawn_buf =
@@ -583,7 +586,7 @@ impl World {
         });
         // Grupo 3 — organismos. Binding 4 (pedidos de sementes) só de leitura.
         let life_entries: Vec<_> =
-            (0..41).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
+            (0..42).map(|b| storage_entry(b, matches!(b, 4 | 20 | 21 | 23 | 27 | 28))).collect();
         let life_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("life layout"),
             entries: &life_entries,
@@ -748,6 +751,7 @@ impl World {
                 &bitten_free_buf,
                 &truce_buf,
                 &pair_mask_buf,
+                &wound_buf,
             ],
         );
 
