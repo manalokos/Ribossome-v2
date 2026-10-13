@@ -33,8 +33,9 @@
 @group(0) @binding(13) var<storage, read> bite_view: array<vec4<f32>>;
 // SPRITES (aspeto "microscopia eletrónica"): atlas cinzento + máscara
 // (assets/sprites.png, feito por scripts/sprites_atlas.py a partir de
-// imagens geradas). SPRITE_COLS variantes por linha; linhas 0..21 = tipo de
-// órgão, depois o troço de aminoácido, um espigão e o corpo da protease.
+// imagens geradas). SPRITE_COLS colunas por linha; linhas 0..22 = tipo de
+// órgão (a coluna é a VARIANTE, 6 por órgão), depois um espigão e o corpo da
+// protease.
 // A cor é a do órgão (ou a da classe do aminoácido).
 @group(0) @binding(14) var sprites_tex: texture_2d<f32>;
 @group(0) @binding(15) var sprites_samp: sampler;
@@ -346,12 +347,8 @@ fn is_storage(slot: u32, k: u32) -> bool {
     return oc != 0u && (oc & 0x1Fu) - 1u == ORGAN_STORAGE;
 }
 // Tamanho do quadrado em múltiplos do raio do disco, por tipo de órgão.
-// FLUTUADOR: uma bolha azul-clara. (Ainda não tem desenho próprio no atlas:
-// usa o disco liso do inibidor, com a sua cor e maior.)
+// FLUTUADOR: uma bolha azul-clara.
 const FLOAT_COLOR: vec3<f32> = vec3<f32>(0.72, 0.9, 1.0);
-fn organ_sprite_row(t: u32) -> f32 {
-    return f32(select(t, ORGAN_INHIBITOR, t == ORGAN_FLOAT));
-}
 fn organ_extent(t: u32) -> f32 {
     switch t {
         // (Com sprites o mosaico enche o quadrado: isto é o raio do desenho
@@ -491,7 +488,7 @@ fn vs_ghost(@builtin(vertex_index) vi: u32, @builtin(instance_index) inst: u32) 
         o.tangent = e;
         o.core_phase = vec2<f32>(1.0 / ext, phase);
         o.organ = organ;
-        o.sprite = ((oc >> 5u) * 7u + organ) % SPRITE_COLS_U;
+        o.sprite = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
         o.color = organ_lod_color(organ, oc, class_color(aa)) * tone;
     }
     let px = (w - cam_center()) * view.zoom;
@@ -684,9 +681,9 @@ fn agent_vertex(vi: u32, inst: u32) -> AgentVsOut {
             organ = (oc & 0x1Fu) - 1u;
             r_world *= ORGAN_SCALE;
             if (glyph) {
-                // Variante do aspeto pelo código do órgão (igual na linhagem)
-                // e a cor do órgão, com que o sprite cinzento é pintado.
-                sprite_col = ((oc >> 5u) * 7u + organ) % SPRITE_COLS_U;
+                // Um desenho por VARIANTE do órgão (a coluna do atlas é a
+                // variante) e a cor do órgão, com que o sprite é pintado.
+                sprite_col = min((oc >> 5u) & 0x7u, ORGAN_VARIANTS - 1u);
                 col = organ_lod_color(organ, oc, col);
             }
             // FIO entre dois genes: um tubo fino e cinzento, sem desenho de órgão.
@@ -1272,7 +1269,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             let sn = sin(in.core_phase.y);
             q = vec2<f32>(q.x * cs - q.y * sn, q.x * sn + q.y * cs);
         }
-        let sp = sprite(organ_sprite_row(in.organ), col_f, q, uv_x * core * SHADOW_MARGIN, uv_y * core * SHADOW_MARGIN);
+        let sp = sprite(f32(in.organ), col_f, q, uv_x * core * SHADOW_MARGIN, uv_y * core * SHADOW_MARGIN);
         g_h = sp.z * in.size / SHADOW_MARGIN;
         // (Âncora, quimiossíntese, revisão e quiral: os desenhos são rendilhados,
         // e a forma insuflada de um rendilhado é fina. Sem isto ficavam uma

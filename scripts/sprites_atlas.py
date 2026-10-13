@@ -10,8 +10,9 @@ linhas, mosaicos de TILE px. O shader (agents_view.wgsl) pinta a luminância
 com a cor do órgão e escolhe a coluna pelo código do órgão, por isso órgãos
 do mesmo tipo têm pequenas diferenças entre si.
 
-Linhas: 0..21 = tipo de órgão; 22 = troço de aminoácido (cápsula deitada);
-23 = um espigão da protease (ponta para cima); 24 = corpo da protease;
+Linhas: 0..22 = tipo de órgão (22 = flutuador; era o troço de aminoácido
+antigo, já sem uso); 23 = um espigão da protease (ponta para cima); 24 =
+corpo da protease;
 25 = grão de entulho; 26 = bloco de rocha; 27 = monómeros ativados e
 28 = gastos, colunas A, U, G, C (world_view.wgsl); 29..31 = os 20
 aminoácidos, um troço diferente por tipo (aminoácido i na linha 29 + i/9,
@@ -34,6 +35,14 @@ esse mapa (cinzento: branco = mais alto, alinhado com a fonte) em vez do
 contorno insuflado. A escala fica a do insuflado (o ponto mais alto igual).
 ALTURAS_SO=1 (para testes): as linhas com mapas usam só as variantes que os têm.
 
+ÓRGÃOS POR VARIANTE (saves/sprites/v2/, out. 2026): NN_nome_grelha6.png é
+uma matriz de 3 colunas por 2 linhas com as 6 VARIANTES do órgão pela ordem
+da tabela (a coluna do atlas é a variante), e v2/alturas/ tem o mapa de
+alturas de cada grelha. Uma linha que exista em v2 substitui a de fontes/.
+Todas as peças ficam com o MESMO ALBEDO: a luminância de cada mosaico é
+levada à mesma média (ALBEDO), para no microscópio a diferença entre órgãos
+ser só de forma e de cor.
+
 Uso: python -X utf8 scripts/sprites_atlas.py
 """
 import glob
@@ -50,9 +59,13 @@ from sprites_escolha import ORGANS, mask_of  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "saves", "sprites", "fontes")
 HEIGHTS = os.path.join(ROOT, "saves", "sprites", "alturas")
+SRC2 = os.path.join(ROOT, "saves", "sprites", "v2")
+HEIGHTS2 = os.path.join(SRC2, "alturas")
+# Luminância média de todas as peças (0..255), dentro da máscara.
+ALBEDO = 150.0
 TILE, COLS, ROWS = 512, 9, 32
 STALK_BODY = 0.3
-STRETCH = {7, 22, 23}
+STRETCH = {7, 23}
 STALK = {8, 9}
 BODY = {29}
 BODY_MARGIN = 1.3
@@ -118,7 +131,7 @@ def inflate(lum, mask, given=None):
     return Image.fromarray((v >> 8).astype(np.uint8), "L"), Image.fromarray((v & 255).astype(np.uint8), "L")
 
 
-def tile(lum, row, height=None):
+def tile(lum, row, height=None, flat=False):
     if height is not None:
         height = height.resize(lum.size, Image.LANCZOS)
     mask = mask_of(lum, row in HOLES)
@@ -126,7 +139,17 @@ def tile(lum, row, height=None):
     b = clean.getbbox()
     if b is None:
         return None
-    lum = ImageOps.autocontrast(lum, cutoff=1, mask=mask)
+    # (As grelhas v2 já vêm com a mesma matéria e a mesma luz: não se estica
+    # o contraste de cada uma, que as deixava com sombreados diferentes.)
+    if not flat:
+        lum = ImageOps.autocontrast(lum, cutoff=1, mask=mask)
+    # O MESMO ALBEDO em todas as peças: a média dentro da máscara vai para
+    # ALBEDO (um ganho, sem mexer no contraste relativo do desenho).
+    arr = np.array(lum, dtype=np.float32)
+    inside = np.array(mask) > 127
+    if inside.any():
+        arr *= ALBEDO / max(float(arr[inside].mean()), 1.0)
+        lum = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "L")
     if row in STRETCH:
         return fit(lum, mask, b, height)
     if row in BODY:
@@ -155,11 +178,29 @@ def tile(lum, row, height=None):
 def main():
     rows = {}
     drawn = {}
+    # As grelhas de 6 variantes (v2) primeiro; as linhas que elas dão já não
+    # se leem de fontes/.
+    new_rows = set()
+    for path in sorted(glob.glob(os.path.join(SRC2, "*_grelha6.png"))):
+        row = int(os.path.basename(path)[:2])
+        lum = Image.open(path).convert("L")
+        w, h = lum.size
+        hpath = os.path.join(HEIGHTS2, os.path.basename(path))
+        whole = Image.open(hpath).convert("L").resize(lum.size, Image.LANCZOS) if os.path.exists(hpath) else None
+        for k in range(6):
+            r, c = divmod(k, 3)
+            box = (c * w // 3, r * h // 2, (c + 1) * w // 3, (r + 1) * h // 2)
+            t = tile(lum.crop(box), row, whole.crop(box) if whole is not None else None, flat=True)
+            assert t is not None, (path, k)
+            rows.setdefault(row, []).append(t)
+        new_rows.add(row)
     for path in sorted(glob.glob(os.path.join(SRC, "*.png"))):
         m = re.match(r"(\d+)_(.+)_(grelha|\d+)\.png", os.path.basename(path))
         if not m:
             continue
         row = int(m.group(1))
+        if row in new_rows:
+            continue
         lum = Image.open(path).convert("L")
         cells = [lum]
         name = os.path.basename(path)

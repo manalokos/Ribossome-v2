@@ -24,7 +24,7 @@ THRESHOLD = 22
 # tipo -> (nome no ecrã, cor do órgão como em organ_color do inspetor, buracos transparentes)
 ORGANS = {
     0: ("mouth", (235, 235, 235), False),
-    1: ("muscle", (217, 100, 100), False),
+    1: ("predator sensor", (255, 107, 64), False),
     2: ("food sensor", (115, 255, 115), False),
     3: ("light sensor", (255, 242, 102), False),
     4: ("energy sensor", (255, 217, 51), False),
@@ -44,6 +44,7 @@ ORGANS = {
     18: ("holdfast", (217, 153, 77), False),
     19: ("chiral", (242, 89, 217), True),
     21: ("inhibitor", (242, 204, 230), False),
+    22: ("float", (184, 230, 255), False),
 }
 
 
