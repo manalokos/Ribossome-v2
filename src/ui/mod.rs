@@ -1333,7 +1333,7 @@ fn tab_body(ui: &mut egui::Ui, b: &Busca, world: &mut World) {
             .tip("1 = physical (a free body follows the water); less = experiment: currents carry them less and they also push the water less");
         c.slider("agents push the water", slider(&mut p.agent_fluid_push, -1.0..=1.0))
             .tip("each residue gives its drag back to the fluid (only in the world with fluid)");
-        c.slider("gravity on AGENTS × (∝ √n)", slider(&mut p.sedimentation, 0.0..=0.5))
+        c.slider("gravity on AGENTS × (∝ √n; floats lift)", slider(&mut p.sedimentation, 0.0..=0.5))
             .tip("agents sink ∝ √(number of residues): large ones go down faster. 0 = they do not sink");
     });
     section(ui, b, T, "Joints and contact", |c| {

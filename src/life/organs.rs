@@ -36,7 +36,7 @@
 
 use super::amino::{STOP, codon};
 
-pub const ORGAN_TYPES: usize = 22;
+pub const ORGAN_TYPES: usize = 23;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Organ {
@@ -64,6 +64,8 @@ pub enum Organ {
     Linker = 20,
     /// Inibidor: imunidade às proteases de uma família (a do vizinho).
     Inhibitor = 21,
+    /// Flutuador: uma vesícula de gás, mais leve do que a água.
+    Float = 22,
 }
 
 /// Nota: TODAS as juntas respondem aos sinais α/β (sensibilidade por
@@ -91,6 +93,7 @@ pub const ORGAN_NAMES: [&str; ORGAN_TYPES] = [
     "quiral (inverte o lado das dobras)",
     "fio (liga dois genes)",
     "inibidor (imunidade a proteases)",
+    "flutuador (vesícula de gás)",
 ];
 
 /// Os mesmos nomes em inglês, SÓ para mostrar (interface, gráficos, editor,
@@ -119,10 +122,11 @@ pub const ORGAN_NAMES_EN: [&str; ORGAN_TYPES] = [
     "chiral (flips the side of the bends)",
     "linker (joins two genes)",
     "inhibitor (immunity to proteases)",
+    "float (gas vesicle)",
 ];
 
 /// Letras curtas para o inspetor.
-pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'ω', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q', '~', 'ι'];
+pub const ORGAN_SYMBOLS: [char; ORGAN_TYPES] = ['B', 'ω', 'f', 'l', 'e', '◷', 'r', 's', 'ψ', 'Ψ', 'φ', 'ξ', '⚓', 'b', 'χ', 'π', 'z', 'j', 'v', 'q', '~', 'ι', '°'];
 
 /// Descrição em linguagem corrente de um órgão (tipo, parâmetro, índice de
 /// intensidade), com o aspeto no ecrã. Espelha a semântica do shader.
@@ -241,6 +245,14 @@ pub const ORGAN_PROPS: [&[PropDef]; ORGAN_TYPES] = [
     &[],
     &[],
     &[pd("protecao", "fraction of the damage from proteases of its family that this organ blocks (× intensity, up to 1). The family is set by the NEXT residue, like the pocket of a protease: D or E = family 1, K or R = family 2, F/L/W/Y/I/V = family 3, any other = the generalist proteases")],
+    // FLUTUADOR: uma vesícula de gás. Não empurra nada: é matéria mais leve
+    // do que a água, que entra na densidade média do corpo (a sedimentação
+    // em lifecycle.wgsl). Só faz alguma coisa com gravidade nos agentes.
+    &[
+        pd("impulsao", "how much lighter than water it is, in average residues (× intensity): the body sinks by its mean excess weight, so one float of 3 holds up about 3 residues; with more lift than weight the body RISES"),
+        pd("canal", "−1 = always inflated; 2 = follows a positive γ signal; 3 = follows a positive δ signal (proportional to the signal, up to 1)"),
+        pd("inverte", "with a channel: 0 = inflates WITH the signal (empty without it); 1 = DEFLATES with the signal (full without it)"),
+    ],
 ];
 
 fn fmt_canal(v: f32) -> &'static str {
@@ -390,6 +402,15 @@ pub fn describe(t: u8, p: u8, gain_idx: u8, table: &[super::table::OrganRow]) ->
             v("meia_vida")
         ),
         21 => format!("inhibitor [pale disc]: blocks {:.0}% of the damage from proteases of the family set by the next residue (D/E = family 1, K/R = family 2, F/L/W/Y/I/V = family 3, other = generalist). A protease alone gives no immunity, and nothing is inherited: each form of the lineage needs its own", (v("protecao") * g).clamp(0.0, 1.0) * 100.0),
+        22 => format!(
+            "float [pale blue bubble]: a gas vesicle, lighter than water by {:.1} average residues; {}. Only matters with gravity on agents",
+            v("impulsao") * g,
+            if v("canal") < 0.0 {
+                "always inflated".to_string()
+            } else {
+                format!("{} with a positive {} signal", if v("inverte") >= 0.5 { "deflates" } else { "inflates" }, if v("canal") < 2.5 { "γ" } else { "δ" })
+            }
+        ),
         _ => ORGAN_NAMES_EN.get(t).map_or_else(|| row.nome.clone(), |n| n.to_string()),
     }
 }
@@ -502,6 +523,7 @@ pub fn wgsl() -> String {
         "CHIRAL",
         "LINKER",
         "INHIBITOR",
+        "FLOAT",
     ];
     for (i, name) in names.iter().enumerate() {
         s += &format!("const ORGAN_{name}: u32 = {i}u;\n");

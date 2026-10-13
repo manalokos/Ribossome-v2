@@ -916,16 +916,19 @@ fn agents_step(@builtin(global_invocation_id) gid: vec3<u32>) {
     // protease_active em contact.wgsl). Não passa pela fuga das bocas.
     a.energy -= params.maintenance_cost * metab * protease_active(slot, a.body_len);
 
-    // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n × massa média por resíduo (os
+    // ---- SEDIMENTAÇÃO (Stokes): afunda ∝ √n × peso médio por resíduo (os
     // órgãos pesados, como o armazenamento, afundam mais), só a parte em
-    // água livre. ----
+    // água livre. O peso é o que o corpo pesa A MAIS do que a água: os
+    // FLUTUADORES (vesículas de gás) pesam a menos, e descontam. Um corpo
+    // com mais impulsão do que peso SOBE, pela mesma lei. Ninguém empurra
+    // nada: é só a densidade média do corpo. ----
     if (params.sedimentation > 0.0) {
         let free_frac = select(1.0, f32(in_water) / f32(max(a.body_len, 1u)), a.body_len > 0u);
         let nb = f32(max(a.body_len, 1u));
-        let dens = body_mass(slot, a.body_len) / (nb * MASS_RESIDUE_REF);
+        let dens = body_mass(slot, a.body_len) / (nb * MASS_RESIDUE_REF) - float_lift(slot, a.body_len) / nb;
         // Uma ventosa agarrada segura o corpo contra a queda.
         let fall = params.sedimentation * sqrt(nb) * dens * free_frac / (1.0 + HOLDFAST_VS_FALL * held);
-        let ns = vec2<f32>(p.x, max(p.y - fall, 0.0));
+        let ns = vec2<f32>(p.x, clamp(p.y - fall, 0.0, SIM_SIZE - 0.01));
         if (gamma_count(world_to_cell(ns)) < GAMMA_SOLID_THRESHOLD) {
             p = ns;
             a.pos_x = p.x;

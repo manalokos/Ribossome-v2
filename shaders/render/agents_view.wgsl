@@ -281,6 +281,7 @@ fn organ_lod_color(organ: u32, oc: u32, base: vec3<f32>) -> vec3<f32> {
         case ORGAN_CHEMO: { return vec3<f32>(0.9, 0.78, 0.15); }
         case ORGAN_DORMANCY: { return vec3<f32>(0.72, 0.82, 1.0); }
         case ORGAN_INHIBITOR: { return vec3<f32>(0.95, 0.8, 0.9); }
+        case ORGAN_FLOAT: { return FLOAT_COLOR; }
         case ORGAN_HOLDFAST: { return vec3<f32>(0.85, 0.6, 0.3); }
         case ORGAN_CHIRAL: { return vec3<f32>(0.95, 0.35, 0.85); }
         // (Um só tipo de depósito, uma só cor: antes tinha a do aminoácido
@@ -345,6 +346,12 @@ fn is_storage(slot: u32, k: u32) -> bool {
     return oc != 0u && (oc & 0x1Fu) - 1u == ORGAN_STORAGE;
 }
 // Tamanho do quadrado em múltiplos do raio do disco, por tipo de órgão.
+// FLUTUADOR: uma bolha azul-clara. (Ainda não tem desenho próprio no atlas:
+// usa o disco liso do inibidor, com a sua cor e maior.)
+const FLOAT_COLOR: vec3<f32> = vec3<f32>(0.72, 0.9, 1.0);
+fn organ_sprite_row(t: u32) -> f32 {
+    return f32(select(t, ORGAN_INHIBITOR, t == ORGAN_FLOAT));
+}
 fn organ_extent(t: u32) -> f32 {
     switch t {
         // (Com sprites o mosaico enche o quadrado: isto é o raio do desenho
@@ -354,6 +361,7 @@ fn organ_extent(t: u32) -> f32 {
         case ORGAN_FOOD_SENSOR_DIR, ORGAN_LIGHT_SENSOR_DIR: { return 1.2 / SPRITE_STALK_BODY; }
         case ORGAN_PREDATOR_SENSOR: { return 1.6; }
         case ORGAN_STORAGE: { return 1.9; }
+        case ORGAN_FLOAT: { return 1.8; }
         // (uma antena de luz: maior do que os outros órgãos; só o desenho)
         case ORGAN_PHOTOSYSTEM: { return 2.0; }
         case ORGAN_HOLDFAST: { return 1.4; }
@@ -1264,7 +1272,7 @@ fn agent_frag(in: AgentVsOut) -> vec4<f32> {
             let sn = sin(in.core_phase.y);
             q = vec2<f32>(q.x * cs - q.y * sn, q.x * sn + q.y * cs);
         }
-        let sp = sprite(f32(in.organ), col_f, q, uv_x * core * SHADOW_MARGIN, uv_y * core * SHADOW_MARGIN);
+        let sp = sprite(organ_sprite_row(in.organ), col_f, q, uv_x * core * SHADOW_MARGIN, uv_y * core * SHADOW_MARGIN);
         g_h = sp.z * in.size / SHADOW_MARGIN;
         // (Âncora, quimiossíntese, revisão e quiral: os desenhos são rendilhados,
         // e a forma insuflada de um rendilhado é fina. Sem isto ficavam uma

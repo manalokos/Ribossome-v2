@@ -153,6 +153,27 @@ fn body_absorption(slot: u32, n: u32) -> f32 {
     return sum / ABSORB_MOUTH_REF;
 }
 
+// IMPULSÃO dos flutuadores de um corpo, em resíduos médios (o que descontam
+// ao peso na sedimentação). Variante: p0 = impulsão, p1 = canal (−1 sempre
+// cheio; 2 = γ, 3 = δ: enche com o sinal positivo), p2 = inverte (esvazia
+// com o sinal). (Ciclo sem saídas a meio: é chamado de agents_step.)
+fn float_lift(slot: u32, n: u32) -> f32 {
+    var lift = 0.0;
+    for (var k = 0u; k < n; k++) {
+        let o = organ_get(slot, k);
+        if (organ_type(o) == ORGAN_FLOAT) {
+            let v = organ_var(o);
+            var full = 1.0;
+            if (v.p1 >= 0.0) {
+                let sig = clamp(signals[slot * MAX_BODY + k][u32(clamp(v.p1, 0.0, 3.0))], 0.0, 1.0);
+                full = select(sig, 1.0 - sig, v.p2 >= 0.5);
+            }
+            lift += max(v.p0, 0.0) * organ_gain(o) * full;
+        }
+    }
+    return lift;
+}
+
 // Desvio da junta k pelos sinais (rad). As juntas de aminoácido respondem,
 // cada uma com a sua sensibilidade; os órgãos não respondem (sensibilidade 0
 // na tabela). (Havia um órgão "músculo" que amplificava a resposta local;
